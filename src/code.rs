@@ -20,6 +20,8 @@ pub struct ReedSolomon<'a> {
 }
 
 impl<'a> ReedSolomon<'a> {
+    /// Construct `RS[F_p, mu_s, k]` on the given domain; validates
+    /// `1 <= k <= n`.
     pub fn new(domain: &'a Subgroup, k: usize) -> Result<Self> {
         if k == 0 || k > domain.order() {
             return Err(Error::OutOfRange(format!(
@@ -30,15 +32,19 @@ impl<'a> ReedSolomon<'a> {
         Ok(ReedSolomon { domain, k })
     }
 
+    /// The evaluation domain.
     pub fn domain(&self) -> &Subgroup {
         self.domain
     }
+    /// Code length `n = s`.
     pub fn n(&self) -> usize {
         self.domain.order()
     }
+    /// Message length `k`.
     pub fn k(&self) -> usize {
         self.k
     }
+    /// Rate `k / n`.
     pub fn rate(&self) -> f64 {
         self.k as f64 / self.n() as f64
     }

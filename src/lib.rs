@@ -48,6 +48,8 @@
 // `n % d == 0` is the standard idiom in number-theoretic code; clippy's
 // `is_multiple_of` suggestion hurts readability here.
 #![allow(clippy::manual_is_multiple_of)]
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod attack;
 pub mod buckets;

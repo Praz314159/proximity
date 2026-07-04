@@ -18,12 +18,14 @@ fn err<T>(r: crate::Result<T>) -> PyResult<T> {
     r.map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// Full exact q=1 bucket distribution: `out[lam]` counts r-subsets S of mu_s with `e_1(S) = lam`. Cost/memory scale with p.
 #[pyfunction]
 fn bucket_dist_q1(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyArray1<u64>>> {
     let d = err(dp::distribution_q1(&sub(p, s)?, r))?;
     Ok(d.into_values().into_pyarray_bound(py).into())
 }
 
+/// Full exact q=2 joint distribution over `(e_1, e_2)`, shape (p, p). Intended for p <= ~700.
 #[pyfunction]
 fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyArray2<u64>>> {
     let v = err(dp::distribution_q2(&sub(p, s)?, r))?;
@@ -33,16 +35,19 @@ fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyA
     Ok(arr.into_pyarray_bound(py).into())
 }
 
+/// Kernel census, weight-capped: `out[w]` counts nonzero vectors with coefficients in `[-cmax, cmax]` and weight w <= wmax such that `sum v_i w^i = 0 (mod p)`.
 #[pyfunction]
 fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> PyResult<Vec<u64>> {
     err(census::direct(&sub(p, s)?, cmax, wmax))
 }
 
+/// Full kernel census by weight (meet-in-the-middle; s <= 32 at cmax = 2).
 #[pyfunction]
 fn census_mitm(p: u64, s: usize, cmax: i64) -> PyResult<Vec<u64>> {
     err(census::mitm(&sub(p, s)?, cmax))
 }
 
+/// Exact single bucket at e-values `lam` (any q = len(lam) <= 8, s <= 32). Cost is p-independent.
 #[pyfunction]
 fn bucket_e(p: u64, s: usize, r: usize, lam: Vec<u64>) -> PyResult<u64> {
     let sg = sub(p, s)?;
@@ -50,6 +55,7 @@ fn bucket_e(p: u64, s: usize, r: usize, lam: Vec<u64>) -> PyResult<u64> {
     err(t.bucket(&lam))
 }
 
+/// Exact buckets for many lambdas sharing one table build (any q <= 8, s <= 32).
 #[pyfunction]
 fn buckets_e(p: u64, s: usize, r: usize, q: usize, lams: Vec<Vec<u64>>) -> PyResult<Vec<u64>> {
     let sg = sub(p, s)?;
@@ -57,31 +63,37 @@ fn buckets_e(p: u64, s: usize, r: usize, q: usize, lams: Vec<Vec<u64>>) -> PyRes
     lams.iter().map(|l| err(t.bucket(l))).collect()
 }
 
+/// The common `(e_1..e_q)` of the Theorem-A rung family (the optimal structural construction).
 #[pyfunction]
 fn rung_lambda_e(p: u64, s: usize, r: usize, q: usize) -> PyResult<Vec<u64>> {
     err(code::rung_lambda(&sub(p, s)?, r, q))
 }
 
+/// Anatomy of a q=1 bucket: returns `(total, per_weight_class_counts)`; total equals the DP bucket exactly.
 #[pyfunction]
 fn decompose_bucket_q1(p: u64, s: usize, r: usize, lam: u64) -> PyResult<(u64, Vec<u64>)> {
     err(mitm::decompose_bucket_q1(&sub(p, s)?, r, lam))
 }
 
+/// The quantized-ladder structural maximum `C(s/2^t - [r0!=0], floor(r/2^t))`, `t = ceil(log2(q+1))`.
 #[pyfunction]
 fn m_struct(s: usize, r: usize, q: usize) -> u64 {
     code::m_struct(s, r, q)
 }
 
+/// Elements of the order-s subgroup of F_p^* as consecutive powers `[w^0, ..., w^{s-1}]`.
 #[pyfunction]
 fn subgroup(p: u64, s: usize) -> PyResult<Vec<u64>> {
     Ok(sub(p, s)?.elements().to_vec())
 }
 
+/// Deterministic Miller-Rabin primality test for n < 2^64.
 #[pyfunction]
 fn is_prime(n: u64) -> bool {
     field::is_prime(n)
 }
 
+/// Full prime factorization (trial division + Pollard rho), sorted with multiplicity.
 #[pyfunction]
 fn factor(n: u64) -> Vec<u64> {
     field::factor(n)

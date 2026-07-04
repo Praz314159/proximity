@@ -40,17 +40,8 @@ jobs:
           python-version: "3.11"
       - name: Build wheel
         run: |
-          pip install maturin numpy
+          pip install maturin numpy pytest
           maturin build --release --features python
           pip install target/wheels/*.whl
-      - name: Golden parity check
-        run: |
-          python -c "
-          import vanish as bl, numpy as np
-          d = np.asarray(bl.bucket_dist_q1(89633, 32, 16))
-          assert d.max() == 29382 and d.sum() == 601080390
-          assert bl.bucket_e(3457, 32, 16, bl.rung_lambda_e(3457, 32, 16, 2)) == 422
-          total, _ = bl.decompose_bucket_q1(77569, 32, 16, int(np.asarray(bl.bucket_dist_q1(77569, 32, 16)).argmax()))
-          assert total == 30598
-          print('python golden parity OK')
-          "
+      - name: Golden parity tests
+        run: pytest python/tests/ -q

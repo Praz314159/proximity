@@ -29,6 +29,7 @@ impl BucketDistribution {
     pub fn values(&self) -> &[u64] {
         &self.values
     }
+    /// Consume the distribution, returning the raw bucket-size vector.
     pub fn into_values(self) -> Vec<u64> {
         self.values
     }

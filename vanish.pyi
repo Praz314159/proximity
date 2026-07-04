@@ -1,0 +1,42 @@
+"""Type stubs for the vanish native module."""
+
+from typing import List, Tuple
+
+import numpy as np
+import numpy.typing as npt
+
+def bucket_dist_q1(p: int, s: int, r: int) -> npt.NDArray[np.uint64]:
+    """Full exact q=1 bucket distribution; out[lam] counts r-subsets with e_1 = lam."""
+
+def bucket_dist_q2(p: int, s: int, r: int) -> npt.NDArray[np.uint64]:
+    """Full exact q=2 joint distribution over (e_1, e_2), shape (p, p)."""
+
+def census_direct(p: int, s: int, cmax: int, wmax: int) -> List[int]:
+    """Weight-capped kernel census; out[w] = # nonzero kernel vectors of weight w."""
+
+def census_mitm(p: int, s: int, cmax: int) -> List[int]:
+    """Full kernel census by weight (meet-in-the-middle; s <= 32 at cmax = 2)."""
+
+def bucket_e(p: int, s: int, r: int, lam: List[int]) -> int:
+    """Exact single bucket at e-values lam (q = len(lam) <= 8, s <= 32); p-independent."""
+
+def buckets_e(p: int, s: int, r: int, q: int, lams: List[List[int]]) -> List[int]:
+    """Exact buckets for many lambdas sharing one table build."""
+
+def rung_lambda_e(p: int, s: int, r: int, q: int) -> List[int]:
+    """The common (e_1..e_q) of the Theorem-A rung family."""
+
+def decompose_bucket_q1(p: int, s: int, r: int, lam: int) -> Tuple[int, List[int]]:
+    """Anatomy of a q=1 bucket: (total, per-weight class counts); total = DP bucket."""
+
+def m_struct(s: int, r: int, q: int) -> int:
+    """Quantized-ladder structural maximum C(s/2^t - [r0!=0], floor(r/2^t))."""
+
+def subgroup(p: int, s: int) -> List[int]:
+    """Order-s subgroup of F_p^* as consecutive powers [w^0, ..., w^{s-1}]."""
+
+def is_prime(n: int) -> bool:
+    """Deterministic Miller-Rabin for n < 2^64."""
+
+def factor(n: int) -> List[int]:
+    """Full prime factorization, sorted with multiplicity."""

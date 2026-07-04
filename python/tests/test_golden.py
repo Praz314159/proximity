@@ -84,3 +84,11 @@ def test_ergonomics_pass_bindings():
     # toy soundness pins
     w, s_, c = vanish.toy_soundness(35521, 16, 8)
     assert (w, c) == (3281, 3281) and abs(s_ - 3281 / 35521) < 1e-12
+
+
+def test_round3_parallel_bindings():
+    rows = {p: b for p, b in vanish.rung_buckets_many(32, 16, [1, 2, 8], [3457, 89633])}
+    assert rows[3457] == [220134, 422, 2]
+    assert rows[89633][0] == 29382
+    certs = {p: (t, m, z) for p, t, m, z in vanish.certify_many(32, 16, [89633, 65537])}
+    assert certs[89633] == (3, 12870, 29382) and certs[65537][0] == 2

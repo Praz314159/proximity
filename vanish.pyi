@@ -70,3 +70,9 @@ def attack_ceiling(n: int, k: int, list_bits: float) -> float:
 
 def toy_soundness(p: int, s: int, r: int) -> Tuple[int, float, int]:
     """(winning challenges, exact soundness, structural class count)."""
+
+def rung_buckets_many(s: int, r: int, qs: List[int], primes: List[int]) -> List[Tuple[int, List[int]]]:
+    """Parallel rung-bucket sweep: rows of (p, [exact bucket per q])."""
+
+def certify_many(s: int, r: int, primes: List[int]) -> List[Tuple[int, int, int, int]]:
+    """Parallel certificates: rows of (p, tier, m_struct, zero_bucket)."""

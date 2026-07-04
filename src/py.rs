@@ -230,6 +230,65 @@ fn toy_soundness(p: u64, s: usize, r: usize) -> PyResult<(u64, f64, u64)> {
     Ok((t.winning, t.soundness, t.classes))
 }
 
+/// A rung-sweep row: (p, one exact rung bucket per requested q).
+type RungRow = (u64, Vec<u64>);
+
+/// Rayon-parallel rung-bucket sweep: for each prime, build the MitM tables
+/// once per q and evaluate the rung lambda's exact bucket. The q-axis
+/// campaign driver (23k primes x several q in minutes, not hours).
+#[pyfunction]
+fn rung_buckets_many(
+    py: Python<'_>,
+    s: usize,
+    r: usize,
+    qs: Vec<usize>,
+    primes: Vec<u64>,
+) -> PyResult<Vec<RungRow>> {
+    use rayon::prelude::*;
+    py.allow_threads(|| {
+        primes
+            .par_iter()
+            .map(|&p| {
+                let sg = Subgroup::new(p, s)?;
+                let mut row = Vec::with_capacity(qs.len());
+                for &q in &qs {
+                    let lam = code::rung_lambda(&sg, r, q)?;
+                    let t = mitm::HalfTables::build(&sg, r, q)?;
+                    row.push(t.bucket(&lam)?);
+                }
+                Ok((p, row))
+            })
+            .collect::<crate::Result<Vec<_>>>()
+    })
+    .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Rayon-parallel certificates: rows of (p, tier, m_struct, zero_bucket).
+#[pyfunction]
+fn certify_many(
+    py: Python<'_>,
+    s: usize,
+    r: usize,
+    primes: Vec<u64>,
+) -> PyResult<Vec<(u64, u8, u64, u64)>> {
+    use crate::certify::{certify_q1 as cert, Verdict};
+    use rayon::prelude::*;
+    py.allow_threads(|| {
+        primes
+            .par_iter()
+            .map(|&p| {
+                let c = cert(&Subgroup::new(p, s)?, r)?;
+                Ok(match c.verdict {
+                    Verdict::AllBucketsStructural => (p, 1u8, c.m_struct, c.zero_class),
+                    Verdict::ZeroBucketStructural { .. } => (p, 2, c.m_struct, c.zero_class),
+                    Verdict::Inflated { zero_bucket, .. } => (p, 3, c.m_struct, zero_bucket),
+                })
+            })
+            .collect::<crate::Result<Vec<_>>>()
+    })
+    .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
@@ -254,5 +313,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(attack_antipodal, m)?)?;
     m.add_function(wrap_pyfunction!(attack_ceiling, m)?)?;
     m.add_function(wrap_pyfunction!(toy_soundness, m)?)?;
+    m.add_function(wrap_pyfunction!(rung_buckets_many, m)?)?;
+    m.add_function(wrap_pyfunction!(certify_many, m)?)?;
     Ok(())
 }

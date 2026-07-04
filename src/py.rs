@@ -2,6 +2,10 @@
 //! --features python`). Function names and signatures are kept stable across
 //! internal refactors so downstream experiment scripts do not change.
 
+// pyo3 macro expansion trips clippy::useless_conversion on every #[pyfunction];
+// false positive at this expansion site.
+#![allow(clippy::useless_conversion)]
+
 use crate::buckets::{dp, mitm};
 use crate::code;
 use crate::domain::Subgroup;
@@ -99,6 +103,51 @@ fn factor(n: u64) -> Vec<u64> {
     field::factor(n)
 }
 
+/// One-call sweep statistics for q=1: returns (max, argmax, occupied, total,
+/// second_moment) — the sweep-workload API (avoids marshaling full
+/// distributions). second_moment is exact (u128 internally), returned as u128.
+#[pyfunction]
+fn dist_stats_q1(p: u64, s: usize, r: usize) -> PyResult<(u64, u64, u64, u64, u128)> {
+    let d = err(dp::distribution_q1(&sub(p, s)?, r))?;
+    let (mx, arg) = d.max();
+    Ok((mx, arg, d.occupied(), d.total(), d.second_moment()))
+}
+
+/// A row of sweep statistics: (p, max, argmax, occupied, total, second_moment).
+type SweepRow = (u64, u64, u64, u64, u64, u128);
+
+/// Parallel (rayon) prime sweep of `dist_stats_q1` — the campaign driver.
+#[pyfunction]
+fn sweep_stats_q1(py: Python<'_>, s: usize, r: usize, primes: Vec<u64>) -> PyResult<Vec<SweepRow>> {
+    use rayon::prelude::*;
+    py.allow_threads(|| {
+        primes
+            .par_iter()
+            .map(|&p| {
+                let d = dp::distribution_q1(&Subgroup::new(p, s)?, r)?;
+                let (mx, arg) = d.max();
+                Ok((p, mx, arg, d.occupied(), d.total(), d.second_moment()))
+            })
+            .collect::<crate::Result<Vec<_>>>()
+    })
+    .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Tiered structural certificate for (p, s, r), q = 1 (p-independent).
+/// Returns (tier, m_struct, zero_bucket): tier 1 = all buckets structural,
+/// tier 2 = zero bucket structural, tier 3 = inflated (zero_bucket = exact
+/// inflated value; tiers 1-2 return the structural zero-class size).
+#[pyfunction]
+fn certify_q1(p: u64, s: usize, r: usize) -> PyResult<(u8, u64, u64)> {
+    use crate::certify::{certify_q1 as cert, Verdict};
+    let c = err(cert(&sub(p, s)?, r))?;
+    Ok(match c.verdict {
+        Verdict::AllBucketsStructural => (1, c.m_struct, c.zero_class),
+        Verdict::ZeroBucketStructural { .. } => (2, c.m_struct, c.zero_class),
+        Verdict::Inflated { zero_bucket, .. } => (3, c.m_struct, zero_bucket),
+    })
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
@@ -113,5 +162,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(subgroup, m)?)?;
     m.add_function(wrap_pyfunction!(is_prime, m)?)?;
     m.add_function(wrap_pyfunction!(factor, m)?)?;
+    m.add_function(wrap_pyfunction!(dist_stats_q1, m)?)?;
+    m.add_function(wrap_pyfunction!(sweep_stats_q1, m)?)?;
+    m.add_function(wrap_pyfunction!(certify_q1, m)?)?;
     Ok(())
 }

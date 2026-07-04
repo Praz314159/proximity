@@ -40,3 +40,12 @@ def is_prime(n: int) -> bool:
 
 def factor(n: int) -> List[int]:
     """Full prime factorization, sorted with multiplicity."""
+
+def dist_stats_q1(p: int, s: int, r: int) -> Tuple[int, int, int, int, int]:
+    """(max, argmax, occupied, total, exact second moment) for the q=1 distribution."""
+
+def sweep_stats_q1(s: int, r: int, primes: List[int]) -> List[Tuple[int, int, int, int, int, int]]:
+    """Parallel sweep: rows of (p, max, argmax, occupied, total, second_moment)."""
+
+def certify_q1(p: int, s: int, r: int) -> Tuple[int, int, int]:
+    """(tier, m_struct, zero_bucket): 1 = all structural, 2 = zero bucket structural, 3 = inflated."""

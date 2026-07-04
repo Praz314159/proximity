@@ -165,6 +165,47 @@ fn main() {
                 }
             }
         }
+        "certify" => {
+            use vanish::certify::{certify_q1, Verdict};
+            let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let c = certify_q1(&sg, r).unwrap_or_else(|e| die(e));
+            match c.verdict {
+                Verdict::AllBucketsStructural => println!(
+                    "CERTIFIED: every q=1 bucket at p={p} is a single structural class;\n\
+                     max bucket = M_struct = {} (kernel census empty at coefficient \
+                     range [-2,2], all weights)",
+                    c.m_struct
+                ),
+                Verdict::ZeroBucketStructural { census2_by_weight } => {
+                    println!(
+                        "CERTIFIED (tier 2): zero bucket exactly structural = {} \
+                         (the rung/C.6 word's exact list);\nother buckets may merge: \
+                         [-2,2] census by weight:",
+                        c.zero_class
+                    );
+                    for (w, n) in census2_by_weight.iter().enumerate().filter(|(_, &n)| n > 0) {
+                        println!("  w={w}: {n}");
+                    }
+                }
+                Verdict::Inflated {
+                    census1_by_weight,
+                    zero_bucket,
+                    zero_profile,
+                } => {
+                    println!(
+                        "INFLATED: zero bucket = {zero_bucket} (structural class = {})",
+                        c.zero_class
+                    );
+                    for (w, n) in census1_by_weight.iter().enumerate().filter(|(_, &n)| n > 0) {
+                        println!("  {{-1,0,1}} kernel vectors at w={w}: {n}");
+                    }
+                    for (w, n) in zero_profile.iter().enumerate().filter(|(_, &n)| n > 0) {
+                        println!("  zero-bucket classes at w={w}: {n}");
+                    }
+                }
+            }
+        }
         "attack" => {
             use vanish::attack::*;
             let params = AttackParams {

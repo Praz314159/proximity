@@ -1,21 +1,22 @@
-//! Exact bucket-distribution DPs.
+//! Full bucket distributions by in-place subset-sum DP.
 //!
-//! q = 1: N[lambda] = #{ r-subsets S of mu_s : e_1(S) = lambda } for every
-//! lambda in F_p, via the in-place subset-sum recurrence
-//!     T[j][lambda] += T[j-1][lambda - g]   (g over subgroup, j descending),
-//! i.e. a rotated vector add per (g, j). Counts are exact u64 (valid for
-//! s <= 64: C(64,32) < 2^64; guarded by assertion).
+//! `q = 1`: `T[j][lambda] += T[j-1][lambda - g]` over subgroup elements `g`
+//! with `j` descending — a rotated vector add per `(g, j)`; memory
+//! `(r + 1) * p * 8` bytes, exact `u64` counts for `s <= 64`
+//! (`C(64, 32) < 2^64`).
 //!
-//! q = 2: joint distribution over (e_1, e_2); adding element g maps
-//! (e1, e2) -> (e1 + g, e2 + g*e1), a row permutation + per-row rotation.
+//! `q = 2`: joint distribution over `(e_1, e_2)`; adding `g` maps
+//! `(e1, e2) -> (e1 + g, e2 + g * e1)` — a row permutation plus per-row
+//! rotation. Intended for `p <= ~700`.
 
-use crate::field::subgroup;
+use crate::buckets::BucketDistribution;
+use crate::domain::Subgroup;
+use crate::error::{Error, Result};
 use rayon::prelude::*;
 
 const PAR_THRESHOLD: usize = 1 << 15;
 
 fn add_rotated(dst: &mut [u64], src: &[u64], shift: usize) {
-    // dst[lambda] += src[(lambda - shift) mod p]
     let n = dst.len();
     let s = shift % n;
     let (d1, d2) = dst.split_at_mut(s);
@@ -32,40 +33,56 @@ fn add_rotated(dst: &mut [u64], src: &[u64], shift: usize) {
     add(d2, &src[..n - s]);
 }
 
-/// Full q=1 bucket distribution; returns Vec of length p.
-pub fn bucket_dist_q1(p: u64, s: usize, r: usize) -> Vec<u64> {
-    assert!(s <= 64, "u64 counts require s <= 64 (CRT variant TODO)");
-    assert!(r <= s);
-    let els = subgroup(p, s);
-    let pp = p as usize;
+fn check(sg: &Subgroup, r: usize) -> Result<()> {
+    if sg.order() > 64 {
+        return Err(Error::Unsupported(
+            "u64-exact DP requires s <= 64 (CRT variant is a tracked issue)".into(),
+        ));
+    }
+    if r == 0 || r > sg.order() {
+        return Err(Error::OutOfRange(format!("r = {r} outside [1, s]")));
+    }
+    Ok(())
+}
+
+/// Exact `q = 1` distribution: `N(lambda) = #{ |S| = r : e_1(S) = lambda }`
+/// for every `lambda in F_p`.
+pub fn distribution_q1(sg: &Subgroup, r: usize) -> Result<BucketDistribution> {
+    check(sg, r)?;
+    let pp = sg.p() as usize;
     let mut t: Vec<Vec<u64>> = (0..=r).map(|_| vec![0u64; pp]).collect();
     t[0][0] = 1;
-    for (cnt, &g) in els.iter().enumerate() {
+    for (cnt, &g) in sg.elements().iter().enumerate() {
         let top = r.min(cnt + 1);
         for j in (1..=top).rev() {
             let (lo, hi) = t.split_at_mut(j);
             add_rotated(&mut hi[0], &lo[j - 1], g as usize);
         }
     }
-    t.pop().unwrap()
+    Ok(BucketDistribution {
+        values: t.pop().unwrap(),
+    })
 }
 
-/// Full q=2 joint distribution; returns row-major Vec of length p*p
-/// (index = e1 * p + e2). Intended for p <= ~700.
-pub fn bucket_dist_q2(p: u64, s: usize, r: usize) -> Vec<u64> {
-    assert!(s <= 64 && r <= s);
-    let els = subgroup(p, s);
-    let pp = p as usize;
+/// Exact `q = 2` joint distribution, row-major `p x p`
+/// (`index = e1 * p + e2`).
+pub fn distribution_q2(sg: &Subgroup, r: usize) -> Result<Vec<u64>> {
+    check(sg, r)?;
+    let pp = sg.p() as usize;
+    if pp > 1 << 11 {
+        return Err(Error::Unsupported(
+            "q=2 grid DP intended for p <= ~2048".into(),
+        ));
+    }
     let mut t: Vec<Vec<u64>> = (0..=r).map(|_| vec![0u64; pp * pp]).collect();
     t[0][0] = 1;
-    for (cnt, &g) in els.iter().enumerate() {
+    for (cnt, &g) in sg.elements().iter().enumerate() {
         let top = r.min(cnt + 1);
         for j in (1..=top).rev() {
             let (lo, hi) = t.split_at_mut(j);
             let src = &lo[j - 1];
             let dst = &mut hi[0];
             let gg = g as usize;
-            // dst[(e1+g) % p][(e2 + g*e1) % p] += src[e1][e2]
             for e1 in 0..pp {
                 let e1p = (e1 + gg) % pp;
                 let shift = (gg * e1) % pp;
@@ -81,17 +98,5 @@ pub fn bucket_dist_q2(p: u64, s: usize, r: usize) -> Vec<u64> {
             }
         }
     }
-    t.pop().unwrap()
-}
-
-pub fn max_and_argmax(dist: &[u64]) -> (u64, usize) {
-    let mut best = 0u64;
-    let mut arg = 0usize;
-    for (i, &v) in dist.iter().enumerate() {
-        if v > best {
-            best = v;
-            arg = i;
-        }
-    }
-    (best, arg)
+    Ok(t.pop().unwrap())
 }

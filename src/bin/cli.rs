@@ -1,0 +1,173 @@
+//! Command-line interface: run the standard campaigns without writing code.
+//!
+//!   bucketlab info    --p 3457 --s 32
+//!   bucketlab bucket  --p 3457 --s 32 --r 16 --lam 0 [--q 1]
+//!   bucketlab rung    --p 3457 --s 32 --r 16 --q 2
+//!   bucketlab census  --p 89633 --s 32 [--cmax 2] [--wmax 6]
+//!   bucketlab decompose --p 77569 --s 32 --r 16 --lam 0
+//!   bucketlab sweep   --s 32 --r 16 --pmax 300000 [--csv]
+//!
+//! `sweep` prints, per prime `p = 1 mod s`, the exact max bucket, the
+//! conjecture ratio `max / (M_struct + C(s,r)/p)`, and the occupied-bucket
+//! count (the exact toy-protocol winning-set size for the canonical pair).
+
+use bucketlab::buckets::{dp, mitm};
+use bucketlab::code::{m_struct, rung_lambda};
+use bucketlab::domain::Subgroup;
+use bucketlab::field::{binom, is_prime};
+use rayon::prelude::*;
+use std::collections::HashMap;
+use std::process::exit;
+
+fn parse_args(args: &[String]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let mut i = 0;
+    while i < args.len() {
+        if let Some(key) = args[i].strip_prefix("--") {
+            if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                map.insert(key.to_string(), args[i + 1].clone());
+                i += 2;
+            } else {
+                map.insert(key.to_string(), "true".to_string());
+                i += 1;
+            }
+        } else {
+            eprintln!("unexpected argument: {}", args[i]);
+            exit(2);
+        }
+    }
+    map
+}
+
+fn req<T: std::str::FromStr>(m: &HashMap<String, String>, key: &str) -> T {
+    m.get(key).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+        eprintln!("missing or invalid --{key}");
+        exit(2);
+    })
+}
+
+fn opt<T: std::str::FromStr>(m: &HashMap<String, String>, key: &str, default: T) -> T {
+    m.get(key).and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn die(e: impl std::fmt::Display) -> ! {
+    eprintln!("error: {e}");
+    exit(1);
+}
+
+fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let Some((cmd, rest)) = argv.split_first() else {
+        eprintln!("usage: bucketlab <info|bucket|rung|census|decompose|sweep> --flags ...");
+        exit(2);
+    };
+    let m = parse_args(rest);
+    match cmd.as_str() {
+        "info" => {
+            let (p, s) = (req(&m, "p"), req(&m, "s"));
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            println!(
+                "F_{p}, subgroup order {s}, w = {}, two-smooth = {}",
+                sg.w(),
+                sg.is_two_smooth()
+            );
+            let r = s / 2;
+            println!(
+                "r = s/2 = {r}: C(s,r) = {}, M_struct(q=1) = {}, pigeonhole = {:.3}",
+                binom(s as u64, r as u64),
+                m_struct(s, r, 1),
+                binom(s as u64, r as u64) as f64 / p as f64
+            );
+        }
+        "bucket" => {
+            let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
+            let lam: Vec<u64> = m
+                .get("lam")
+                .map(|v| {
+                    v.split(',')
+                        .map(|x| x.parse().unwrap_or_else(|_| die("bad --lam")))
+                        .collect()
+                })
+                .unwrap_or_else(|| die("missing --lam (comma-separated e-values)"));
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let t = mitm::HalfTables::build(&sg, r, lam.len()).unwrap_or_else(|e| die(e));
+            println!("{}", t.bucket(&lam).unwrap_or_else(|e| die(e)));
+        }
+        "rung" => {
+            let (p, s, r, q) = (req(&m, "p"), req(&m, "s"), req(&m, "r"), req(&m, "q"));
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let lam = rung_lambda(&sg, r, q).unwrap_or_else(|e| die(e));
+            let t = mitm::HalfTables::build(&sg, r, q).unwrap_or_else(|e| die(e));
+            let b = t.bucket(&lam).unwrap_or_else(|e| die(e));
+            println!(
+                "rung lambda = {lam:?}\nbucket = {b} (M_struct = {})",
+                m_struct(s, r, q)
+            );
+        }
+        "census" => {
+            let (p, s) = (req(&m, "p"), req(&m, "s"));
+            let cmax: i64 = opt(&m, "cmax", 2);
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let counts = if let Some(w) = m.get("wmax") {
+                let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
+                bucketlab::census::direct(&sg, cmax as u64, wmax).unwrap_or_else(|e| die(e))
+            } else {
+                bucketlab::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
+            };
+            for (w, c) in counts.iter().enumerate() {
+                if *c > 0 {
+                    println!("w={w}: {c}");
+                }
+            }
+        }
+        "decompose" => {
+            let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
+            let lam: u64 = req(&m, "lam");
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let (total, per_w) = mitm::decompose_bucket_q1(&sg, r, lam).unwrap_or_else(|e| die(e));
+            println!("bucket({lam}) = {total}");
+            for (w, c) in per_w.iter().enumerate() {
+                if *c > 0 {
+                    println!("  weight {w}: {c} classes");
+                }
+            }
+        }
+        "sweep" => {
+            let (s, r): (usize, usize) = (req(&m, "s"), req(&m, "r"));
+            let pmax: u64 = req(&m, "pmax");
+            let csv = m.contains_key("csv");
+            let m0 = m_struct(s, r, 1) as f64;
+            let cs = binom(s as u64, r as u64) as f64;
+            let primes: Vec<u64> = (s as u64 + 1..pmax)
+                .step_by(s)
+                .filter(|&p| is_prime(p))
+                .collect();
+            let mut rows: Vec<(f64, u64, u64, u64)> = primes
+                .par_iter()
+                .filter_map(|&p| {
+                    let sg = Subgroup::new(p, s).ok()?;
+                    let d = dp::distribution_q1(&sg, r).ok()?;
+                    let (mx, _) = d.max();
+                    let ratio = mx as f64 / (m0 + cs / p as f64);
+                    Some((ratio, p, mx, d.occupied()))
+                })
+                .collect();
+            if csv {
+                println!("p,max_bucket,conjecture_ratio,occupied");
+                for (ratio, p, mx, occ) in &rows {
+                    println!("{p},{mx},{ratio:.6},{occ}");
+                }
+            } else {
+                rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                println!("{} primes; worst 10 conjecture ratios:", rows.len());
+                for (ratio, p, mx, occ) in rows.iter().take(10) {
+                    println!("  p={p:>9} ratio={ratio:.3} maxN={mx} occupied={occ}");
+                }
+            }
+        }
+        other => {
+            eprintln!("unknown subcommand: {other}");
+            exit(2);
+        }
+    }
+}

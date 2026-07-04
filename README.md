@@ -1,72 +1,112 @@
-# proximity / bucketlab
+# proximity — exact tools for proximity gaps & list decoding near capacity
 
-Fast exact kernels for computationally exploring **proximity gaps, correlated
-agreement, and list decoding near capacity** for the smooth-domain Reed–Solomon
-codes used in SNARKs (the setting of the Proximity Prize survey, ePrint
-2026/680). Rust core + PyO3 bindings; Python is the lab bench, Rust carries the
-hot loops.
+A Rust toolkit (with Python bindings) for computationally exploring
+**proximity gaps, correlated agreement, and list decoding near capacity** for
+the smooth-domain Reed–Solomon codes used in SNARKs — the setting of the
+Proximity Prize survey (Arnon–Boneh–Fenzi, ePrint 2026/680).
 
-The central objects are *buckets*: for the order-s subgroup mu_s of F_p*, the
-bucket at lambda = (lambda_1..lambda_q) counts r-subsets S of mu_s whose top
-elementary symmetric functions e_1(S)..e_q(S) equal lambda. Via the
-useful-family framework (Appendix C of the survey), bucket sizes are exactly
-the list sizes of extremal words beyond the Johnson radius, kernel censuses
-govern their arithmetic inflation, and occupied-bucket supports are exact
-winning sets for the survey's Section-6 toy protocol. This crate computes all
-of these exactly.
+The design premise: in this problem area, *cheap exact computation* is a
+first-class research instrument. Every number the toolkit produces is either a
+certified exact count or clearly labeled otherwise, and every kernel is pinned
+to independently-verified golden values (see [Validation](#validation)).
 
-## Kernels
+## The objects
 
-| function | what it computes | exactness | scale |
-|---|---|---|---|
-| `bucket_dist_q1(p, s, r)` | full distribution N(λ) of e₁-buckets over F_p | exact u64 (s ≤ 64) | p to ~10⁸ (memory-bound) |
-| `bucket_dist_q2(p, s, r)` | full joint (e₁,e₂) distribution | exact u64 | p ≤ ~700 |
-| `census_direct(p, s, cmax, wmax)` | kernel vectors, coeffs in [−c,c], weight ≤ w | exact | C(s/2,w)(2c)^w ops |
-| `census_mitm(p, s, cmax)` | full census by weight (MitM halves) | exact | s ≤ 32 at c=2 |
-| `bucket_e / buckets_e(p, s, r, q, λ)` | exact single buckets, **any q** | exact | s ≤ 32 |
-| `rung_lambda_e(p, s, r, q)` | Theorem-A rung λ (exp20c conventions) | — | — |
-| `decompose_bucket_q1(p, s, r, λ)` | ε-class decomposition (the anatomy law) | exact | s ≤ 32 |
+For a prime `p` and the order-`s` multiplicative subgroup `mu_s <= F_p^*`, the
+**bucket** at `lambda = (lambda_1, ..., lambda_q)` counts the `r`-subsets
+`S` of `mu_s` with elementary symmetric values `e_i(S) = lambda_i`, `i <= q`.
+Buckets are the computational heart of the landscape:
 
-## Build & test
+- they are **exact list sizes** of the extremal ("C.5-form") words beyond the
+  Johnson radius — the words behind the known list-decoding lower bounds near
+  capacity;
+- their **occupied supports** are exact winning sets for the survey's Section-6
+  toy protocol (soundness = occupied / p for the canonical attack pair);
+- their **structural maxima** follow the quantized ladder
+  `M_struct(s, r, q) = C(s/2^t - [r0 != 0], floor(r/2^t))`,
+  `t = ceil(log2(q+1))`;
+- their arithmetic inflation is a weighted count of **kernel census** vectors
+  (`sum v_i w^i = 0 mod p`), arriving in dilation orbits of size `s` and
+  confined by the norm law `N(v) <= (sum v_i^2)^{s/4}` to primes below
+  `~w^{s/4}` — small-weight accidents cannot reach the structural regime.
+
+## Architecture
+
+Bottom-up, each layer depending only on those below:
+
+| module | object | role |
+|---|---|---|
+| `field` | `F_p` scalars | mulmod/powmod, Miller–Rabin, generators, Pollard-rho factorization |
+| `domain` | `Subgroup` | the validated core object: `mu_s`, cosets, dilation structure |
+| `code` | `ReedSolomon` | radii (capacity/Johnson), C.5 window, rung words, ladder values |
+| `buckets` | distributions & queries | `dp`: full distributions (cost ~ `p`); `mitm`: single buckets at any `q` and decompositions (**`p`-independent** — interrogate primes of any size) |
+| `census` | kernel vectors | direct (weight-capped, any `s`) and MitM (full, `s <= 32`) engines |
+
+The cost split is the strategic point: use `dp` only when you need the max over
+*all* `lambda`; use the `p`-independent `mitm` engines to ask targeted
+questions at primes of any magnitude.
+
+## Usage
+
+**Rust:**
+
+```rust
+use bucketlab::{domain::Subgroup, buckets};
+
+let sg = Subgroup::new(3457, 32)?;
+let dist = buckets::dp::distribution_q1(&sg, 16)?;      // all buckets, exact
+let (max, lambda) = dist.max();                         // 220134 at lambda = 0
+let t = buckets::mitm::HalfTables::build(&sg, 16, 2)?;  // p-independent engine
+let rung = bucketlab::code::rung_lambda(&sg, 16, 2)?;
+assert_eq!(t.bucket(&rung)?, 422);                      // exact q=2 list size
+```
+
+**CLI** (`cargo install --path .` or `cargo run --release --bin bucketlab --`):
 
 ```
-cargo test --release            # golden + property suite, no Python needed
-cargo run --release --example bench_sweep
-maturin build --release --features python && pip install target/wheels/*.whl
+bucketlab info      --p 3457 --s 32
+bucketlab rung      --p 3457 --s 32 --r 16 --q 2
+bucketlab bucket    --p 89633 --s 32 --r 16 --lam 0
+bucketlab decompose --p 77569 --s 32 --r 16 --lam 0
+bucketlab census    --p 89633 --s 32 --cmax 2
+bucketlab sweep     --s 32 --r 16 --pmax 300000 --csv > landscape.csv
 ```
 
-## Measured throughput (Apple M-series)
+**Python** (`pip install maturin && maturin build --release --features python
+&& pip install target/wheels/*.whl`):
 
-- Full sweep, all 1,622 primes ≡ 1 mod 32 below 3×10⁵, DP + max + census ≤ 4
-  per prime: **15 s total (9.3 ms/prime)** — the exp17 campaign was ~260 primes
-  in minutes.
-- Single DP: the rotated-add kernel is memory-bandwidth-bound, so numpy is
-  already near-optimal per prime (0.036 s vs 0.044 s at s=32, p=180001);
-  the wins are the Python-loop kernels (census/MitM/decomposition: 10–100×)
-  and rayon parallelism across primes.
-- Whole golden test suite (six s=32 DPs, q=2 joint DP, censuses,
-  decomposition): 0.31 s.
+```python
+import bucketlab as bl, numpy as np
+d = np.asarray(bl.bucket_dist_q1(89633, 32, 16))   # full exact distribution
+bl.bucket_e(3457, 32, 16, bl.rung_lambda_e(3457, 32, 16, 2))   # -> 422
+```
 
-## Validation contract
+## Performance
 
-Every kernel is pinned to exhaustively-verified values from an independent
-Python/numpy reference implementation (`tests/golden.rs`): maxN at 12 primes
-across s=16/32, the q=2 joint extrema at p=97, censuses at p=89633/65537, rung
-buckets for q ≤ 8, the p=77569 decomposition to the unit with its weight
-profile, plus property tests (mass = C(s,r), dilation invariance, DP↔MitM
-agreement). The q≥2 sign convention (c_i = (−1)^i e_i) is documented at the
-triangularization site — it was a real bug once, caught by exactly the DP
-cross-check now encoded here. Optimization passes must keep this suite green.
+Apple M-series, release build: a full landscape campaign — every prime
+`p = 1 mod 32` below 300k (1,622 primes), exact q=1 distribution + max +
+low-weight census each — runs in ~15 s (`examples/bench_sweep.rs`). The whole
+golden test suite (six s=32 distributions, a q=2 joint grid, censuses,
+decompositions) runs in ~0.3 s. Single full DPs are memory-bandwidth-bound;
+the MitM engines answer single-bucket questions in milliseconds at any `p`.
 
-## Roadmap (in leverage order)
+## Validation
 
-1. **Adversarial-prime stress tests**: factor norms/resultants of chosen
-   ±1-polynomials, measure buckets at the large prime factors directly.
-2. **q=3 exhaustive distributions** at p ≤ ~450 (p³ grid DP — the natural next
-   kernel, ~minutes here vs infeasible in numpy).
-3. **s=64 crossover measured buckets**: MitM at 2³² half-subsets — u32-encoded,
-   radix-partitioned sort-join, ~17 GB streamed; unlocks measured (not
-   predicted) values at p ≈ 3×10⁹.
-4. CRT dual-residue counts (two ~62-bit primes) for exact s ≥ 128 DPs.
-5. Montgomery/Barrett reduction in the MitM inner loops; wgpu census kernel if
-   CPU saturates.
+`cargo test --release` runs the golden + property suite: pinned
+exhaustively-verified values (bucket maxima at 12 primes, joint-grid extrema,
+censuses, rung buckets through q=8, a to-the-unit bucket decomposition) plus
+invariants (mass = `C(s,r)`, dilation symmetry, DP↔MitM agreement). CI enforces
+fmt, clippy `-D warnings`, the suite, CLI smoke tests, and Python-binding
+parity on every push. The contract for new kernels is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Roadmap
+
+Tracked as GitHub issues: norms & bad-set enumeration, the spectrum module
+(character sums / dilated Gauss periods), toy-protocol winning-set tools,
+q=3 grid DP, CRT dual-residue counts for `s >= 128`, the `s = 64` MitM
+sort-join, Montgomery arithmetic, criterion benches.
+
+## License
+
+MIT or Apache-2.0, at your option.

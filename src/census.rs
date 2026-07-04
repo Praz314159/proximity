@@ -1,51 +1,54 @@
-//! Kernel censuses: counting nonzero vectors v with coefficients in
-//! [-cmax, cmax] and bounded weight such that sum_i v_i w^i = 0 (mod p),
-//! i on the half-basis [0, s/2). These drive the (exp20a-validated)
-//! decomposition law: bucket inflation is a weighted count of exactly these
-//! vectors, in dilation orbits of size s.
+//! Kernel censuses: counting nonzero vectors `v` with bounded coefficients and
+//! weight such that `sum_i v_i w^i = 0 (mod p)` on the half-basis
+//! `i in [0, s/2)`.
+//!
+//! These vectors are the *arithmetic accidents* of the landscape: each one
+//! merges structural classes, in dilation orbits of size `s`, and the
+//! (exactly validated) decomposition law says bucket inflation is precisely a
+//! weighted count of them. Their norms obey `N(v) <= (sum v_i^2)^{s/4}`
+//! (Parseval + AM–GM), which confines weight-`w` orbits to primes
+//! `p <= ~w^{s/4}` — the anticorrelation law.
 //!
 //! Two engines:
-//!  - `census_direct`: weight-capped depth-first enumeration, rayon over the
-//!    first (position, coefficient) choice. Cost ~ sum_w C(s/2, w) (2c)^w.
-//!  - `census_mitm`: full census by weight via meet-in-the-middle over the two
-//!    coordinate halves; requires (2c+1)^{s/4} tables (s <= 32 at c = 2).
+//! - [`direct`]: weight-capped depth-first enumeration, rayon-parallel; cost
+//!   `~ sum_w C(s/2, w) (2c)^w`, any `s`.
+//! - [`mitm`]: full census by weight via meet-in-the-middle halves; cost and
+//!   memory `(2c + 1)^{s/4}`, so `s <= 32` at `c = 2`.
 
-use crate::field::{powmod, subgroup};
+use crate::domain::Subgroup;
+use crate::error::{Error, Result};
 use rayon::prelude::*;
-use std::collections::HashMap;
 
-fn pow_table(p: u64, s: usize) -> Vec<u64> {
-    let els = subgroup(p, s);
-    let w = els[1];
-    let mut t = Vec::with_capacity(s / 2);
-    let mut x = 1u64;
-    for _ in 0..s / 2 {
-        t.push(x);
-        x = (x as u128 * w as u128 % p as u128) as u64;
+/// `counts[w]` = number of nonzero kernel vectors of weight exactly `w`
+/// (`w <= wmax`), coefficients in `[-cmax, cmax] \ {0}` on the support.
+pub fn direct(sg: &Subgroup, cmax: u64, wmax: usize) -> Result<Vec<u64>> {
+    if cmax == 0 {
+        return Err(Error::OutOfRange("cmax must be >= 1".into()));
     }
-    debug_assert_eq!(powmod(w, (s / 2) as u64, p), p - 1);
-    t
-}
-
-/// counts[w] = # nonzero kernel vectors of weight exactly w (<= wmax),
-/// coefficients in [-cmax, cmax] \ {0} on the support.
-pub fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> Vec<u64> {
-    let pows = pow_table(p, s);
-    let half = s / 2;
-    // residues[i][k] = (c * w^i) mod p for c = -cmax..-1, 1..cmax (2*cmax entries)
+    let p = sg.p();
+    let half = sg.order() / 2;
+    if wmax > half {
+        return Err(Error::OutOfRange("wmax exceeds s/2".into()));
+    }
+    let pows = sg.pow_table(half);
     let coefs: Vec<i64> = (-(cmax as i64)..=cmax as i64).filter(|&c| c != 0).collect();
     let residues: Vec<Vec<u64>> = (0..half)
         .map(|i| {
             coefs
                 .iter()
                 .map(|&c| {
-                    let cc = if c >= 0 { c as u64 % p } else { p - ((-c) as u64 % p) };
+                    let cc = if c >= 0 {
+                        c as u64 % p
+                    } else {
+                        p - ((-c) as u64 % p)
+                    };
                     (cc as u128 * pows[i] as u128 % p as u128) as u64
                 })
                 .collect()
         })
         .collect();
 
+    #[allow(clippy::too_many_arguments)]
     fn recurse(
         pos: usize,
         used: usize,
@@ -62,7 +65,6 @@ pub fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> Vec<u64> {
         if used == wmax || pos == half {
             return;
         }
-        // enough positions left?
         for i in pos..half {
             for &rv in &residues[i] {
                 recurse(
@@ -79,11 +81,15 @@ pub fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> Vec<u64> {
         }
     }
 
-    // parallel over the first (position, coefficient) pair
     let firsts: Vec<(usize, u64)> = (0..half)
-        .flat_map(|i| residues[i].iter().map(move |&rv| (i, rv)).collect::<Vec<_>>())
+        .flat_map(|i| {
+            residues[i]
+                .iter()
+                .map(move |&rv| (i, rv))
+                .collect::<Vec<_>>()
+        })
         .collect();
-    let counts = firsts
+    Ok(firsts
         .par_iter()
         .map(|&(i, rv)| {
             let mut c = vec![0u64; wmax + 1];
@@ -96,22 +102,30 @@ pub fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> Vec<u64> {
                 a.iter_mut().zip(b).for_each(|(x, y)| *x += y);
                 a
             },
-        );
-    counts
+        ))
 }
 
-/// Full census by weight via MitM over coordinate halves; s/2 <= 16 at cmax=2.
-pub fn census_mitm(p: u64, s: usize, cmax: i64) -> Vec<u64> {
-    let pows = pow_table(p, s);
+/// Full census by weight via meet-in-the-middle over coordinate halves.
+/// Requires `s <= 32` at `cmax = 2` (`(2c+1)^{s/4}` table entries).
+pub fn mitm(sg: &Subgroup, cmax: i64) -> Result<Vec<u64>> {
+    use std::collections::HashMap;
+    let s = sg.order();
+    if s > 32 || s % 4 != 0 {
+        return Err(Error::Unsupported(
+            "MitM census requires s <= 32, 4 | s".into(),
+        ));
+    }
+    if !(1..=4).contains(&cmax) {
+        return Err(Error::OutOfRange("cmax in [1, 4]".into()));
+    }
+    let p = sg.p();
     let half = s / 2;
-    let (lo, hi) = (0, half / 2); // coords [0, hi) and [hi, half)
+    let pows = sg.pow_table(half);
     let side = |from: usize, to: usize| -> HashMap<u64, Vec<u8>> {
-        // value -> list of weights of vectors on these coords
         let mut map: HashMap<u64, Vec<u8>> = HashMap::new();
         let n = to - from;
         let base = (2 * cmax + 1) as u64;
-        let total = base.pow(n as u32);
-        for code in 0..total {
+        for code in 0..base.pow(n as u32) {
             let mut c = code;
             let mut acc: u64 = 0;
             let mut w: u8 = 0;
@@ -132,8 +146,8 @@ pub fn census_mitm(p: u64, s: usize, cmax: i64) -> Vec<u64> {
         }
         map
     };
-    let a = side(lo, hi);
-    let b = side(hi, half);
+    let a = side(0, half / 2);
+    let b = side(half / 2, half);
     let mut counts = vec![0u64; half + 1];
     for (val, wsb) in &b {
         let need = (p - val % p) % p;
@@ -146,5 +160,5 @@ pub fn census_mitm(p: u64, s: usize, cmax: i64) -> Vec<u64> {
         }
     }
     counts[0] = counts[0].saturating_sub(1); // remove the zero vector
-    counts
+    Ok(counts)
 }

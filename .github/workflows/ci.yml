@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests (golden + property suite)
+        run: cargo test --release
+      - name: CLI smoke test
+        run: |
+          cargo run --release --bin bucketlab -- rung --p 3457 --s 32 --r 16 --q 2 | grep "bucket = 422"
+          cargo run --release --bin bucketlab -- decompose --p 77569 --s 32 --r 16 --lam 0 | grep "bucket(0) = 30598"
+
+  python-bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: |
+          pip install maturin numpy
+          maturin build --release --features python
+          pip install target/wheels/*.whl
+      - name: Golden parity check
+        run: |
+          python -c "
+          import bucketlab as bl, numpy as np
+          d = np.asarray(bl.bucket_dist_q1(89633, 32, 16))
+          assert d.max() == 29382 and d.sum() == 601080390
+          assert bl.bucket_e(3457, 32, 16, bl.rung_lambda_e(3457, 32, 16, 2)) == 422
+          total, _ = bl.decompose_bucket_q1(77569, 32, 16, int(np.asarray(bl.bucket_dist_q1(77569, 32, 16)).argmax()))
+          assert total == 30598
+          print('python golden parity OK')
+          "

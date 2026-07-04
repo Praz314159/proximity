@@ -1,0 +1,25 @@
+[package]
+name = "bucketlab"
+version = "0.1.0"
+edition = "2021"
+description = "Fast exact kernels for the bucket-landscape program (proximity notes): subset-sum DP over F_p, kernel censuses, meet-in-the-middle buckets."
+
+[lib]
+name = "bucketlab"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rayon = "1.10"
+pyo3 = { version = "0.22", features = ["abi3-py39"], optional = true }
+numpy = { version = "0.22", optional = true }
+
+[features]
+default = []
+python = ["dep:pyo3", "dep:numpy", "pyo3/extension-module"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[[example]]
+name = "bench_dp"

@@ -148,6 +148,88 @@ fn certify_q1(p: u64, s: usize, r: usize) -> PyResult<(u8, u64, u64)> {
     })
 }
 
+/// Primes p = 1 (mod s) in [lo, hi) — the sweep-population helper every
+/// experiment script was rewriting locally.
+#[pyfunction]
+fn primes_1_mod(s: u64, lo: u64, hi: u64) -> Vec<u64> {
+    let mut p = lo.max(s + 1);
+    p += (1 + s - p % s) % s;
+    let mut out = Vec::new();
+    while p < hi {
+        if field::is_prime(p) {
+            out.push(p);
+        }
+        p += s;
+    }
+    out
+}
+
+/// Structural class size C(s/2 - w, (r - w)/2) (0 when parity/range infeasible).
+#[pyfunction]
+fn class_size(s: usize, r: usize, w: usize) -> u64 {
+    code::class_size(s, r, w)
+}
+
+/// A decomposition row: (p, total, per-weight class counts).
+type DecompRow = (u64, u64, Vec<u64>);
+
+/// Parallel zero-bucket decompositions across primes (the audit workload:
+/// 23k primes in seconds instead of minutes).
+#[pyfunction]
+fn decompose_many(
+    py: Python<'_>,
+    s: usize,
+    r: usize,
+    primes: Vec<u64>,
+) -> PyResult<Vec<DecompRow>> {
+    use rayon::prelude::*;
+    py.allow_threads(|| {
+        primes
+            .par_iter()
+            .map(|&p| {
+                let sg = Subgroup::new(p, s)?;
+                let (t, pw) = mitm::decompose_bucket_q1(&sg, r, 0)?;
+                Ok((p, t, pw))
+            })
+            .collect::<crate::Result<Vec<_>>>()
+    })
+    .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// An attack row: (delta_star, deficit, t, s_g, r, log2_list).
+type AttackRow = (f64, f64, u32, u64, u64, f64);
+
+/// Best ladder attack: (delta_star, deficit, t, s_g, r, log2_list), or None.
+#[pyfunction]
+fn attack_best(n: u64, k: u64, list_bits: f64) -> PyResult<Option<AttackRow>> {
+    let p = crate::attack::AttackParams { n, k, list_bits };
+    let a = err(crate::attack::best_attack(&p))?;
+    Ok(a.map(|a| (a.delta_star, a.deficit, a.t, a.s_g, a.r, a.log2_list)))
+}
+
+/// Antipodal (survey Table-5) baseline attack, same tuple shape as attack_best.
+#[pyfunction]
+fn attack_antipodal(n: u64, k: u64, list_bits: f64) -> PyResult<Option<AttackRow>> {
+    let p = crate::attack::AttackParams { n, k, list_bits };
+    let a = err(crate::attack::antipodal_attack(&p))?;
+    Ok(a.map(|a| (a.delta_star, a.deficit, a.t, a.s_g, a.r, a.log2_list)))
+}
+
+/// Structural-framework ceiling delta_min - H2(rate)/list_bits.
+#[pyfunction]
+fn attack_ceiling(n: u64, k: u64, list_bits: f64) -> PyResult<f64> {
+    err(crate::attack::hyperbola_ceiling(
+        &crate::attack::AttackParams { n, k, list_bits },
+    ))
+}
+
+/// Exact toy-protocol soundness: (winning, soundness, classes).
+#[pyfunction]
+fn toy_soundness(p: u64, s: usize, r: usize) -> PyResult<(u64, f64, u64)> {
+    let t = err(crate::toy::exact_soundness(&sub(p, s)?, r))?;
+    Ok((t.winning, t.soundness, t.classes))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
@@ -165,5 +247,12 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dist_stats_q1, m)?)?;
     m.add_function(wrap_pyfunction!(sweep_stats_q1, m)?)?;
     m.add_function(wrap_pyfunction!(certify_q1, m)?)?;
+    m.add_function(wrap_pyfunction!(primes_1_mod, m)?)?;
+    m.add_function(wrap_pyfunction!(class_size, m)?)?;
+    m.add_function(wrap_pyfunction!(decompose_many, m)?)?;
+    m.add_function(wrap_pyfunction!(attack_best, m)?)?;
+    m.add_function(wrap_pyfunction!(attack_antipodal, m)?)?;
+    m.add_function(wrap_pyfunction!(attack_ceiling, m)?)?;
+    m.add_function(wrap_pyfunction!(toy_soundness, m)?)?;
     Ok(())
 }

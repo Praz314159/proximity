@@ -49,3 +49,24 @@ def sweep_stats_q1(s: int, r: int, primes: List[int]) -> List[Tuple[int, int, in
 
 def certify_q1(p: int, s: int, r: int) -> Tuple[int, int, int]:
     """(tier, m_struct, zero_bucket): 1 = all structural, 2 = zero bucket structural, 3 = inflated."""
+
+def primes_1_mod(s: int, lo: int, hi: int) -> List[int]:
+    """Primes p = 1 (mod s) in [lo, hi)."""
+
+def class_size(s: int, r: int, w: int) -> int:
+    """Structural class size C(s/2 - w, (r - w)/2); 0 if infeasible."""
+
+def decompose_many(s: int, r: int, primes: List[int]) -> List[Tuple[int, int, List[int]]]:
+    """Parallel zero-bucket decompositions: rows of (p, total, per-weight counts)."""
+
+def attack_best(n: int, k: int, list_bits: float) -> Tuple[float, float, int, int, int, float] | None:
+    """Best ladder attack: (delta_star, deficit, t, s_g, r, log2_list)."""
+
+def attack_antipodal(n: int, k: int, list_bits: float) -> Tuple[float, float, int, int, int, float] | None:
+    """Antipodal (Table-5) baseline, same shape as attack_best."""
+
+def attack_ceiling(n: int, k: int, list_bits: float) -> float:
+    """Framework ceiling delta_min - H2(rate)/list_bits."""
+
+def toy_soundness(p: int, s: int, r: int) -> Tuple[int, float, int]:
+    """(winning challenges, exact soundness, structural class count)."""

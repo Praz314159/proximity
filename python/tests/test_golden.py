@@ -63,3 +63,24 @@ def test_sweep_stats_and_certify_bindings():
     assert vanish.certify_q1(89633, 32, 16) == (3, 12870, 29382)
     assert vanish.certify_q1(65537, 32, 16)[0] == 2
     assert vanish.certify_q1(562949953421729, 32, 16) == (1, 12870, 12870)
+
+
+def test_ergonomics_pass_bindings():
+    # primes_1_mod matches a known population count
+    ps = vanish.primes_1_mod(32, 33, 300000)
+    assert len(ps) == 1622 and ps[0] == 97
+    # class_size pins
+    assert vanish.class_size(32, 16, 0) == 12870
+    assert vanish.class_size(32, 16, 6) == 252
+    assert vanish.class_size(32, 16, 7) == 0
+    # decompose_many agrees with singles
+    rows = {p: (t, pw) for p, t, pw in vanish.decompose_many(32, 16, [89633, 77569])}
+    assert rows[89633][0] == 29382 and rows[77569][0] == 30598
+    # attack bindings reproduce the golden thresholds
+    lam = 6 * np.log2(2130706433) - 128
+    assert abs(vanish.attack_antipodal(1 << 21, 1 << 20, lam)[0] - 0.492188) < 1e-5
+    best = vanish.attack_best(1 << 21, 1 << 20, lam)
+    assert abs(best[0] - 0.4843755) < 1e-6 and best[2] == 15
+    # toy soundness pins
+    w, s_, c = vanish.toy_soundness(35521, 16, 8)
+    assert (w, c) == (3281, 3281) and abs(s_ - 3281 / 35521) < 1e-12

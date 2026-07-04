@@ -165,8 +165,49 @@ fn main() {
                 }
             }
         }
+        "attack" => {
+            use vanish::attack::*;
+            let params = AttackParams {
+                n: req(&m, "n"),
+                k: req(&m, "k"),
+                list_bits: req(&m, "list-bits"),
+            };
+            let dmin = capacity_radius(params.n, params.k);
+            println!(
+                "n = {}, k = {} (rate {:.4}), required list bits = {:.2}",
+                params.n,
+                params.k,
+                params.k as f64 / params.n as f64,
+                params.list_bits
+            );
+            println!("capacity radius (dmin)     : {dmin:.6}");
+            match antipodal_attack(&params).unwrap_or_else(|e| die(e)) {
+                Some(a) => println!("antipodal (Table-5 method) : delta* = {:.6}", a.delta_star),
+                None => println!("antipodal (Table-5 method) : unattainable"),
+            }
+            match best_attack(&params).unwrap_or_else(|e| die(e)) {
+                Some(a) => println!(
+                    "ladder (best rung)         : delta* = {:.6}  [t={}, s_G={}, r={}, \
+                     log2 list = {:.2}, deficit = {:.6}]",
+                    a.delta_star, a.t, a.s_g, a.r, a.log2_list, a.deficit
+                ),
+                None => println!("ladder (best rung)         : unattainable"),
+            }
+            println!(
+                "framework ceiling          : {:.6}",
+                hyperbola_ceiling(&params).unwrap_or_else(|e| die(e))
+            );
+            if let Some(bb) = m.get("base-bits") {
+                let bb: f64 = bb.parse().unwrap_or_else(|_| die("bad --base-bits"));
+                match elias_delta_star(&params, bb).unwrap_or_else(|e| die(e)) {
+                    Some(d) => println!("Elias (base field {bb:.1} bits): delta* = {d:.6}"),
+                    None => println!("Elias (base field {bb:.1} bits): unattainable"),
+                }
+            }
+        }
         other => {
             eprintln!("unknown subcommand: {other}");
+            eprintln!("usage: vanish <info|bucket|rung|census|decompose|sweep|attack> --flags ...");
             exit(2);
         }
     }

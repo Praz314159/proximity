@@ -49,6 +49,7 @@
 // `is_multiple_of` suggestion hurts readability here.
 #![allow(clippy::manual_is_multiple_of)]
 
+pub mod attack;
 pub mod buckets;
 pub mod census;
 pub mod code;

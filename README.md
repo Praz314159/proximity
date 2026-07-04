@@ -1,5 +1,7 @@
 # vanish — exact tools for proximity gaps & list decoding near capacity
 
+[![CI](https://github.com/Praz314159/proximity/actions/workflows/ci.yml/badge.svg)](https://github.com/Praz314159/proximity/actions)
+
 A Rust toolkit (with Python bindings) for computationally exploring
 **proximity gaps, correlated agreement, and list decoding near capacity** for
 the smooth-domain Reed–Solomon codes used in SNARKs — the setting of the

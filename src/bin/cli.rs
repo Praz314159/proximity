@@ -165,6 +165,25 @@ fn main() {
                 }
             }
         }
+        "toy" => {
+            let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
+            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let t = vanish::toy::exact_soundness(&sg, r).unwrap_or_else(|e| die(e));
+            println!(
+                "toy protocol (survey Sec. 6), canonical pair (x^{r}, x^{}), k = {}, \
+                 radius 1 - {r}/{s}:",
+                r - 1,
+                r - 1
+            );
+            println!(
+                "  winning challenges |Omega| = {} of {p}  ->  EXACT soundness = {:.6}",
+                t.winning, t.soundness
+            );
+            println!(
+                "  structural class count (phase-transition scale) = {}",
+                t.classes
+            );
+        }
         "certify" => {
             use vanish::certify::{certify_q1, Verdict};
             let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));

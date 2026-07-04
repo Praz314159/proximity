@@ -1,4 +1,4 @@
-//! # bucketlab
+//! # vanish
 //!
 //! An exact computational toolkit for exploring **proximity gaps, correlated
 //! agreement, and list decoding near capacity** for the smooth-domain
@@ -33,7 +33,7 @@
 //! ## Example
 //!
 //! ```
-//! use bucketlab::{domain::Subgroup, buckets};
+//! use vanish::{domain::Subgroup, buckets};
 //!
 //! let sg = Subgroup::new(3457, 32).unwrap();
 //! let dist = buckets::dp::distribution_q1(&sg, 16).unwrap();

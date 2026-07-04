@@ -1,23 +1,23 @@
 //! Command-line interface: run the standard campaigns without writing code.
 //!
-//!   bucketlab info    --p 3457 --s 32
-//!   bucketlab bucket  --p 3457 --s 32 --r 16 --lam 0 [--q 1]
-//!   bucketlab rung    --p 3457 --s 32 --r 16 --q 2
-//!   bucketlab census  --p 89633 --s 32 [--cmax 2] [--wmax 6]
-//!   bucketlab decompose --p 77569 --s 32 --r 16 --lam 0
-//!   bucketlab sweep   --s 32 --r 16 --pmax 300000 [--csv]
+//!   vanish info    --p 3457 --s 32
+//!   vanish bucket  --p 3457 --s 32 --r 16 --lam 0 [--q 1]
+//!   vanish rung    --p 3457 --s 32 --r 16 --q 2
+//!   vanish census  --p 89633 --s 32 [--cmax 2] [--wmax 6]
+//!   vanish decompose --p 77569 --s 32 --r 16 --lam 0
+//!   vanish sweep   --s 32 --r 16 --pmax 300000 [--csv]
 //!
 //! `sweep` prints, per prime `p = 1 mod s`, the exact max bucket, the
 //! conjecture ratio `max / (M_struct + C(s,r)/p)`, and the occupied-bucket
 //! count (the exact toy-protocol winning-set size for the canonical pair).
 
-use bucketlab::buckets::{dp, mitm};
-use bucketlab::code::{m_struct, rung_lambda};
-use bucketlab::domain::Subgroup;
-use bucketlab::field::{binom, is_prime};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::process::exit;
+use vanish::buckets::{dp, mitm};
+use vanish::code::{m_struct, rung_lambda};
+use vanish::domain::Subgroup;
+use vanish::field::{binom, is_prime};
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -58,7 +58,7 @@ fn die(e: impl std::fmt::Display) -> ! {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some((cmd, rest)) = argv.split_first() else {
-        eprintln!("usage: bucketlab <info|bucket|rung|census|decompose|sweep> --flags ...");
+        eprintln!("usage: vanish <info|bucket|rung|census|decompose|sweep> --flags ...");
         exit(2);
     };
     let m = parse_args(rest);
@@ -110,9 +110,9 @@ fn main() {
             let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
             let counts = if let Some(w) = m.get("wmax") {
                 let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
-                bucketlab::census::direct(&sg, cmax as u64, wmax).unwrap_or_else(|e| die(e))
+                vanish::census::direct(&sg, cmax as u64, wmax).unwrap_or_else(|e| die(e))
             } else {
-                bucketlab::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
+                vanish::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
             };
             for (w, c) in counts.iter().enumerate() {
                 if *c > 0 {

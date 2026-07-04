@@ -3,11 +3,11 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "bucketlab"
+name = "vanish"
 version = "0.2.0"
 description = "Fast exact kernels for the bucket-landscape program"
 requires-python = ">=3.9"
 
 [tool.maturin]
 features = ["python"]
-module-name = "bucketlab"
+module-name = "vanish"

@@ -1,5 +1,5 @@
 [package]
-name = "bucketlab"
+name = "vanish"
 version = "0.2.0"
 edition = "2021"
 description = "Exact computational toolkit for exploring proximity gaps, correlated agreement, and list decoding near capacity for smooth-domain Reed-Solomon codes"
@@ -9,11 +9,11 @@ keywords = ["coding-theory", "list-decoding", "proximity-gaps", "snark", "reed-s
 categories = ["cryptography", "mathematics", "science"]
 
 [lib]
-name = "bucketlab"
+name = "vanish"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "bucketlab"
+name = "vanish"
 path = "src/bin/cli.rs"
 required-features = []
 

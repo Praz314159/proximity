@@ -88,7 +88,7 @@ fn factor(n: u64) -> Vec<u64> {
 }
 
 #[pymodule]
-fn bucketlab(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q2, m)?)?;
     m.add_function(wrap_pyfunction!(census_direct, m)?)?;

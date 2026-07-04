@@ -1,9 +1,9 @@
 //! Single-DP wall-clock check. `cargo run --release --example bench_dp`
 
-use bucketlab::buckets::dp;
-use bucketlab::domain::Subgroup;
-use bucketlab::field::binom;
 use std::time::Instant;
+use vanish::buckets::dp;
+use vanish::domain::Subgroup;
+use vanish::field::binom;
 
 fn main() {
     for (p, s, r) in [(180001u64, 32usize, 16usize), (299969, 64, 32)] {

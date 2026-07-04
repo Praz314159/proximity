@@ -4,17 +4,17 @@
 //! Optimization passes and refactors must keep this suite green; new kernels
 //! must add their own pins. See CONTRIBUTING.md.
 
-use bucketlab::buckets::{dp, mitm};
-use bucketlab::census;
-use bucketlab::code::{class_size, m_struct, rung_lambda};
-use bucketlab::domain::Subgroup;
-use bucketlab::field::{binom, factor, is_prime};
+use vanish::buckets::{dp, mitm};
+use vanish::census;
+use vanish::code::{class_size, m_struct, rung_lambda};
+use vanish::domain::Subgroup;
+use vanish::field::{binom, factor, is_prime};
 
 fn sg(p: u64, s: usize) -> Subgroup {
     Subgroup::new(p, s).unwrap()
 }
 
-fn mass_check(dist: &bucketlab::buckets::BucketDistribution, s: u64, r: u64) {
+fn mass_check(dist: &vanish::buckets::BucketDistribution, s: u64, r: u64) {
     assert_eq!(dist.total(), binom(s, r), "total mass must be C(s, r)");
 }
 

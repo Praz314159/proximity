@@ -2,13 +2,13 @@
 //! max + low-weight census per prime, rayon over primes.
 //! `cargo run --release --example bench_sweep`
 
-use bucketlab::buckets::dp;
-use bucketlab::census;
-use bucketlab::code::m_struct;
-use bucketlab::domain::Subgroup;
-use bucketlab::field::{binom, is_prime};
 use rayon::prelude::*;
 use std::time::Instant;
+use vanish::buckets::dp;
+use vanish::census;
+use vanish::code::m_struct;
+use vanish::domain::Subgroup;
+use vanish::field::{binom, is_prime};
 
 fn main() {
     let (s, r) = (32usize, 16usize);

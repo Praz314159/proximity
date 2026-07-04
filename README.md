@@ -1,4 +1,4 @@
-# proximity — exact tools for proximity gaps & list decoding near capacity
+# vanish — exact tools for proximity gaps & list decoding near capacity
 
 A Rust toolkit (with Python bindings) for computationally exploring
 **proximity gaps, correlated agreement, and list decoding near capacity** for
@@ -51,32 +51,32 @@ questions at primes of any magnitude.
 **Rust:**
 
 ```rust
-use bucketlab::{domain::Subgroup, buckets};
+use vanish::{domain::Subgroup, buckets};
 
 let sg = Subgroup::new(3457, 32)?;
 let dist = buckets::dp::distribution_q1(&sg, 16)?;      // all buckets, exact
 let (max, lambda) = dist.max();                         // 220134 at lambda = 0
 let t = buckets::mitm::HalfTables::build(&sg, 16, 2)?;  // p-independent engine
-let rung = bucketlab::code::rung_lambda(&sg, 16, 2)?;
+let rung = vanish::code::rung_lambda(&sg, 16, 2)?;
 assert_eq!(t.bucket(&rung)?, 422);                      // exact q=2 list size
 ```
 
-**CLI** (`cargo install --path .` or `cargo run --release --bin bucketlab --`):
+**CLI** (`cargo install --path .` or `cargo run --release --bin vanish --`):
 
 ```
-bucketlab info      --p 3457 --s 32
-bucketlab rung      --p 3457 --s 32 --r 16 --q 2
-bucketlab bucket    --p 89633 --s 32 --r 16 --lam 0
-bucketlab decompose --p 77569 --s 32 --r 16 --lam 0
-bucketlab census    --p 89633 --s 32 --cmax 2
-bucketlab sweep     --s 32 --r 16 --pmax 300000 --csv > landscape.csv
+vanish info      --p 3457 --s 32
+vanish rung      --p 3457 --s 32 --r 16 --q 2
+vanish bucket    --p 89633 --s 32 --r 16 --lam 0
+vanish decompose --p 77569 --s 32 --r 16 --lam 0
+vanish census    --p 89633 --s 32 --cmax 2
+vanish sweep     --s 32 --r 16 --pmax 300000 --csv > landscape.csv
 ```
 
 **Python** (`pip install maturin && maturin build --release --features python
 && pip install target/wheels/*.whl`):
 
 ```python
-import bucketlab as bl, numpy as np
+import vanish as bl, numpy as np
 d = np.asarray(bl.bucket_dist_q1(89633, 32, 16))   # full exact distribution
 bl.bucket_e(3457, 32, 16, bl.rung_lambda_e(3457, 32, 16, 2))   # -> 422
 ```

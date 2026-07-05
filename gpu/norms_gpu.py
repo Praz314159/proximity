@@ -102,6 +102,15 @@ def run(s, wmax, cmax, out_path, shard=0, nshard=1):
         # chunk supports so nsup*npat stays ~2^26 per launch
         chunk = max(1, (1 << 26) // npat)
         t0, done = time.time(), 0
+        pend_v, pend_c = [], []
+
+        def _merge(pv, pc):
+            v, c = np.concatenate(pv), np.concatenate(pc)
+            u, inv = np.unique(v, return_inverse=True)
+            # float64 weights are exact: per-weight totals < 2^53
+            agg = np.bincount(inv, weights=c.astype(np.float64))
+            return [u], [agg.astype(np.uint64)]
+
         for lo in range(0, len(sups), chunk):
             sub = sups[lo:lo + chunk]
             total = len(sub) * npat
@@ -113,9 +122,16 @@ def run(s, wmax, cmax, out_path, shard=0, nshard=1):
                   np.uint32(q1), np.uint32(q2), d_pw1, d_pw2, d_coefs,
                   np.uint64(pow(q1, q2 - 2, q2)), d_out))
             vals, counts = cp.unique(d_out, return_counts=True)
-            for n, c in zip(vals.get(), counts.get()):
-                table[int(n)][w] += int(c)
+            # vectorized host aggregation (a Python dict merge here is the
+            # bottleneck once uniques reach millions)
+            pend_v.append(vals.get())
+            pend_c.append(counts.get())
+            if len(pend_v) >= 64:
+                pend_v, pend_c = _merge(pend_v, pend_c)
             done += total
+        pend_v, pend_c = _merge(pend_v, pend_c)
+        for n, c in zip(pend_v[0], pend_c[0]):
+            table[int(n)][w] += int(c)
         print(f"w={w}: {done:,} vectors, {len(table):,} uniques so far, "
               f"{time.time()-t0:.1f}s", flush=True)
     with open(out_path, "w") as f:

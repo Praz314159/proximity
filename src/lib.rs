@@ -60,6 +60,7 @@ pub mod domain;
 pub mod error;
 pub mod field;
 pub mod norms;
+pub mod norms_ingest;
 pub mod toy;
 
 pub use error::{Error, Result};

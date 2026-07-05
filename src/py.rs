@@ -315,6 +315,47 @@ fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// Ingest GPU-campaign norm-table JSON shards into the s-64-scale bad set.
+/// Returns (rows, mass_by_weight, n_max_by_weight, entries_parsed) where
+/// rows = list of (p, counts_by_weight, unsafe_split).
+/// Writes <out_prefix>.primes.bin (u64 le), .counts.bin (u32 le, row-major
+/// n x (wmax+1)), .flags.bin (u8) and returns
+/// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed).
+#[pyfunction]
+fn badset_from_gpu_json(
+    py: Python<'_>,
+    paths: Vec<String>,
+    s: usize,
+    wmax: usize,
+    out_prefix: String,
+) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64)> {
+    let (rows, stats) = py
+        .allow_threads(|| crate::norms_ingest::badset_from_gpu_json(&paths, s, wmax))
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let n = rows.len() as u64;
+    let werr = |e: std::io::Error| PyValueError::new_err(e.to_string());
+    let mut pb = Vec::with_capacity(rows.len() * 8);
+    let mut cb = Vec::with_capacity(rows.len() * (wmax + 1) * 4);
+    let mut fb = Vec::with_capacity(rows.len());
+    for e in &rows {
+        pb.extend_from_slice(&e.p.to_le_bytes());
+        for &c in &e.counts {
+            let c32 = u32::try_from(c).map_err(|_| PyValueError::new_err("count exceeds u32"))?;
+            cb.extend_from_slice(&c32.to_le_bytes());
+        }
+        fb.push(e.unsafe_split as u8);
+    }
+    std::fs::write(format!("{out_prefix}.primes.bin"), pb).map_err(werr)?;
+    std::fs::write(format!("{out_prefix}.counts.bin"), cb).map_err(werr)?;
+    std::fs::write(format!("{out_prefix}.flags.bin"), fb).map_err(werr)?;
+    Ok((
+        n,
+        stats.mass_by_weight,
+        stats.n_max_by_weight,
+        stats.entries_parsed,
+    ))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
@@ -342,6 +383,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rung_buckets_many, m)?)?;
     m.add_function(wrap_pyfunction!(certify_many, m)?)?;
     m.add_function(wrap_pyfunction!(norms_bad_set, m)?)?;
+    m.add_function(wrap_pyfunction!(badset_from_gpu_json, m)?)?;
     m.add_function(wrap_pyfunction!(norms_n_max, m)?)?;
     Ok(())
 }

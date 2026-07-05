@@ -84,9 +84,11 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-/// One Pollard-rho split of a composite `n` (Brent-style iteration with a
-/// deterministic parameter schedule; loops over parameters until a proper
-/// factor is found).
+/// One Pollard-rho split of a composite `n`, Brent's variant: powers-of-two
+/// cycle detection and gcds batched 128 iterations at a time (one gcd per
+/// batch instead of per step — the difference between microseconds and
+/// milliseconds on hard semiprimes, which dominate norm-table ingestion).
+/// Deterministic parameter schedule; loops until a proper factor is found.
 fn pollard_rho(n: u64) -> u64 {
     if n % 2 == 0 {
         return 2;
@@ -94,14 +96,37 @@ fn pollard_rho(n: u64) -> u64 {
     let mut c = 1u64;
     loop {
         let f = |x: u64| (mulmod(x, x, n) + c) % n;
-        let (mut x, mut y, mut d) = (2u64, 2u64, 1u64);
-        while d == 1 {
-            x = f(x);
-            y = f(f(y));
-            d = if x == y { n } else { gcd(x.abs_diff(y), n) };
+        let (mut y, mut r, mut q, mut g) = (2u64, 1u64, 1u64, 1u64);
+        let (mut x, mut ys) = (0u64, 0u64);
+        while g == 1 {
+            x = y;
+            for _ in 0..r {
+                y = f(y);
+            }
+            let mut k = 0;
+            while k < r && g == 1 {
+                ys = y;
+                let m = 128.min(r - k);
+                for _ in 0..m {
+                    y = f(y);
+                    q = mulmod(q, x.abs_diff(y), n);
+                }
+                g = gcd(q, n);
+                k += m;
+            }
+            r *= 2;
         }
-        if d != n {
-            return d;
+        if g == n {
+            // the batched product collapsed to 0 mod n: retrace this batch
+            // one step at a time with individual gcds
+            g = 1;
+            while g == 1 {
+                ys = f(ys);
+                g = gcd(x.abs_diff(ys), n);
+            }
+        }
+        if g != n {
+            return g;
         }
         c += 1;
     }

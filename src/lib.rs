@@ -22,6 +22,19 @@
 //! - [`census`]: kernel censuses — the arithmetic accidents that inflate
 //!   buckets, in dilation orbits, governed by the anticorrelation law
 //!   `N(v) <= (sum v_i^2)^{s/4}`.
+//! - [`norms`]: cyclotomic norms and complete *bad sets* — every prime any
+//!   bounded-weight accident can ever visit, by enumerating and factoring
+//!   norms; [`norms::ingest`] streams externally computed (GPU) norm tables
+//!   through the same pipeline at the billions-of-entries scale.
+//! - [`certify`]: tiered, `p`-independent structural certificates — prove
+//!   that no accident inflates any bucket at given parameters, or report the
+//!   exact inflated anatomy.
+//! - [`toy`]: exact soundness of the survey's Section-6 toy protocol via the
+//!   winning-set identity (winning challenges = occupied buckets).
+//! - [`attack`]: the parameter-space calculator — best attack radius over the
+//!   quantized ladder, the antipodal baseline, the structural ceiling, and
+//!   the Elias threshold. Deliberately float-domain and standalone; its exact
+//!   integer counterpart is [`code::m_struct`].
 //!
 //! ## Validation contract
 //!

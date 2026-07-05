@@ -6,6 +6,9 @@
 //!   vanish census  --p 89633 --s 32 [--cmax 2] [--wmax 6]
 //!   vanish decompose --p 77569 --s 32 --r 16 --lam 0
 //!   vanish sweep   --s 32 --r 16 --pmax 300000 [--csv]
+//!   vanish toy     --p 5767169 --s 16 --r 8
+//!   vanish certify --p 1568247649 --s 32 --r 16
+//!   vanish attack  --n 2097152 --k 1048576 --list-bits 57.93 [--base-bits 31]
 //!
 //! `sweep` prints, per prime `p = 1 mod s`, the exact max bucket, the
 //! conjecture ratio `max / (M_struct + C(s,r)/p)`, and the occupied-bucket
@@ -58,7 +61,9 @@ fn die(e: impl std::fmt::Display) -> ! {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some((cmd, rest)) = argv.split_first() else {
-        eprintln!("usage: vanish <info|bucket|rung|census|decompose|sweep> --flags ...");
+        eprintln!(
+            "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack> --flags ..."
+        );
         exit(2);
     };
     let m = parse_args(rest);
@@ -266,7 +271,9 @@ fn main() {
         }
         other => {
             eprintln!("unknown subcommand: {other}");
-            eprintln!("usage: vanish <info|bucket|rung|census|decompose|sweep|attack> --flags ...");
+            eprintln!(
+                "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack> --flags ..."
+            );
             exit(2);
         }
     }

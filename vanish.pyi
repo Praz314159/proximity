@@ -82,3 +82,11 @@ def norms_bad_set(s: int, wmax: int, cmax: int) -> List[Tuple[int, List[int], bo
 
 def norms_n_max(s: int, wmax: int, cmax: int) -> List[str]:
     """Per-weight maximum cyclotomic norms (decimal strings)."""
+
+def badset_from_gpu_json(
+    paths: List[str], s: int, wmax: int, out_prefix: str
+) -> Tuple[int, List[int], List[int], int]:
+    """Ingest GPU norm-table shards (JSON files or binary-dump prefixes) into a
+    bad set. Writes <out_prefix>.{primes,counts,flags}.bin and returns
+    (n_rows, mass_by_weight, n_max_by_weight, entries_parsed); mass_by_weight
+    must equal C(s/2, w) * 2^w when the shards are complete."""

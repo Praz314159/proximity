@@ -38,11 +38,15 @@ Bottom-up, each layer depending only on those below:
 
 | module | object | role |
 |---|---|---|
-| `field` | `F_p` scalars | mulmod/powmod, Miller–Rabin, generators, Pollard-rho factorization |
+| `field` | `F_p` scalars | mulmod/powmod, Montgomery Miller–Rabin, generators, Brent–Pollard-rho factorization |
 | `domain` | `Subgroup` | the validated core object: `mu_s`, cosets, dilation structure |
 | `code` | `ReedSolomon` | radii (capacity/Johnson), C.5 window, rung words, ladder values |
 | `buckets` | distributions & queries | `dp`: full distributions (cost ~ `p`); `mitm`: single buckets at any `q` and decompositions (**`p`-independent** — interrogate primes of any size) |
 | `census` | kernel vectors | direct (weight-capped, any `s`) and MitM (full, `s <= 32`) engines |
+| `norms` | bad sets | cyclotomic norms → complete per-prime accident inventories; `norms::ingest` streams GPU-computed norm tables (billions of entries) |
+| `certify` | certificates | tiered `p`-independent proofs that buckets are exactly structural (or their exact inflated anatomy) |
+| `toy` | protocol soundness | exact Section-6 toy-protocol soundness via the winning-set identity |
+| `attack` | thresholds | best attack radius over the quantized ladder, antipodal baseline, structural ceiling, Elias threshold (float-domain, standalone) |
 
 The cost split is the strategic point: use `dp` only when you need the max over
 *all* `lambda`; use the `p`-independent `mitm` engines to ask targeted
@@ -72,6 +76,9 @@ vanish bucket    --p 89633 --s 32 --r 16 --lam 0
 vanish decompose --p 77569 --s 32 --r 16 --lam 0
 vanish census    --p 89633 --s 32 --cmax 2
 vanish sweep     --s 32 --r 16 --pmax 300000 --csv > landscape.csv
+vanish toy       --p 5767169 --s 16 --r 8
+vanish certify   --p 1568247649 --s 32 --r 16
+vanish attack    --n 2097152 --k 1048576 --list-bits 57.93 --base-bits 31
 ```
 
 **Python** (`pip install maturin && maturin build --release --features python
@@ -104,10 +111,12 @@ parity on every push. The contract for new kernels is in
 
 ## Roadmap
 
-Tracked as GitHub issues: norms & bad-set enumeration, the spectrum module
-(character sums / dilated Gauss periods), toy-protocol winning-set tools,
-q=3 grid DP, CRT dual-residue counts for `s >= 128`, the `s = 64` MitM
-sort-join, Montgomery arithmetic, criterion benches.
+Tracked as GitHub issues: the spectrum module (character sums / dilated Gauss
+periods), q=3 grid DP, CRT dual-residue counts for `s >= 128`, the `s = 64`
+MitM sort-join, GPU-side smooth-part stripping for ingest, criterion benches.
+(Shipped since first planned: norms & bad-set enumeration, GPU norm-table
+ingestion, toy-protocol tools, Montgomery arithmetic, the attack calculator,
+structural certificates.)
 
 ## License
 

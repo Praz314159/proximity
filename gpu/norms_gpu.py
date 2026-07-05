@@ -34,6 +34,7 @@ extern "C" __global__ void norms(
     const unsigned int* pw1,  // [s] powers of order-s root mod q1
     const unsigned int* pw2,
     const int*  coefs,        // [ncoef] nonzero coefficient values
+    const unsigned long long inv,   // inverse of q1 mod q2 (hoisted)
     unsigned long long* out)  // [nsup * npat] exact norms (CRT-reconstructed)
 {
     long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -63,11 +64,6 @@ extern "C" __global__ void norms(
         prod1 = (prod1 * v1) % q1;
         prod2 = (prod2 * v2) % q2;
     }
-    // CRT: n = r1 + q1 * ((r2 - r1) * inv(q1) mod q2)  -- inv passed via pw2[s]? no:
-    // compute with precomputed inverse folded into pw2 tail is fragile; do it here:
-    // Fermat inverse of q1 mod q2 (q2 prime, 31-bit -> fast powmod)
-    unsigned long long inv = 1, base = q1 % q2, e = q2 - 2;
-    while (e) { if (e & 1) inv = (inv * base) % q2; base = (base * base) % q2; e >>= 1; }
     unsigned long long diff = (prod2 + q2 - prod1 % q2) % q2;
     out[tid] = prod1 + (unsigned long long)q1 * ((diff * inv) % q2);
 }
@@ -80,7 +76,7 @@ def split_prime(s, start):
         if vanish.is_prime(q):
             return q
 
-def run(s, wmax, cmax, out_path):
+def run(s, wmax, cmax, out_path, shard=0, nshard=1):
     half = s // 2
     bound_bits = (s / 4) * np.log2(cmax * cmax * wmax)
     assert bound_bits < 61.5, "norm exceeds two-31-bit-prime CRT range"
@@ -97,7 +93,10 @@ def run(s, wmax, cmax, out_path):
 
     table = defaultdict(lambda: defaultdict(int))   # norm -> {w: count}
     for w in range(1, wmax + 1):
-        sups = np.array(list(combinations(range(half), w)), dtype=np.int32)
+        sups = np.array(list(combinations(range(half), w))[shard::nshard],
+                        dtype=np.int32)
+        if len(sups) == 0:
+            continue
         npat = len(coefs) ** w
         # chunk supports so nsup*npat stays ~2^26 per launch
         chunk = max(1, (1 << 26) // npat)
@@ -110,7 +109,8 @@ def run(s, wmax, cmax, out_path):
             kern(((total + 255) // 256,), (256,),
                  (np.int32(s), np.int32(w), np.int32(len(coefs)),
                   np.int64(npat), np.int32(len(sub)), d_sup,
-                  np.uint32(q1), np.uint32(q2), d_pw1, d_pw2, d_coefs, d_out))
+                  np.uint32(q1), np.uint32(q2), d_pw1, d_pw2, d_coefs,
+                  np.uint64(pow(q1, q2 - 2, q2)), d_out))
             vals, counts = cp.unique(d_out, return_counts=True)
             for n, c in zip(vals.get(), counts.get()):
                 table[int(n)][w] += int(c)
@@ -142,7 +142,9 @@ if __name__ == "__main__":
     ap.add_argument("--w", type=int, default=10)
     ap.add_argument("--cmax", type=int, default=1)
     ap.add_argument("--out", default="norms_gpu.json")
+    ap.add_argument("--shard", type=int, default=0)
+    ap.add_argument("--nshard", type=int, default=1)
     a = ap.parse_args()
     if a.validate:
         raise SystemExit(0 if validate() else 1)
-    run(a.s, a.w, a.cmax, a.out)
+    run(a.s, a.w, a.cmax, a.out, a.shard, a.nshard)

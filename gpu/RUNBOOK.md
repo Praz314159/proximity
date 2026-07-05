@@ -29,6 +29,15 @@ cd .. && mkdir campaign && cd campaign
    ```bash
    python norms_gpu.py --s 64 --w 8  --out norms_s64_w8.json    # ~minutes
    python norms_gpu.py --s 64 --w 10 --out norms_s64_w10.json   # ~1-2 h
+   ```
+   Multi-GPU pod (e.g. 4x A100): one process per GPU, sharded by support —
+   same total cost, 4x the wall clock. Shards partition the work exactly;
+   merge by summing counts per norm (each vector lands in exactly one shard):
+   ```bash
+   for i in 0 1 2 3; do
+     CUDA_VISIBLE_DEVICES=$i python norms_gpu.py --s 64 --w 10 \
+       --shard $i --nshard 4 --out /workspace/w10_shard$i.json &
+   done; wait
    python norms_gpu.py --s 64 --w 12 --out norms_s64_w12.json   # ~day; optional
    ```
    Watch the per-weight progress lines; uniques should stay << vector count

@@ -183,7 +183,7 @@ pub fn badset_from_gpu_json(
             std::fs::read(path).map_err(|e| Error::Unsupported(format!("read {path}: {e}")))?;
         // collect entries in batches, factor in parallel
         let mut batch: Vec<(u64, Vec<u64>)> = Vec::with_capacity(1 << 20);
-        let mut flush = |batch: &mut Vec<(u64, Vec<u64>)>,
+        let flush = |batch: &mut Vec<(u64, Vec<u64>)>,
                          acc: &mut HashMap<u64, (Vec<u64>, bool)>| {
             let partial: Vec<HashMap<u64, (Vec<u64>, bool)>> = batch
                 .par_chunks(1.max(batch.len() / 128))

@@ -26,14 +26,17 @@ pub struct BucketDistribution {
 
 impl BucketDistribution {
     /// Bucket sizes indexed by `lambda in [0, p)`.
+    #[must_use]
     pub fn values(&self) -> &[u64] {
         &self.values
     }
     /// Consume the distribution, returning the raw bucket-size vector.
+    #[must_use]
     pub fn into_values(self) -> Vec<u64> {
         self.values
     }
     /// Largest bucket and its `lambda`.
+    #[must_use]
     pub fn max(&self) -> (u64, u64) {
         let (mut best, mut arg) = (0u64, 0usize);
         for (i, &v) in self.values.iter().enumerate() {
@@ -46,15 +49,18 @@ impl BucketDistribution {
     }
     /// Number of occupied buckets — for the canonical toy-protocol attack pair
     /// this is exactly `|Omega| = soundness * p` (winning-set identity).
+    #[must_use]
     pub fn occupied(&self) -> u64 {
         self.values.iter().filter(|&&v| v > 0).count() as u64
     }
     /// Total mass; equals `C(s, r)` (checked in the test suite).
+    #[must_use]
     pub fn total(&self) -> u64 {
         self.values.iter().sum()
     }
     /// Second moment `sum_lambda N(lambda)^2` (the L^2 / pair-collision count),
     /// as u128 to avoid overflow.
+    #[must_use]
     pub fn second_moment(&self) -> u128 {
         self.values.iter().map(|&v| (v as u128) * (v as u128)).sum()
     }

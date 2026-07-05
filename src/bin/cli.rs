@@ -110,7 +110,7 @@ fn main() {
             let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
             let counts = if let Some(w) = m.get("wmax") {
                 let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
-                vanish::census::direct(&sg, cmax as u64, wmax).unwrap_or_else(|e| die(e))
+                vanish::census::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
             } else {
                 vanish::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
             };

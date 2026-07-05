@@ -60,11 +60,13 @@ fn validate(p: &AttackParams) -> Result<()> {
 }
 
 /// Relative minimum distance `1 - (k - 1)/n` (capacity radius).
+#[must_use]
 pub fn capacity_radius(n: u64, k: u64) -> f64 {
     1.0 - (k as f64 - 1.0) / n as f64
 }
 
 /// Binary entropy `H2(x)` in bits.
+#[must_use]
 pub fn h2(x: f64) -> f64 {
     if x <= 0.0 || x >= 1.0 {
         return 0.0;

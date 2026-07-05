@@ -21,8 +21,8 @@ use rayon::prelude::*;
 
 /// `counts[w]` = number of nonzero kernel vectors of weight exactly `w`
 /// (`w <= wmax`), coefficients in `[-cmax, cmax] \ {0}` on the support.
-pub fn direct(sg: &Subgroup, cmax: u64, wmax: usize) -> Result<Vec<u64>> {
-    if cmax == 0 {
+pub fn direct(sg: &Subgroup, cmax: i64, wmax: usize) -> Result<Vec<u64>> {
+    if cmax < 1 {
         return Err(Error::OutOfRange("cmax must be >= 1".into()));
     }
     let p = sg.p();
@@ -31,7 +31,7 @@ pub fn direct(sg: &Subgroup, cmax: u64, wmax: usize) -> Result<Vec<u64>> {
         return Err(Error::OutOfRange("wmax exceeds s/2".into()));
     }
     let pows = sg.pow_table(half);
-    let coefs: Vec<i64> = (-(cmax as i64)..=cmax as i64).filter(|&c| c != 0).collect();
+    let coefs: Vec<i64> = (-cmax..=cmax).filter(|&c| c != 0).collect();
     let residues: Vec<Vec<u64>> = (0..half)
         .map(|i| {
             coefs

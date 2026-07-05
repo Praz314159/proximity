@@ -23,6 +23,7 @@ type Key = (u8, [u64; QCAP]);
 
 /// Precomputed half-subset tables for exact bucket queries at fixed
 /// `(subgroup, r, q)`.
+#[derive(Debug, Clone)]
 pub struct HalfTables {
     p: u64,
     s: usize,
@@ -139,6 +140,7 @@ impl HalfTables {
 
     /// The `e`-values corresponding to signed coefficients (exposed for
     /// round-tripping in tests).
+    #[must_use]
     pub fn signed_roundtrip(lam: &[u64], p: u64) -> Vec<u64> {
         let q = lam.len();
         signed_to_e(&e_to_signed(lam, p), q, p)

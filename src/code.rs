@@ -33,26 +33,32 @@ impl<'a> ReedSolomon<'a> {
     }
 
     /// The evaluation domain.
+    #[must_use]
     pub fn domain(&self) -> &Subgroup {
         self.domain
     }
     /// Code length `n = s`.
+    #[must_use]
     pub fn n(&self) -> usize {
         self.domain.order()
     }
     /// Message length `k`.
+    #[must_use]
     pub fn k(&self) -> usize {
         self.k
     }
     /// Rate `k / n`.
+    #[must_use]
     pub fn rate(&self) -> f64 {
         self.k as f64 / self.n() as f64
     }
     /// Relative minimum distance `1 - (k-1)/n` (the capacity radius).
+    #[must_use]
     pub fn capacity_radius(&self) -> f64 {
         1.0 - (self.k as f64 - 1.0) / self.n() as f64
     }
     /// Johnson radius `1 - sqrt(rate)`.
+    #[must_use]
     pub fn johnson_radius(&self) -> f64 {
         1.0 - self.rate().sqrt()
     }
@@ -60,6 +66,7 @@ impl<'a> ReedSolomon<'a> {
     /// Whether `(r, q)` satisfies the Lemma-C.5 window `(r - q - 1) < k <= r`
     /// at `m = 1`, i.e. the C.5-form word at these parameters certifies (and,
     /// by exactness, *equals*) the bucket list at radius `1 - r/n`.
+    #[must_use]
     pub fn in_c5_window(&self, r: usize, q: usize) -> bool {
         r >= self.k && self.k + q >= r && r < self.n()
     }
@@ -85,18 +92,22 @@ impl<'a> ReedSolomon<'a> {
     }
 }
 
+/// The rung level `t = ceil(log2(q + 1))`: the smallest `t` with
+/// `2^t - 1 >= q`. Pinning `q` symmetric functions buys exactly the level-`t`
+/// coset structure (the ladder's quantization).
+fn rung_level(q: usize) -> usize {
+    (q + 1).next_power_of_two().ilog2() as usize
+}
+
 /// The structural (characteristic-zero) maximum bucket size — the quantized
 /// ladder value
 /// `M_struct(s, r, q) = C(s/2^t - [r0 != 0], floor(r / 2^t))`,
 /// `t = ceil(log2(q + 1))`, `r0 = r mod 2^t`. Attained by the rung
 /// construction ([`rung_lambda`]) and matched (within one bit) by the ladder
 /// upper bound; exact against exhaustive enumeration at `s <= 32`.
+#[must_use]
 pub fn m_struct(s: usize, r: usize, q: usize) -> u64 {
-    let mut t = 0usize;
-    while (1usize << t) - 1 < q {
-        t += 1;
-    }
-    let block = 1usize << t;
+    let block = 1usize << rung_level(q);
     let (b, r0) = (r / block, r % block);
     let ncos = s / block;
     let avail = ncos - usize::from(r0 != 0);
@@ -109,6 +120,7 @@ pub fn m_struct(s: usize, r: usize, q: usize) -> u64 {
 /// Size of the structural class at weight `w`: the number of `r`-subsets whose
 /// `e_1`-representation has exactly `w` forced singles,
 /// `C(s/2 - w, (r - w)/2)` (zero when the parity or range is infeasible).
+#[must_use]
 pub fn class_size(s: usize, r: usize, w: usize) -> u64 {
     if w > r || (r - w) % 2 == 1 {
         return 0;
@@ -133,10 +145,7 @@ pub fn rung_lambda(sg: &Subgroup, r: usize, q: usize) -> Result<Vec<u64>> {
     if q == 0 || q >= r || r >= sg.order() {
         return Err(Error::OutOfRange("need 1 <= q < r < s".into()));
     }
-    let mut t = 0usize;
-    while (1usize << t) - 1 < q {
-        t += 1;
-    }
+    let t = rung_level(q);
     let block = 1usize << t;
     let (b, r0) = (r / block, r % block);
     let cosets = sg.cosets(t)?;
@@ -155,6 +164,7 @@ pub fn rung_lambda(sg: &Subgroup, r: usize, q: usize) -> Result<Vec<u64>> {
 
 /// The top-`q` elementary symmetric functions `e_1..e_q` of a set of field
 /// elements.
+#[must_use]
 pub fn top_elementary_symmetric(els: &[u64], q: usize, p: u64) -> Vec<u64> {
     let mut e = vec![0u64; q + 1];
     e[0] = 1;

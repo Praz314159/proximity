@@ -27,6 +27,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// Unique norm values with per-weight vector counts.
+#[derive(Debug, Clone)]
 pub struct NormTable {
     /// Subgroup order the table was built for.
     pub s: usize,
@@ -40,6 +41,7 @@ pub struct NormTable {
 
 impl NormTable {
     /// Largest norm at each weight (the anticorrelation profile).
+    #[must_use]
     pub fn n_max_by_weight(&self) -> Vec<u128> {
         let mut out = vec![0u128; self.wmax + 1];
         for (&n, counts) in &self.entries {

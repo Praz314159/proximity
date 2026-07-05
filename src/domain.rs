@@ -54,33 +54,39 @@ impl Subgroup {
     }
 
     /// The field characteristic.
+    #[must_use]
     pub fn p(&self) -> u64 {
         self.p
     }
 
     /// The subgroup order.
+    #[must_use]
     pub fn order(&self) -> usize {
         self.s
     }
 
     /// The canonical order-`s` element `w`.
+    #[must_use]
     pub fn w(&self) -> u64 {
         self.w
     }
 
     /// Elements as consecutive powers `[w^0, ..., w^{s-1}]`.
+    #[must_use]
     pub fn elements(&self) -> &[u64] {
         &self.elements
     }
 
     /// Whether `s` is a power of two (the SNARK-relevant smooth case; required
     /// by the ladder/rung machinery and the negation-pairing arguments).
+    #[must_use]
     pub fn is_two_smooth(&self) -> bool {
         self.s.is_power_of_two()
     }
 
     /// Powers `[w^0, ..., w^{len-1}]` — the half-basis table (`len = s/2`) used
     /// by censuses and decompositions.
+    #[must_use]
     pub fn pow_table(&self, len: usize) -> Vec<u64> {
         let mut t = Vec::with_capacity(len);
         let mut x = 1u64;

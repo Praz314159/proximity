@@ -42,6 +42,7 @@ fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyA
 /// Kernel census, weight-capped: `out[w]` counts nonzero vectors with coefficients in `[-cmax, cmax]` and weight w <= wmax such that `sum v_i w^i = 0 (mod p)`.
 #[pyfunction]
 fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> PyResult<Vec<u64>> {
+    let cmax = i64::try_from(cmax).map_err(|_| PyValueError::new_err("cmax too large"))?;
     err(census::direct(&sub(p, s)?, cmax, wmax))
 }
 

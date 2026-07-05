@@ -4,13 +4,20 @@
 //! Everything here is scalar and allocation-free; the analysis kernels build on
 //! these primitives. Values are plain `u64` residues in `[0, p)`.
 
+/// The deterministic Miller–Rabin witness set for `n < 2^64` (Sinclair);
+/// shared by the small-prime trial screen and both strong-probable-prime
+/// loops.
+const MR_WITNESSES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+
 /// `(a * b) mod p` without overflow, via a `u128` intermediate.
 #[inline]
+#[must_use]
 pub fn mulmod(a: u64, b: u64, p: u64) -> u64 {
     ((a as u128 * b as u128) % p as u128) as u64
 }
 
 /// `b^e mod p` by square-and-multiply.
+#[must_use]
 pub fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
     let mut acc: u64 = 1 % p;
     b %= p;
@@ -84,11 +91,12 @@ impl Montgomery {
 }
 
 /// Deterministic Miller–Rabin, valid for all `n < 2^64`.
+#[must_use]
 pub fn is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
     }
-    for q in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+    for q in MR_WITNESSES {
         if n % q == 0 {
             return n == q;
         }
@@ -105,7 +113,7 @@ pub fn is_prime(n: u64) -> bool {
         d /= 2;
         t += 1;
     }
-    'outer: for a in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+    'outer: for a in MR_WITNESSES {
         // Montgomery-form modexp a^d
         let mut base = mt.to_mont(a);
         let mut x = one;
@@ -140,7 +148,7 @@ fn is_prime_generic(n: u64) -> bool {
         d /= 2;
         t += 1;
     }
-    'outer: for a in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+    'outer: for a in MR_WITNESSES {
         let mut x = powmod(a, d, n);
         if x == 1 || x == n - 1 {
             continue;
@@ -159,6 +167,7 @@ fn is_prime_generic(n: u64) -> bool {
 /// Distinct prime factors by trial division. Suitable for the `p - 1` values
 /// that arise when constructing subgroups; for large cyclotomic norms use
 /// [`factor`], which falls back to Pollard rho.
+#[must_use]
 pub fn distinct_prime_factors(mut n: u64) -> Vec<u64> {
     let mut out = Vec::new();
     let mut d = 2u64;
@@ -248,6 +257,7 @@ fn pollard_rho(n: u64) -> u64 {
 /// Full prime factorization (with multiplicity), trial division to 31 then
 /// Pollard rho. Handles the cyclotomic-norm magnitudes (≲ 2^63) that arise in
 /// bad-set enumeration.
+#[must_use]
 pub fn factor(mut n: u64) -> Vec<u64> {
     let mut out = Vec::new();
     for d in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] {
@@ -275,6 +285,7 @@ pub fn factor(mut n: u64) -> Vec<u64> {
 
 /// Smallest generator of `F_p^*` (matches the reference Python implementation,
 /// so generator-dependent artifacts are reproducible across the two stacks).
+#[must_use]
 pub fn find_generator(p: u64) -> u64 {
     let fac = distinct_prime_factors(p - 1);
     (2..p)
@@ -283,6 +294,7 @@ pub fn find_generator(p: u64) -> u64 {
 }
 
 /// Binomial coefficient as exact `u64` (panics on overflow past `u64`).
+#[must_use]
 pub fn binom(n: u64, k: u64) -> u64 {
     if k > n {
         return 0;

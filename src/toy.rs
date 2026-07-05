@@ -29,6 +29,7 @@ pub struct ToySoundness {
 
 /// Number of nonempty structural `e_1`-classes for `r`-subsets of `mu_s`
 /// (`s` a power of two): `sum_w C(s/2, w) 2^w` over feasible weights.
+#[must_use]
 pub fn classes_count(s: usize, r: usize) -> u64 {
     let half = (s / 2) as u64;
     let mut tot = 0u64;

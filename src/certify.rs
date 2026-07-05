@@ -50,7 +50,7 @@ pub enum Verdict {
 }
 
 /// A certificate for the `q = 1` bucket landscape at `(p, s, r)`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Certificate {
     /// The verdict (see [`Verdict`]).
     pub verdict: Verdict,

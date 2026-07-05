@@ -136,6 +136,9 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
         .collect();
     let coefs: Vec<i64> = (-cmax..=cmax).filter(|&c| c != 0).collect();
     let ncoef = coefs.len();
+    // hoisted CRT inverse for the two-prime path
+    let crt_inv = (tables.len() == 2)
+        .then(|| powmod(tables[0].0 % tables[1].0, tables[1].0 - 2, tables[1].0));
 
     let mut entries: HashMap<u128, Vec<u64>> = HashMap::new();
     for w in 1..=wmax {
@@ -159,14 +162,22 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                         for (ti, (q, pw)) in tables.iter().enumerate() {
                             let mut prod: u64 = 1;
                             for k in (1..s).step_by(2) {
-                                let mut v: u64 = 0;
+                                // Lazy accumulation: terms |c|*pw < 2^64 and at
+                                // most 32 of them fit a u128 sum, so the mod
+                                // drops from per-term to per-embedding. The
+                                // exponent mask is valid because s is a power
+                                // of two (validated at entry).
+                                let mut acc: u128 = 0;
                                 for i in 0..w {
-                                    let e = (sup[i] as usize * k) % s;
+                                    let e = (sup[i] as usize * k) & (s - 1);
                                     let c = cvec[i];
-                                    let cc = if c >= 0 { c as u64 } else { q - ((-c) as u64) };
-                                    v = (v + mulmod(cc, pw[e], *q)) % q;
+                                    acc += if c >= 0 {
+                                        (c as u128) * (pw[e] as u128)
+                                    } else {
+                                        ((-c) as u128) * ((q - pw[e]) as u128)
+                                    };
                                 }
-                                prod = mulmod(prod, v, *q);
+                                prod = mulmod(prod, (acc % (*q as u128)) as u64, *q);
                             }
                             residues[ti] = prod;
                         }
@@ -175,7 +186,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                         } else {
                             // CRT for two primes
                             let (q1, q2) = (tables[0].0, tables[1].0);
-                            let inv = powmod(q1 % q2, q2 - 2, q2);
+                            let inv = crt_inv.unwrap();
                             let diff = (residues[1] + q2 - residues[0] % q2) % q2;
                             residues[0] as u128 + (q1 as u128) * (mulmod(diff, inv, q2) as u128)
                         };

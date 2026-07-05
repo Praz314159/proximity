@@ -49,20 +49,21 @@ extern "C" __global__ void norms(
         pos[i]  = sup[si * w + i];
     }
     unsigned long long prod1 = 1, prod2 = 1;
+    // Lazy accumulation: |c| <= 4, pw < 2^31, w <= 16 -> sums < 2^37, so the
+    // per-term %q disappears (one reduction per embedding, ~8x fewer mods).
+    // Exponent mask is valid because s is a power of two.
     for (int k = 1; k < s; k += 2) {
-        unsigned long long v1 = 0, v2 = 0;
+        unsigned long long a1 = 0, a2 = 0;
         for (int i = 0; i < w; i++) {
-            int e = (pos[i] * k) % s;
+            int e = (pos[i] * k) & (s - 1);
             long long c = cvec[i];
-            unsigned long long c1 = c >= 0 ? (unsigned long long)c
-                                           : q1 - (unsigned long long)(-c);
-            unsigned long long c2 = c >= 0 ? (unsigned long long)c
-                                           : q2 - (unsigned long long)(-c);
-            v1 = (v1 + c1 * pw1[e]) % q1;
-            v2 = (v2 + c2 * pw2[e]) % q2;
+            unsigned long long m = c >= 0 ? (unsigned long long)c
+                                          : (unsigned long long)(-c);
+            a1 += m * (c >= 0 ? pw1[e] : q1 - pw1[e]);
+            a2 += m * (c >= 0 ? pw2[e] : q2 - pw2[e]);
         }
-        prod1 = (prod1 * v1) % q1;
-        prod2 = (prod2 * v2) % q2;
+        prod1 = (prod1 * (a1 % q1)) % q1;
+        prod2 = (prod2 * (a2 % q2)) % q2;
     }
     unsigned long long diff = (prod2 + q2 - prod1 % q2) % q2;
     out[tid] = prod1 + (unsigned long long)q1 * ((diff * inv) % q2);

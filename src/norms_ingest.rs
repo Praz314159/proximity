@@ -250,7 +250,9 @@ pub fn badset_from_gpu_json(
     wmax: usize,
 ) -> Result<(Vec<IngestEntry>, IngestStats)> {
     if wmax >= MAXW {
-        return Err(Error::OutOfRange("wmax >= 16 unsupported by inline counts".into()));
+        return Err(Error::OutOfRange(
+            "wmax >= 16 unsupported by inline counts".into(),
+        ));
     }
     if !s.is_power_of_two() || s < 4 {
         return Err(Error::Unsupported("power-of-two s >= 4 required".into()));

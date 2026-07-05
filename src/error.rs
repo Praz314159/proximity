@@ -20,9 +20,23 @@ pub enum Error {
     #[error("parameter out of range: {0}")]
     OutOfRange(String),
     /// The operation is not supported at these parameters (e.g. an engine's
-    /// size limit); the message names the requirement.
+    /// size limit); the message names the requirement. Never used for I/O or
+    /// input syntax — see [`Error::Io`] and [`Error::MalformedInput`].
     #[error("operation requires {0}")]
     Unsupported(String),
+    /// An ingest input file could not be read.
+    #[error("reading {path}: {source}")]
+    Io {
+        /// The path that failed.
+        path: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// An ingest input (GPU JSON shard or binary dump) is malformed; the
+    /// message locates the defect (byte offset for JSON).
+    #[error("malformed ingest input: {0}")]
+    MalformedInput(String),
 }
 
 /// Convenience alias used across the crate.

@@ -68,8 +68,8 @@ impl<'a> Scanner<'a> {
             self.pos += 1;
             Ok(())
         } else {
-            Err(Error::Unsupported(format!(
-                "JSON parse: expected '{}' at byte {}",
+            Err(Error::MalformedInput(format!(
+                "JSON: expected '{}' at byte {}",
                 c as char, self.pos
             )))
         }
@@ -90,7 +90,7 @@ impl<'a> Scanner<'a> {
             v = v
                 .checked_mul(10)
                 .and_then(|x| x.checked_add((self.buf[self.pos] - b'0') as u64))
-                .ok_or_else(|| Error::Unsupported("norm exceeds u64".into()))?;
+                .ok_or_else(|| Error::MalformedInput("norm exceeds u64".into()))?;
             self.pos += 1;
         }
         self.expect(b'"')?;
@@ -106,8 +106,8 @@ impl<'a> Scanner<'a> {
             self.pos += 1;
         }
         if self.pos == start {
-            return Err(Error::Unsupported(format!(
-                "JSON parse: expected number at byte {}",
+            return Err(Error::MalformedInput(format!(
+                "JSON: expected number at byte {}",
                 self.pos
             )));
         }
@@ -173,12 +173,13 @@ fn parse_bin_weight(
     wmax: usize,
     mut sink: impl FnMut(u64, &[u64]),
 ) -> Result<u64> {
-    let nb = std::fs::read(format!("{prefix}.w{w}.norms.bin"))
-        .map_err(|e| Error::Unsupported(format!("read {prefix}.w{w}.norms.bin: {e}")))?;
-    let cb = std::fs::read(format!("{prefix}.w{w}.counts.bin"))
-        .map_err(|e| Error::Unsupported(format!("read {prefix}.w{w}.counts.bin: {e}")))?;
+    let read = |path: String| std::fs::read(&path).map_err(|source| Error::Io { path, source });
+    let nb = read(format!("{prefix}.w{w}.norms.bin"))?;
+    let cb = read(format!("{prefix}.w{w}.counts.bin"))?;
     if nb.len() != cb.len() || nb.len() % 8 != 0 {
-        return Err(Error::Unsupported("bin length mismatch".into()));
+        return Err(Error::MalformedInput(format!(
+            "{prefix}.w{w}: norms/counts length mismatch or not 8-byte aligned"
+        )));
     }
     let mut counts = vec![0u64; wmax + 1];
     let n = nb.len() / 8;
@@ -289,8 +290,10 @@ pub fn badset_from_gpu_json(
             flush_batch(&mut batch, &mut acc, s, wmax);
             continue;
         }
-        let buf =
-            std::fs::read(path).map_err(|e| Error::Unsupported(format!("read {path}: {e}")))?;
+        let buf = std::fs::read(path).map_err(|source| Error::Io {
+            path: path.clone(),
+            source,
+        })?;
         // collect entries in batches, factor in parallel
         let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(1 << 20);
 
@@ -415,6 +418,14 @@ mod tests {
                 assert!(a.unsafe_split);
             }
         }
+    }
+
+    /// Missing input files surface as [`crate::Error::Io`], not as an
+    /// engine-limit error.
+    #[test]
+    fn missing_file_is_io_error() {
+        let r = badset_from_gpu_json(&["/nonexistent/vanish_test.json".into()], 16, 8);
+        assert!(matches!(r, Err(crate::Error::Io { .. })));
     }
 
     fn binom(n: u64, k: usize) -> u64 {

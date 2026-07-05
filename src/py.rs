@@ -283,7 +283,9 @@ fn certify_many(
     .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
-/// A bad-set row: (p, per-weight Galois-normalized counts, census_fallback).
+/// A bad-set row: (p, per-weight Galois-normalized counts, census_fallback);
+/// the bool is reconstructed from the row's provenance at this boundary so
+/// the Python tuple shape stays frozen.
 type BadRow = (u64, Vec<u64>, bool);
 
 /// Complete bad set for weights <= wmax, coefficients in [-cmax, cmax]:
@@ -294,7 +296,10 @@ fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<V
     py.allow_threads(|| crate::norms::bad_set(s, wmax, cmax))
         .map(|v| {
             v.into_iter()
-                .map(|e| (e.p, e.counts, e.census_fallback))
+                .map(|e| {
+                    let cf = e.provenance == crate::norms::Provenance::CensusCorrected;
+                    (e.p, e.counts, cf)
+                })
                 .collect()
         })
         .map_err(|e| PyValueError::new_err(e.to_string()))
@@ -337,7 +342,7 @@ fn badset_from_gpu_json(
             let c32 = u32::try_from(c).map_err(|_| PyValueError::new_err("count exceeds u32"))?;
             cb.extend_from_slice(&c32.to_le_bytes());
         }
-        fb.push(e.unsafe_split as u8);
+        fb.push(u8::from(!e.provenance.is_exact()));
     }
     std::fs::write(format!("{out_prefix}.primes.bin"), pb).map_err(werr)?;
     std::fs::write(format!("{out_prefix}.counts.bin"), cb).map_err(werr)?;

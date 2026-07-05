@@ -14,8 +14,8 @@
 //! census fallback is not yet feasible, and the flags mark exactly the
 //! rows a downstream analysis must treat as approximate.
 
+use super::{for_each_bad_prime, BadSetEntry, Provenance};
 use crate::error::{Error, Result};
-use crate::field::factor;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -24,18 +24,6 @@ use std::collections::HashMap;
 /// allocation dominated the w=12 ingest wall time).
 pub(crate) const MAXW: usize = 16;
 type Counts = [u64; MAXW];
-
-/// Accumulated bad-set row (pre-normalization counts are valuation-weighted).
-#[derive(Debug, Clone)]
-pub struct IngestEntry {
-    /// The prime.
-    pub p: u64,
-    /// Galois-normalized per-weight kernel-vector counts (index = weight).
-    pub counts: Vec<u64>,
-    /// True when the equal-split normalization is unsafe for this prime
-    /// (some norm divisible by p^2, or a non-divisible valuation sum).
-    pub unsafe_split: bool,
-}
 
 /// Global invariants returned alongside the bad set, for validation.
 #[derive(Debug, Clone)]
@@ -203,28 +191,15 @@ fn flush_batch(
         .map(|chunk| {
             let mut local: HashMap<u64, (Counts, bool)> = HashMap::new();
             for (n, counts) in chunk {
-                if *n <= 1 {
-                    continue;
-                }
-                let fs = factor(*n);
-                let mut i = 0;
-                while i < fs.len() {
-                    let p = fs[i];
-                    let mut e = 0u64;
-                    while i < fs.len() && fs[i] == p {
-                        e += 1;
-                        i += 1;
+                for_each_bad_prime(*n, s as u64, |p, e| {
+                    let entry = local.entry(p).or_insert(([0; MAXW], false));
+                    for (w, &c) in counts.iter().enumerate() {
+                        entry.0[w] += e * c;
                     }
-                    if p > s as u64 && (p - 1) % s as u64 == 0 {
-                        let entry = local.entry(p).or_insert(([0; MAXW], false));
-                        for (w, &c) in counts.iter().enumerate() {
-                            entry.0[w] += e * c;
-                        }
-                        if e >= 2 {
-                            entry.1 = true;
-                        }
+                    if e >= 2 {
+                        entry.1 = true;
                     }
-                }
+                });
             }
             local
         })
@@ -249,7 +224,7 @@ pub fn badset_from_gpu_json(
     paths: &[String],
     s: usize,
     wmax: usize,
-) -> Result<(Vec<IngestEntry>, IngestStats)> {
+) -> Result<(Vec<BadSetEntry>, IngestStats)> {
     if wmax >= MAXW {
         return Err(Error::OutOfRange(
             "wmax >= 16 unsupported by inline counts".into(),
@@ -310,7 +285,7 @@ pub fn badset_from_gpu_json(
         })?;
         flush_batch(&mut batch, &mut acc, s, wmax);
     }
-    let mut out: Vec<IngestEntry> = acc
+    let mut out: Vec<BadSetEntry> = acc
         .into_iter()
         .map(|(p, (val_counts, mut flag))| {
             let counts: Vec<u64> = val_counts[..=wmax]
@@ -322,10 +297,16 @@ pub fn badset_from_gpu_json(
                     v / half
                 })
                 .collect();
-            IngestEntry {
+            BadSetEntry {
                 p,
                 counts,
-                unsafe_split: flag,
+                // no census fallback exists at ingest scale: unsafe splits
+                // are flagged, never corrected
+                provenance: if flag {
+                    Provenance::UnsafeSplit
+                } else {
+                    Provenance::ValuationSplit
+                },
             }
         })
         .collect();
@@ -375,11 +356,16 @@ mod tests {
         assert_eq!(rows.len(), reference.len(), "same prime set");
         for (a, b) in rows.iter().zip(reference.iter()) {
             assert_eq!(a.p, b.p);
-            if !b.census_fallback {
+            if b.provenance != Provenance::CensusCorrected {
                 assert_eq!(a.counts, b.counts, "counts at p={}", a.p);
-                assert!(!a.unsafe_split);
+                assert_eq!(a.provenance, Provenance::ValuationSplit);
             } else {
-                assert!(a.unsafe_split, "p={} must be flagged", a.p);
+                assert_eq!(
+                    a.provenance,
+                    Provenance::UnsafeSplit,
+                    "p={} must be flagged",
+                    a.p
+                );
             }
         }
     }
@@ -412,10 +398,10 @@ mod tests {
         assert_eq!(rows.len(), reference.len());
         for (a, b) in rows.iter().zip(reference.iter()) {
             assert_eq!(a.p, b.p);
-            if !b.census_fallback {
+            if b.provenance != Provenance::CensusCorrected {
                 assert_eq!(a.counts, b.counts, "counts at p={}", a.p);
             } else {
-                assert!(a.unsafe_split);
+                assert_eq!(a.provenance, Provenance::UnsafeSplit);
             }
         }
     }

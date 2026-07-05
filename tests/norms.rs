@@ -51,7 +51,7 @@ fn badset_spot_pins_s32() {
     // p = 89633 carries exactly one weight-6 orbit (32 vectors)
     let e = bs.iter().find(|e| e.p == 89633).unwrap();
     assert_eq!(e.counts[6], 32);
-    assert!(!e.census_fallback);
+    assert_eq!(e.provenance, vanish::norms::Provenance::ValuationSplit);
     // predicted zero bucket from the weight<=6 slice already matches ground
     // truth at 89633 (its higher-weight counts contribute nothing even):
     let sg = Subgroup::new(89633, 32).unwrap();
@@ -70,7 +70,11 @@ fn census_fallback_triggers_at_small_primes() {
     drop(bs);
     let bs = bad_set(16, 8, 1).unwrap();
     let e = bs.iter().find(|e| e.p == 17).unwrap();
-    assert!(e.census_fallback, "p^2 fallback must trigger at p = 17");
+    assert_eq!(
+        e.provenance,
+        vanish::norms::Provenance::CensusCorrected,
+        "p^2 fallback must trigger at p = 17"
+    );
     let pred: u64 = class_size(16, 8, 0)
         + e.counts
             .iter()

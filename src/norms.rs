@@ -57,16 +57,62 @@ impl NormTable {
     }
 }
 
-/// One bad-set row.
-#[derive(Debug, Clone)]
+/// How a bad-set row's per-weight counts were obtained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The equal valuation split was safe (no `p^2 | N(v)`): counts are exact
+    /// from the norm table alone.
+    ValuationSplit,
+    /// The split was unsafe and the counts were replaced by a direct census
+    /// ([`crate::census::mitm`]): exact, by construction.
+    CensusCorrected,
+    /// The split was unsafe and no census was feasible: counts are
+    /// approximate and must be treated as such downstream.
+    UnsafeSplit,
+}
+
+impl Provenance {
+    /// Whether the counts are exact (split-safe or census-corrected).
+    #[must_use]
+    pub fn is_exact(self) -> bool {
+        !matches!(self, Provenance::UnsafeSplit)
+    }
+}
+
+/// One bad-set row: a prime `p = 1 mod s` with Galois-normalized per-weight
+/// kernel-vector counts (index = weight).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadSetEntry {
     /// The prime.
     pub p: u64,
-    /// Galois-normalized per-weight kernel-vector counts (index = weight).
+    /// Per-weight counts.
     pub counts: Vec<u64>,
-    /// True when counts came from a direct census (the `p^2`-divisibility
-    /// fallback) rather than valuation splitting.
-    pub census_fallback: bool,
+    /// How the counts were obtained.
+    pub provenance: Provenance,
+}
+
+/// Factor `n`, group prime multiplicities, and hand each *bad* prime —
+/// `p > s`, `p = 1 (mod s)` — with its valuation `e` to the sink. No-op for
+/// `n <= 1`. The single accumulation skeleton shared by [`bad_set`] and the
+/// GPU-table ingest ([`ingest`]); the two pipelines must factor identically
+/// for their equivalence tests to be meaningful.
+pub(crate) fn for_each_bad_prime(n: u64, s: u64, mut sink: impl FnMut(u64, u64)) {
+    if n <= 1 {
+        return;
+    }
+    let fs = factor(n);
+    let mut i = 0;
+    while i < fs.len() {
+        let p = fs[i];
+        let mut e = 0u64;
+        while i < fs.len() && fs[i] == p {
+            e += 1;
+            i += 1;
+        }
+        if p > s && (p - 1) % s == 0 {
+            sink(p, e);
+        }
+    }
 }
 
 fn crt_primes(s: usize, bound_bits: u32) -> Result<Vec<u64>> {
@@ -220,25 +266,15 @@ pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
         let n64 = u64::try_from(n).map_err(|_| {
             Error::Unsupported("factoring norms above 2^64 not yet supported".into())
         })?;
-        let fs = factor(n64);
-        let mut i = 0;
-        while i < fs.len() {
-            let p = fs[i];
-            let mut e = 0u64;
-            while i < fs.len() && fs[i] == p {
-                e += 1;
-                i += 1;
+        for_each_bad_prime(n64, s as u64, |p, e| {
+            let entry = raw.entry(p).or_insert_with(|| (vec![0; wmax + 1], false));
+            for (w, &c) in counts.iter().enumerate() {
+                entry.0[w] += e * c;
             }
-            if p > s as u64 && (p - 1) % s as u64 == 0 {
-                let entry = raw.entry(p).or_insert_with(|| (vec![0; wmax + 1], false));
-                for (w, &c) in counts.iter().enumerate() {
-                    entry.0[w] += e * c;
-                }
-                if e >= 2 {
-                    entry.1 = true; // p^2 divides a norm: valuation split unsafe
-                }
+            if e >= 2 {
+                entry.1 = true; // p^2 divides a norm: valuation split unsafe
             }
-        }
+        });
     }
     let mut out: Vec<BadSetEntry> = raw
         .into_par_iter()
@@ -254,14 +290,20 @@ pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
                 BadSetEntry {
                     p,
                     counts,
-                    census_fallback: true,
+                    provenance: Provenance::CensusCorrected,
                 }
             } else {
                 let counts = val_counts.iter().map(|&v| v / half).collect();
                 BadSetEntry {
                     p,
                     counts,
-                    census_fallback: false,
+                    // pp at s > 32: the split is unsafe and no census is
+                    // feasible -- honest flagging of the latent state
+                    provenance: if pp {
+                        Provenance::UnsafeSplit
+                    } else {
+                        Provenance::ValuationSplit
+                    },
                 }
             }
         })

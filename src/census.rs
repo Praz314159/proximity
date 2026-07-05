@@ -105,10 +105,46 @@ pub fn direct(sg: &Subgroup, cmax: i64, wmax: usize) -> Result<Vec<u64>> {
         ))
 }
 
+/// Half-side kernel table: enumerate every coefficient vector with entries in
+/// `[-cmax, cmax]` over pow-table slots `[from, to)`, mapping each residue to
+/// the weights of the vectors achieving it. Shared by the MitM census and the
+/// bucket-decomposition engine — the decomposition law requires the two to
+/// agree, so they must enumerate identically.
+pub(crate) fn kernel_side(
+    pows: &[u64],
+    p: u64,
+    cmax: i64,
+    from: usize,
+    to: usize,
+) -> std::collections::HashMap<u64, Vec<u8>> {
+    let mut map: std::collections::HashMap<u64, Vec<u8>> = std::collections::HashMap::new();
+    let n = to - from;
+    let base = (2 * cmax + 1) as u64;
+    for code in 0..base.pow(n as u32) {
+        let mut c = code;
+        let mut acc: u64 = 0;
+        let mut w: u8 = 0;
+        for i in 0..n {
+            let digit = (c % base) as i64 - cmax;
+            c /= base;
+            if digit != 0 {
+                w += 1;
+                let cc = if digit >= 0 {
+                    digit as u64 % p
+                } else {
+                    p - ((-digit) as u64 % p)
+                };
+                acc = (acc + (cc as u128 * pows[from + i] as u128 % p as u128) as u64) % p;
+            }
+        }
+        map.entry(acc).or_default().push(w);
+    }
+    map
+}
+
 /// Full census by weight via meet-in-the-middle over coordinate halves.
 /// Requires `s <= 32` at `cmax = 2` (`(2c+1)^{s/4}` table entries).
 pub fn mitm(sg: &Subgroup, cmax: i64) -> Result<Vec<u64>> {
-    use std::collections::HashMap;
     let s = sg.order();
     if s > 32 || s % 4 != 0 {
         return Err(Error::Unsupported(
@@ -121,33 +157,8 @@ pub fn mitm(sg: &Subgroup, cmax: i64) -> Result<Vec<u64>> {
     let p = sg.p();
     let half = s / 2;
     let pows = sg.pow_table(half);
-    let side = |from: usize, to: usize| -> HashMap<u64, Vec<u8>> {
-        let mut map: HashMap<u64, Vec<u8>> = HashMap::new();
-        let n = to - from;
-        let base = (2 * cmax + 1) as u64;
-        for code in 0..base.pow(n as u32) {
-            let mut c = code;
-            let mut acc: u64 = 0;
-            let mut w: u8 = 0;
-            for i in 0..n {
-                let digit = (c % base) as i64 - cmax;
-                c /= base;
-                if digit != 0 {
-                    w += 1;
-                    let cc = if digit >= 0 {
-                        digit as u64 % p
-                    } else {
-                        p - ((-digit) as u64 % p)
-                    };
-                    acc = (acc + (cc as u128 * pows[from + i] as u128 % p as u128) as u64) % p;
-                }
-            }
-            map.entry(acc).or_default().push(w);
-        }
-        map
-    };
-    let a = side(0, half / 2);
-    let b = side(half / 2, half);
+    let a = kernel_side(&pows, p, cmax, 0, half / 2);
+    let b = kernel_side(&pows, p, cmax, half / 2, half);
     let mut counts = vec![0u64; half + 1];
     for (val, wsb) in &b {
         let need = (p - val % p) % p;

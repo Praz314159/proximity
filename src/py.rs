@@ -153,16 +153,9 @@ fn certify_q1(p: u64, s: usize, r: usize) -> PyResult<(u8, u64, u64)> {
 /// experiment script was rewriting locally.
 #[pyfunction]
 fn primes_1_mod(s: u64, lo: u64, hi: u64) -> Vec<u64> {
-    let mut p = lo.max(s + 1);
-    p += (1 + s - p % s) % s;
-    let mut out = Vec::new();
-    while p < hi {
-        if field::is_prime(p) {
-            out.push(p);
-        }
-        p += s;
-    }
-    out
+    field::primes_one_mod(s, lo)
+        .take_while(|&p| p < hi)
+        .collect()
 }
 
 /// Structural class size C(s/2 - w, (r - w)/2) (0 when parity/range infeasible).

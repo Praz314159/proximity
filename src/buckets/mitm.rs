@@ -162,28 +162,8 @@ pub fn decompose_bucket_q1(sg: &Subgroup, r: usize, lam: u64) -> Result<(u64, Ve
     let half = s / 2;
     let pows = sg.pow_table(half);
     let hh = half / 2;
-    let side = |from: usize, to: usize| -> HashMap<u64, Vec<u8>> {
-        let mut map: HashMap<u64, Vec<u8>> = HashMap::new();
-        let n = to - from;
-        for code in 0..3u64.pow(n as u32) {
-            let mut c = code;
-            let mut acc = 0u64;
-            let mut wt = 0u8;
-            for i in 0..n {
-                let d = (c % 3) as i64 - 1;
-                c /= 3;
-                if d != 0 {
-                    wt += 1;
-                    let cc = if d > 0 { 1u64 } else { p - 1 };
-                    acc = (acc + (cc as u128 * pows[from + i] as u128 % p as u128) as u64) % p;
-                }
-            }
-            map.entry(acc).or_default().push(wt);
-        }
-        map
-    };
-    let a = side(0, hh);
-    let b = side(hh, half);
+    let a = crate::census::kernel_side(&pows, p, 1, 0, hh);
+    let b = crate::census::kernel_side(&pows, p, 1, hh, half);
     let mut per_weight = vec![0u64; half + 1];
     let mut total = 0u64;
     for (val, wsb) in &b {

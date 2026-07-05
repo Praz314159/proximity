@@ -283,6 +283,16 @@ pub fn factor(mut n: u64) -> Vec<u64> {
     out
 }
 
+/// Primes `p = 1 (mod s)` with `p > s`, ascending from the first aligned
+/// candidate at or after `lo`. Unbounded — combine with `take` or
+/// `take_while`. The sweep-population helper shared by the CLI, the Python
+/// bindings, and the CRT-prime hunt.
+pub fn primes_one_mod(s: u64, lo: u64) -> impl Iterator<Item = u64> {
+    let mut p = lo.max(s + 1);
+    p += (1 + s - p % s) % s;
+    std::iter::successors(Some(p), move |&q| Some(q + s)).filter(|&q| is_prime(q))
+}
+
 /// Smallest generator of `F_p^*` (matches the reference Python implementation,
 /// so generator-dependent artifacts are reproducible across the two stacks).
 #[must_use]

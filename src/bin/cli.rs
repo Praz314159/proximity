@@ -17,7 +17,7 @@ use std::process::exit;
 use vanish::buckets::{dp, mitm};
 use vanish::code::{m_struct, rung_lambda};
 use vanish::domain::Subgroup;
-use vanish::field::{binom, is_prime};
+use vanish::field::binom;
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -138,9 +138,8 @@ fn main() {
             let csv = m.contains_key("csv");
             let m0 = m_struct(s, r, 1) as f64;
             let cs = binom(s as u64, r as u64) as f64;
-            let primes: Vec<u64> = (s as u64 + 1..pmax)
-                .step_by(s)
-                .filter(|&p| is_prime(p))
+            let primes: Vec<u64> = vanish::field::primes_one_mod(s as u64, 0)
+                .take_while(|&p| p < pmax)
                 .collect();
             let mut rows: Vec<(f64, u64, u64, u64)> = primes
                 .par_iter()

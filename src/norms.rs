@@ -22,7 +22,7 @@
 use crate::census;
 use crate::domain::Subgroup;
 use crate::error::{Error, Result};
-use crate::field::{factor, is_prime, mulmod, powmod};
+use crate::field::{factor, mulmod, powmod, primes_one_mod};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -74,16 +74,7 @@ fn crt_primes(s: usize, bound_bits: u32) -> Result<Vec<u64>> {
             "norms beyond ~2^120 not supported (raise via wider CRT)".into(),
         ));
     }
-    let mut out = Vec::new();
-    let mut q = (1u64 << 61) + 1;
-    q += (1 + s as u64 - q % s as u64) % s as u64;
-    while out.len() < n_primes {
-        if is_prime(q) {
-            out.push(q);
-        }
-        q += s as u64;
-    }
-    Ok(out)
+    Ok(primes_one_mod(s as u64, 1 << 61).take(n_primes).collect())
 }
 
 fn combinations(n: usize, k: usize) -> Vec<Vec<u8>> {

@@ -159,6 +159,83 @@ fn parse_shard(buf: &[u8], wmax: usize, mut sink: impl FnMut(u64, &[u64])) -> Re
     Ok(n_entries)
 }
 
+/// Read one binary weight dump pair (`<prefix>.w<w>.norms.bin` u64-le +
+/// `.counts.bin` u64-le), invoking `sink` per (norm, counts_by_weight).
+fn parse_bin_weight(
+    prefix: &str,
+    w: usize,
+    wmax: usize,
+    mut sink: impl FnMut(u64, &[u64]),
+) -> Result<u64> {
+    let nb = std::fs::read(format!("{prefix}.w{w}.norms.bin"))
+        .map_err(|e| Error::Unsupported(format!("read {prefix}.w{w}.norms.bin: {e}")))?;
+    let cb = std::fs::read(format!("{prefix}.w{w}.counts.bin"))
+        .map_err(|e| Error::Unsupported(format!("read {prefix}.w{w}.counts.bin: {e}")))?;
+    if nb.len() != cb.len() || nb.len() % 8 != 0 {
+        return Err(Error::Unsupported("bin length mismatch".into()));
+    }
+    let mut counts = vec![0u64; wmax + 1];
+    let n = nb.len() / 8;
+    for i in 0..n {
+        let norm = u64::from_le_bytes(nb[8 * i..8 * i + 8].try_into().unwrap());
+        let c = u64::from_le_bytes(cb[8 * i..8 * i + 8].try_into().unwrap());
+        counts[w] = c;
+        sink(norm, &counts);
+    }
+    Ok(n as u64)
+}
+
+fn flush_batch(
+    batch: &mut Vec<(u64, Vec<u64>)>,
+    acc: &mut HashMap<u64, (Vec<u64>, bool)>,
+    s: usize,
+    _wmax: usize,
+) {
+    let partial: Vec<HashMap<u64, (Vec<u64>, bool)>> = batch
+        .par_chunks(1.max(batch.len() / 128))
+        .map(|chunk| {
+            let mut local: HashMap<u64, (Vec<u64>, bool)> = HashMap::new();
+            for (n, counts) in chunk {
+                if *n <= 1 {
+                    continue;
+                }
+                let fs = factor(*n);
+                let mut i = 0;
+                while i < fs.len() {
+                    let p = fs[i];
+                    let mut e = 0u64;
+                    while i < fs.len() && fs[i] == p {
+                        e += 1;
+                        i += 1;
+                    }
+                    if p > s as u64 && (p - 1) % s as u64 == 0 {
+                        let entry = local
+                            .entry(p)
+                            .or_insert_with(|| (vec![0; counts.len()], false));
+                        for (w, &c) in counts.iter().enumerate() {
+                            entry.0[w] += e * c;
+                        }
+                        if e >= 2 {
+                            entry.1 = true;
+                        }
+                    }
+                }
+            }
+            local
+        })
+        .collect();
+    for m in partial {
+        for (p, (cs, flag)) in m {
+            let entry = acc.entry(p).or_insert_with(|| (vec![0; cs.len()], false));
+            for (w, c) in cs.iter().enumerate() {
+                entry.0[w] += c;
+            }
+            entry.1 |= flag;
+        }
+    }
+    batch.clear();
+}
+
 /// Ingest GPU-campaign shard files into a bad set.
 ///
 /// Streams each file, factors every norm in parallel, keeps primes
@@ -179,56 +256,33 @@ pub fn badset_from_gpu_json(
         entries_parsed: 0,
     };
     for path in paths {
+        if !path.ends_with(".json") {
+            // binary prefix: ingest every existing per-weight dump
+            let mut batch: Vec<(u64, Vec<u64>)> = Vec::with_capacity(1 << 20);
+            for w in 1..=wmax {
+                if !std::path::Path::new(&format!("{path}.w{w}.norms.bin")).exists() {
+                    continue;
+                }
+                stats.entries_parsed += parse_bin_weight(path, w, wmax, |n, counts| {
+                    for (wi, &c) in counts.iter().enumerate() {
+                        if c > 0 {
+                            stats.mass_by_weight[wi] += c;
+                            if n > stats.n_max_by_weight[wi] {
+                                stats.n_max_by_weight[wi] = n;
+                            }
+                        }
+                    }
+                    batch.push((n, counts.to_vec()));
+                })?;
+            }
+            flush_batch(&mut batch, &mut acc, s, wmax);
+            continue;
+        }
         let buf =
             std::fs::read(path).map_err(|e| Error::Unsupported(format!("read {path}: {e}")))?;
         // collect entries in batches, factor in parallel
         let mut batch: Vec<(u64, Vec<u64>)> = Vec::with_capacity(1 << 20);
-        let flush = |batch: &mut Vec<(u64, Vec<u64>)>,
-                         acc: &mut HashMap<u64, (Vec<u64>, bool)>| {
-            let partial: Vec<HashMap<u64, (Vec<u64>, bool)>> = batch
-                .par_chunks(1.max(batch.len() / 128))
-                .map(|chunk| {
-                    let mut local: HashMap<u64, (Vec<u64>, bool)> = HashMap::new();
-                    for (n, counts) in chunk {
-                        if *n <= 1 {
-                            continue;
-                        }
-                        let fs = factor(*n);
-                        let mut i = 0;
-                        while i < fs.len() {
-                            let p = fs[i];
-                            let mut e = 0u64;
-                            while i < fs.len() && fs[i] == p {
-                                e += 1;
-                                i += 1;
-                            }
-                            if p > s as u64 && (p - 1) % s as u64 == 0 {
-                                let entry = local
-                                    .entry(p)
-                                    .or_insert_with(|| (vec![0; counts.len()], false));
-                                for (w, &c) in counts.iter().enumerate() {
-                                    entry.0[w] += e * c;
-                                }
-                                if e >= 2 {
-                                    entry.1 = true;
-                                }
-                            }
-                        }
-                    }
-                    local
-                })
-                .collect();
-            for m in partial {
-                for (p, (cs, flag)) in m {
-                    let entry = acc.entry(p).or_insert_with(|| (vec![0; cs.len()], false));
-                    for (w, c) in cs.iter().enumerate() {
-                        entry.0[w] += c;
-                    }
-                    entry.1 |= flag;
-                }
-            }
-            batch.clear();
-        };
+
         stats.entries_parsed += parse_shard(&buf, wmax, |n, counts| {
             for (w, &c) in counts.iter().enumerate() {
                 stats.mass_by_weight[w] += c;
@@ -238,7 +292,7 @@ pub fn badset_from_gpu_json(
             }
             batch.push((n, counts.to_vec()));
         })?;
-        flush(&mut batch, &mut acc);
+        flush_batch(&mut batch, &mut acc, s, wmax);
     }
     let mut out: Vec<IngestEntry> = acc
         .into_iter()
@@ -310,6 +364,42 @@ mod tests {
                 assert!(!a.unsafe_split);
             } else {
                 assert!(a.unsafe_split, "p={} must be flagged", a.p);
+            }
+        }
+    }
+
+    /// The binary-dump ingest path must produce the identical bad set.
+    #[test]
+    fn ingest_bin_matches_bad_set_s16() {
+        let t = norm_table(16, 8, 1).unwrap();
+        let dir = std::env::temp_dir();
+        let prefix = dir.join("vanish_ingest_bin_test");
+        let prefix = prefix.to_str().unwrap();
+        // group entries per weight, dump as (norms, counts) u64-le pairs
+        for w in 1..=8usize {
+            let mut nb: Vec<u8> = Vec::new();
+            let mut cb: Vec<u8> = Vec::new();
+            for (&n, counts) in &t.entries {
+                if counts[w] > 0 {
+                    nb.extend_from_slice(&(u64::try_from(n).unwrap()).to_le_bytes());
+                    cb.extend_from_slice(&counts[w].to_le_bytes());
+                }
+            }
+            std::fs::write(format!("{prefix}.w{w}.norms.bin"), nb).unwrap();
+            std::fs::write(format!("{prefix}.w{w}.counts.bin"), cb).unwrap();
+        }
+        let (rows, stats) = badset_from_gpu_json(&[prefix.to_string()], 16, 8).unwrap();
+        for w in 1..=8usize {
+            assert_eq!(stats.mass_by_weight[w], binom(8, w) * (1u64 << w));
+        }
+        let reference = bad_set(16, 8, 1).unwrap();
+        assert_eq!(rows.len(), reference.len());
+        for (a, b) in rows.iter().zip(reference.iter()) {
+            assert_eq!(a.p, b.p);
+            if !b.census_fallback {
+                assert_eq!(a.counts, b.counts, "counts at p={}", a.p);
+            } else {
+                assert!(a.unsafe_split);
             }
         }
     }

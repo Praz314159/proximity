@@ -123,12 +123,21 @@ def run(s, wmax, cmax, out_path, shard=0, nshard=1):
             acc_v, inv = cp.unique(allv, return_inverse=True)
             acc_c = cp.bincount(inv, weights=allc)
             done += total
-        for n, c in zip(acc_v.get(), acc_c.get()):
-            table[int(n)][w] += int(c)
+        if out_path.endswith(".json"):
+            # small runs / --validate: in-memory table, JSON at the end
+            for n, c in zip(acc_v.get(), acc_c.get()):
+                table[int(n)][w] += int(c)
+        else:
+            # campaign runs: binary per-weight dumps -- no Python dict, no
+            # JSON (a w=12 shard is ~516M uniques; the dict path cost ~300GB
+            # RAM and OOM'd 3 of 4 shards)
+            acc_v.get().tofile(f"{out_path}.w{w}.norms.bin")
+            acc_c.get().astype(np.uint64).tofile(f"{out_path}.w{w}.counts.bin")
         print(f"w={w}: {done:,} vectors, {len(table):,} uniques so far, "
               f"{time.time()-t0:.1f}s", flush=True)
-    with open(out_path, "w") as f:
-        json.dump({str(n): dict(ws) for n, ws in table.items()}, f)
+    if out_path.endswith(".json"):
+        with open(out_path, "w") as f:
+            json.dump({str(n): dict(ws) for n, ws in table.items()}, f)
     return table
 
 def validate():

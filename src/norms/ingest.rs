@@ -216,14 +216,154 @@ fn flush_batch(
     batch.clear();
 }
 
+/// Checkpoint state: the accumulator plus everything needed to resume.
+struct Checkpoint {
+    acc: HashMap<u64, (Counts, bool)>,
+    stats: IngestStats,
+    done_paths: Vec<String>,
+}
+
+fn ckpt_names(prefix: &str) -> (String, String) {
+    (format!("{prefix}.ckpt.bin"), format!("{prefix}.ckpt.meta"))
+}
+
+/// Atomically persist the accumulator after a completed shard. A failure
+/// here is an early disk-space canary: it fires at shard granularity
+/// instead of after the final hour of factoring.
+fn save_checkpoint(
+    prefix: &str,
+    acc: &HashMap<u64, (Counts, bool)>,
+    stats: &IngestStats,
+    done_paths: &[String],
+    wmax: usize,
+) -> Result<()> {
+    let (bin, meta) = ckpt_names(prefix);
+    let werr = |path: &str| {
+        let path = path.to_string();
+        move |source: std::io::Error| Error::Io { path, source }
+    };
+    let row = 8 + (wmax + 1) * 8 + 1;
+    let mut buf = Vec::with_capacity(acc.len() * row);
+    for (&p, (counts, flag)) in acc {
+        buf.extend_from_slice(&p.to_le_bytes());
+        for &c in &counts[..=wmax] {
+            buf.extend_from_slice(&c.to_le_bytes());
+        }
+        buf.push(u8::from(*flag));
+    }
+    let tmp = format!("{bin}.tmp");
+    std::fs::write(&tmp, &buf).map_err(werr(&tmp))?;
+    std::fs::rename(&tmp, &bin).map_err(werr(&bin))?;
+    let mut m = format!(
+        "wmax {}\nentries {}\nmass {}\nnmax {}\n",
+        wmax,
+        stats.entries_parsed,
+        stats
+            .mass_by_weight
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        stats
+            .n_max_by_weight
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    for p in done_paths {
+        m.push_str("done ");
+        m.push_str(p);
+        m.push('\n');
+    }
+    let tmpm = format!("{meta}.tmp");
+    std::fs::write(&tmpm, m).map_err(werr(&tmpm))?;
+    std::fs::rename(&tmpm, &meta).map_err(werr(&meta))?;
+    Ok(())
+}
+
+fn load_checkpoint(prefix: &str, wmax: usize) -> Option<Checkpoint> {
+    let (bin, meta) = ckpt_names(prefix);
+    let m = std::fs::read_to_string(&meta).ok()?;
+    let buf = std::fs::read(&bin).ok()?;
+    let mut stats = IngestStats {
+        mass_by_weight: vec![0; wmax + 1],
+        n_max_by_weight: vec![0; wmax + 1],
+        entries_parsed: 0,
+    };
+    let mut done_paths = Vec::new();
+    let mut ck_wmax = usize::MAX;
+    for line in m.lines() {
+        let (key, val) = line.split_once(' ')?;
+        match key {
+            "wmax" => ck_wmax = val.parse().ok()?,
+            "entries" => stats.entries_parsed = val.parse().ok()?,
+            "mass" => {
+                stats.mass_by_weight = val
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<std::result::Result<_, _>>()
+                    .ok()?
+            }
+            "nmax" => {
+                stats.n_max_by_weight = val
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<std::result::Result<_, _>>()
+                    .ok()?
+            }
+            "done" => done_paths.push(val.to_string()),
+            _ => return None,
+        }
+    }
+    if ck_wmax != wmax || stats.mass_by_weight.len() != wmax + 1 {
+        return None;
+    }
+    let row = 8 + (wmax + 1) * 8 + 1;
+    if buf.len() % row != 0 {
+        return None;
+    }
+    let mut acc = HashMap::with_capacity(buf.len() / row);
+    for chunk in buf.chunks_exact(row) {
+        let p = u64::from_le_bytes(chunk[..8].try_into().unwrap());
+        let mut counts = [0u64; MAXW];
+        for (w, c) in counts.iter_mut().enumerate().take(wmax + 1) {
+            let off = 8 + w * 8;
+            *c = u64::from_le_bytes(chunk[off..off + 8].try_into().unwrap());
+        }
+        let flag = *chunk.last().unwrap() != 0;
+        acc.insert(p, (counts, flag));
+    }
+    Some(Checkpoint {
+        acc,
+        stats,
+        done_paths,
+    })
+}
+
+/// Delete a run's checkpoint files. Call after the caller has durably
+/// written its outputs; until then the checkpoint is the crash-recovery
+/// state for the whole factoring run.
+pub fn clear_checkpoint(prefix: &str) {
+    let (bin, meta) = ckpt_names(prefix);
+    let _ = std::fs::remove_file(bin);
+    let _ = std::fs::remove_file(meta);
+}
+
 /// Ingest GPU-campaign shard files into a bad set.
 ///
 /// Streams each file, factors every norm in parallel, keeps primes
 /// `p = 1 mod s`, `p > s`, and Galois-normalizes valuation-weighted counts.
+///
+/// With `ckpt_prefix` set, the accumulator is persisted after every
+/// completed shard and a matching checkpoint on disk resumes the run,
+/// re-factoring at most one shard. The checkpoint survives this function —
+/// call [`clear_checkpoint`] once downstream outputs are safely written.
 pub fn badset_from_gpu_json(
     paths: &[String],
     s: usize,
     wmax: usize,
+    ckpt_prefix: Option<&str>,
 ) -> Result<(Vec<BadSetEntry>, IngestStats)> {
     if wmax >= MAXW {
         return Err(Error::OutOfRange(
@@ -240,11 +380,31 @@ pub fn badset_from_gpu_json(
         n_max_by_weight: vec![0; wmax + 1],
         entries_parsed: 0,
     };
+    let mut done_paths: Vec<String> = Vec::new();
+    if let Some(prefix) = ckpt_prefix {
+        if let Some(ck) = load_checkpoint(prefix, wmax) {
+            if ck.done_paths.iter().all(|p| paths.contains(p)) {
+                eprintln!(
+                    "[ingest] resuming from checkpoint: {} primes, {} shard(s) done",
+                    ck.acc.len(),
+                    ck.done_paths.len()
+                );
+                acc = ck.acc;
+                stats = ck.stats;
+                done_paths = ck.done_paths;
+            } else {
+                eprintln!("[ingest] checkpoint does not match requested paths; starting fresh");
+            }
+        }
+    }
     // Incremental flushing caps the batch at ~1M entries (a whole-shard batch
     // costs tens of GB at w = 12) and provides progress heartbeats on stderr.
     const FLUSH_AT: usize = 1 << 20;
     let mut done: u64 = 0;
     for path in paths {
+        if done_paths.contains(path) {
+            continue;
+        }
         if !path.ends_with(".json") {
             // binary prefix: ingest every existing per-weight dump
             let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(FLUSH_AT);
@@ -279,6 +439,14 @@ pub fn badset_from_gpu_json(
                 "[ingest] {path}: done ({done} entries, {} primes)",
                 acc.len()
             );
+            if let Some(prefix) = ckpt_prefix {
+                done_paths.push(path.clone());
+                save_checkpoint(prefix, &acc, &stats, &done_paths, wmax)?;
+                eprintln!(
+                    "[ingest] checkpoint saved ({} shards done)",
+                    done_paths.len()
+                );
+            }
             continue;
         }
         let buf = std::fs::read(path).map_err(|source| Error::Io {
@@ -310,6 +478,14 @@ pub fn badset_from_gpu_json(
             "[ingest] {path}: done ({done} entries, {} primes)",
             acc.len()
         );
+        if let Some(prefix) = ckpt_prefix {
+            done_paths.push(path.clone());
+            save_checkpoint(prefix, &acc, &stats, &done_paths, wmax)?;
+            eprintln!(
+                "[ingest] checkpoint saved ({} shards done)",
+                done_paths.len()
+            );
+        }
     }
     let mut out: Vec<BadSetEntry> = acc
         .into_iter()
@@ -372,7 +548,8 @@ mod tests {
         js.push('}');
         let tmp = std::env::temp_dir().join("vanish_ingest_test.json");
         std::fs::write(&tmp, js).unwrap();
-        let (rows, stats) = badset_from_gpu_json(&[tmp.to_str().unwrap().into()], 16, 8).unwrap();
+        let (rows, stats) =
+            badset_from_gpu_json(&[tmp.to_str().unwrap().into()], 16, 8, None).unwrap();
         // mass invariant: sum_w counts = C(8,w) * 2^w
         for w in 1..=8usize {
             let expect = binom(8, w) * (1u64 << w);
@@ -416,7 +593,7 @@ mod tests {
             std::fs::write(format!("{prefix}.w{w}.norms.bin"), nb).unwrap();
             std::fs::write(format!("{prefix}.w{w}.counts.bin"), cb).unwrap();
         }
-        let (rows, stats) = badset_from_gpu_json(&[prefix.to_string()], 16, 8).unwrap();
+        let (rows, stats) = badset_from_gpu_json(&[prefix.to_string()], 16, 8, None).unwrap();
         for w in 1..=8usize {
             assert_eq!(stats.mass_by_weight[w], binom(8, w) * (1u64 << w));
         }
@@ -432,11 +609,66 @@ mod tests {
         }
     }
 
+    /// A checkpointed run interrupted between shards must resume to results
+    /// identical to an uninterrupted run.
+    #[test]
+    fn checkpoint_resume_roundtrip() {
+        let t = norm_table(16, 8, 1).unwrap();
+        let entries: Vec<_> = t.entries.iter().collect();
+        let dir = std::env::temp_dir();
+        // split the table into two JSON "shards"
+        let mut paths = Vec::new();
+        for (i, half) in entries.chunks(entries.len().div_ceil(2)).enumerate() {
+            let mut js = String::from("{");
+            for (j, (n, counts)) in half.iter().enumerate() {
+                if j > 0 {
+                    js.push(',');
+                }
+                js.push_str(&format!("\"{n}\": {{"));
+                let mut first = true;
+                for (w, &c) in counts.iter().enumerate() {
+                    if c > 0 {
+                        if !first {
+                            js.push(',');
+                        }
+                        js.push_str(&format!("\"{w}\": {c}"));
+                        first = false;
+                    }
+                }
+                js.push('}');
+            }
+            js.push('}');
+            let p = dir.join(format!("vanish_ckpt_shard{i}.json"));
+            std::fs::write(&p, js).unwrap();
+            paths.push(p.to_str().unwrap().to_string());
+        }
+        let prefix = dir.join("vanish_ckpt_test");
+        let prefix = prefix.to_str().unwrap();
+        clear_checkpoint(prefix);
+
+        // reference: uninterrupted run, no checkpointing
+        let (ref_rows, ref_stats) = badset_from_gpu_json(&paths, 16, 8, None).unwrap();
+        // interrupted run: shard 0 only, checkpoint persists...
+        let _ = badset_from_gpu_json(&paths[..1], 16, 8, Some(prefix)).unwrap();
+        assert!(
+            load_checkpoint(prefix, 8).is_some(),
+            "checkpoint must exist"
+        );
+        // ...then the full path list resumes from it
+        let (rows, stats) = badset_from_gpu_json(&paths, 16, 8, Some(prefix)).unwrap();
+        assert_eq!(rows, ref_rows, "resumed rows differ from uninterrupted run");
+        assert_eq!(stats.mass_by_weight, ref_stats.mass_by_weight);
+        assert_eq!(stats.n_max_by_weight, ref_stats.n_max_by_weight);
+        assert_eq!(stats.entries_parsed, ref_stats.entries_parsed);
+        clear_checkpoint(prefix);
+        assert!(load_checkpoint(prefix, 8).is_none(), "checkpoint cleared");
+    }
+
     /// Missing input files surface as [`crate::Error::Io`], not as an
     /// engine-limit error.
     #[test]
     fn missing_file_is_io_error() {
-        let r = badset_from_gpu_json(&["/nonexistent/vanish_test.json".into()], 16, 8);
+        let r = badset_from_gpu_json(&["/nonexistent/vanish_test.json".into()], 16, 8, None);
         assert!(matches!(r, Err(crate::Error::Io { .. })));
     }
 

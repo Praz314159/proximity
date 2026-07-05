@@ -331,7 +331,9 @@ fn badset_from_gpu_json(
     out_prefix: String,
 ) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64)> {
     let (rows, stats) = py
-        .allow_threads(|| crate::norms::ingest::badset_from_gpu_json(&paths, s, wmax))
+        .allow_threads(|| {
+            crate::norms::ingest::badset_from_gpu_json(&paths, s, wmax, Some(&out_prefix))
+        })
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let n = rows.len() as u64;
     let werr = |e: std::io::Error| PyValueError::new_err(e.to_string());
@@ -348,6 +350,8 @@ fn badset_from_gpu_json(
     std::fs::write(format!("{out_prefix}.primes.bin"), pb).map_err(werr)?;
     std::fs::write(format!("{out_prefix}.counts.bin"), cb).map_err(werr)?;
     std::fs::write(format!("{out_prefix}.flags.bin"), fb).map_err(werr)?;
+    // outputs are durable: the crash-recovery checkpoint has served its purpose
+    crate::norms::ingest::clear_checkpoint(&out_prefix);
     Ok((
         n,
         stats.mass_by_weight,

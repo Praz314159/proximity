@@ -87,6 +87,9 @@ def badset_from_gpu_json(
     paths: List[str], s: int, wmax: int, out_prefix: str
 ) -> Tuple[int, List[int], List[int], int]:
     """Ingest GPU norm-table shards (JSON files or binary-dump prefixes) into a
-    bad set. Writes <out_prefix>.{primes,counts,flags}.bin and returns
-    (n_rows, mass_by_weight, n_max_by_weight, entries_parsed); mass_by_weight
-    must equal C(s/2, w) * 2^w when the shards are complete."""
+    bad set. Writes <out_prefix>.{primes,counts,flags}.bin (all counts u64 le)
+    and returns (n_rows, mass_by_weight, n_max_by_weight, entries_parsed);
+    mass_by_weight must equal C(s/2, w) * 2^w when the shards are complete.
+    Crash-safe: the accumulator checkpoints to <out_prefix>.ckpt.* after every
+    completed shard, a rerun resumes from it automatically (re-factoring at
+    most one shard), and the checkpoint is removed once outputs are written."""

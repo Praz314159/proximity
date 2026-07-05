@@ -77,7 +77,7 @@ def split_prime(s, start):
         if vanish.is_prime(q):
             return q
 
-def run(s, wmax, cmax, out_path, shard=0, nshard=1):
+def run(s, wmax, cmax, out_path, shard=0, nshard=1, wmin=1):
     half = s // 2
     bound_bits = (s / 4) * np.log2(cmax * cmax * wmax)
     assert bound_bits < 61.5, "norm exceeds two-31-bit-prime CRT range"
@@ -93,7 +93,7 @@ def run(s, wmax, cmax, out_path, shard=0, nshard=1):
     d_coefs = cp.asarray(coefs)
 
     table = defaultdict(lambda: defaultdict(int))   # norm -> {w: count}
-    for w in range(1, wmax + 1):
+    for w in range(wmin, wmax + 1):
         sups = np.array(list(combinations(range(half), w))[shard::nshard],
                         dtype=np.int32)
         if len(sups) == 0:
@@ -163,7 +163,9 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="norms_gpu.json")
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--nshard", type=int, default=1)
+    ap.add_argument("--wmin", type=int, default=1,
+                    help="resume: skip weights below this (their .bin dumps already exist)")
     a = ap.parse_args()
     if a.validate:
         raise SystemExit(0 if validate() else 1)
-    run(a.s, a.w, a.cmax, a.out, a.shard, a.nshard)
+    run(a.s, a.w, a.cmax, a.out, a.shard, a.nshard, a.wmin)

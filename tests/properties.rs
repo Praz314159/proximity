@@ -120,3 +120,57 @@ fn error_paths() {
     assert!(s6.cosets(1).is_err());
     assert!(vanish::code::rung_lambda(&s6, 3, 1).is_err());
 }
+
+/// Independent oracle: naive trial division. Slow but indisputable; the
+/// primality tests below must never certify themselves.
+fn trial_division_is_prime(n: u64) -> bool {
+    if n < 2 {
+        return false;
+    }
+    let mut d = 2u64;
+    while d.saturating_mul(d) <= n {
+        if n % d == 0 {
+            return false;
+        }
+        d += 1;
+    }
+    true
+}
+
+#[test]
+fn is_prime_matches_trial_division_exhaustively() {
+    for n in 0..100_000u64 {
+        assert_eq!(
+            vanish::field::is_prime(n),
+            trial_division_is_prime(n),
+            "is_prime disagrees with trial division at n = {n}"
+        );
+    }
+}
+
+#[test]
+fn factor_recovers_hard_semiprimes() {
+    // The ingest's cost center: products of two large primes. Ground truth
+    // is constructed non-circularly -- candidate primes near 2^30 are
+    // verified by trial division HERE, then multiplied; factor() must
+    // return exactly that multiset. Neither factor() nor is_prime()
+    // certifies its own test data.
+    let mut primes = Vec::new();
+    let mut c = 1_073_741_827u64; // just above 2^30
+    while primes.len() < 6 {
+        if trial_division_is_prime(c) {
+            primes.push(c);
+        }
+        c += 2;
+    }
+    for (i, &p) in primes.iter().enumerate() {
+        for &q in &primes[i..] {
+            let n = p * q; // ~2^60, within the factor() contract
+            let mut fs = vanish::field::factor(n);
+            fs.sort_unstable();
+            let mut expect = vec![p, q];
+            expect.sort_unstable();
+            assert_eq!(fs, expect, "factor({n}) != {{{p}, {q}}}");
+        }
+    }
+}

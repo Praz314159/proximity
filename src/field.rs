@@ -24,6 +24,65 @@ pub fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
     acc
 }
 
+/// Montgomery-form arithmetic for a fixed odd modulus `n < 2^63`.
+///
+/// Replaces the `u128` division inside [`mulmod`] with two multiplications
+/// and a shift (REDC). The payoff is in loops that stay in Montgomery form
+/// across many multiplications — Miller–Rabin exponentiation and the rho
+/// walk — where the per-step division was the measured cost center of
+/// norm-table ingestion.
+struct Montgomery {
+    n: u64,
+    /// `-n^{-1} mod 2^64`.
+    ninv: u64,
+    /// `2^128 mod n` (converts into Montgomery form via one `mul`).
+    r2: u64,
+}
+
+impl Montgomery {
+    fn new(n: u64) -> Self {
+        debug_assert!(n & 1 == 1 && n < (1 << 63));
+        // Newton iteration for n^{-1} mod 2^64: each step doubles the
+        // number of correct low bits; 6 steps from the 5-bit seed `n`.
+        let mut inv = n;
+        for _ in 0..6 {
+            inv = inv.wrapping_mul(2u64.wrapping_sub(n.wrapping_mul(inv)));
+        }
+        let r = ((1u128 << 64) % n as u128) as u64;
+        Montgomery {
+            n,
+            ninv: inv.wrapping_neg(),
+            r2: mulmod(r, r, n),
+        }
+    }
+    /// REDC: for `t < n * 2^64`, returns `t * 2^{-64} mod n`.
+    #[inline]
+    fn redc(&self, t: u128) -> u64 {
+        let m = (t as u64).wrapping_mul(self.ninv);
+        let s = ((t + m as u128 * self.n as u128) >> 64) as u64;
+        if s >= self.n {
+            s - self.n
+        } else {
+            s
+        }
+    }
+    /// Product of two Montgomery-form values, in Montgomery form.
+    #[inline]
+    fn mul(&self, a: u64, b: u64) -> u64 {
+        self.redc(a as u128 * b as u128)
+    }
+    /// Convert `x < n` into Montgomery form (`x * 2^64 mod n`).
+    #[inline]
+    fn to_mont(&self, x: u64) -> u64 {
+        self.mul(x, self.r2)
+    }
+    /// `1` in Montgomery form (`2^64 mod n`).
+    #[inline]
+    fn one(&self) -> u64 {
+        self.redc(self.r2 as u128)
+    }
+}
+
 /// Deterministic Miller–Rabin, valid for all `n < 2^64`.
 pub fn is_prime(n: u64) -> bool {
     if n < 2 {
@@ -34,6 +93,47 @@ pub fn is_prime(n: u64) -> bool {
             return n == q;
         }
     }
+    if n >= (1 << 63) {
+        return is_prime_generic(n);
+    }
+    let mt = Montgomery::new(n);
+    let one = mt.one();
+    let minus_one = n - one;
+    let mut d = n - 1;
+    let mut t = 0u32;
+    while d % 2 == 0 {
+        d /= 2;
+        t += 1;
+    }
+    'outer: for a in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        // Montgomery-form modexp a^d
+        let mut base = mt.to_mont(a);
+        let mut x = one;
+        let mut e = d;
+        while e > 0 {
+            if e & 1 == 1 {
+                x = mt.mul(x, base);
+            }
+            base = mt.mul(base, base);
+            e >>= 1;
+        }
+        if x == one || x == minus_one {
+            continue;
+        }
+        for _ in 0..t - 1 {
+            x = mt.mul(x, x);
+            if x == minus_one {
+                continue 'outer;
+            }
+        }
+        return false;
+    }
+    true
+}
+
+/// Fallback Miller–Rabin via [`powmod`] for `n >= 2^63`, where the REDC
+/// carry bound does not hold. Same witness set, same determinism.
+fn is_prime_generic(n: u64) -> bool {
     let mut d = n - 1;
     let mut t = 0u32;
     while d % 2 == 0 {
@@ -93,10 +193,23 @@ fn pollard_rho(n: u64) -> u64 {
     if n % 2 == 0 {
         return 2;
     }
+    let mt = Montgomery::new(n);
     let mut c = 1u64;
     loop {
-        let f = |x: u64| (mulmod(x, x, n) + c) % n;
-        let (mut y, mut r, mut q, mut g) = (2u64, 1u64, 1u64, 1u64);
+        // The walk runs entirely in Montgomery form: if X = x*R mod n, then
+        // REDC(X^2) + cR = (x^2 + c)*R mod n. Differences carry the same R
+        // factor, and gcd(dR, n) = gcd(d, n) because R = 2^64 is coprime to
+        // odd n — so factors are detected without ever converting back.
+        let cm = mt.to_mont(c % n);
+        let f = |x: u64| {
+            let s = mt.mul(x, x) + cm;
+            if s >= n {
+                s - n
+            } else {
+                s
+            }
+        };
+        let (mut y, mut r, mut q, mut g) = (mt.to_mont(2), 1u64, 1u64, 1u64);
         let (mut x, mut ys) = (0u64, 0u64);
         while g == 1 {
             x = y;
@@ -109,7 +222,7 @@ fn pollard_rho(n: u64) -> u64 {
                 let m = 128.min(r - k);
                 for _ in 0..m {
                     y = f(y);
-                    q = mulmod(q, x.abs_diff(y), n);
+                    q = mt.mul(q, x.abs_diff(y));
                 }
                 g = gcd(q, n);
                 k += m;

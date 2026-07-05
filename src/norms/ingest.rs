@@ -240,10 +240,14 @@ pub fn badset_from_gpu_json(
         n_max_by_weight: vec![0; wmax + 1],
         entries_parsed: 0,
     };
+    // Incremental flushing caps the batch at ~1M entries (a whole-shard batch
+    // costs tens of GB at w = 12) and provides progress heartbeats on stderr.
+    const FLUSH_AT: usize = 1 << 20;
+    let mut done: u64 = 0;
     for path in paths {
         if !path.ends_with(".json") {
             // binary prefix: ingest every existing per-weight dump
-            let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(1 << 20);
+            let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(FLUSH_AT);
             for w in 1..=wmax {
                 if !std::path::Path::new(&format!("{path}.w{w}.norms.bin")).exists() {
                     continue;
@@ -260,18 +264,28 @@ pub fn badset_from_gpu_json(
                     let mut c = [0u64; MAXW];
                     c[..counts.len()].copy_from_slice(counts);
                     batch.push((n, c));
+                    if batch.len() >= FLUSH_AT {
+                        done += batch.len() as u64;
+                        flush_batch(&mut batch, &mut acc, s, wmax);
+                        if done % (64 << 20) < FLUSH_AT as u64 {
+                            eprintln!("[ingest] {done} entries factored, {} bad primes", acc.len());
+                        }
+                    }
                 })?;
             }
+            done += batch.len() as u64;
             flush_batch(&mut batch, &mut acc, s, wmax);
+            eprintln!(
+                "[ingest] {path}: done ({done} entries, {} primes)",
+                acc.len()
+            );
             continue;
         }
         let buf = std::fs::read(path).map_err(|source| Error::Io {
             path: path.clone(),
             source,
         })?;
-        // collect entries in batches, factor in parallel
-        let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(1 << 20);
-
+        let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(FLUSH_AT);
         stats.entries_parsed += parse_shard(&buf, wmax, |n, counts| {
             for (w, &c) in counts.iter().enumerate() {
                 stats.mass_by_weight[w] += c;
@@ -282,8 +296,20 @@ pub fn badset_from_gpu_json(
             let mut c = [0u64; MAXW];
             c[..counts.len()].copy_from_slice(counts);
             batch.push((n, c));
+            if batch.len() >= FLUSH_AT {
+                done += batch.len() as u64;
+                flush_batch(&mut batch, &mut acc, s, wmax);
+                if done % (64 << 20) < FLUSH_AT as u64 {
+                    eprintln!("[ingest] {done} entries factored, {} bad primes", acc.len());
+                }
+            }
         })?;
+        done += batch.len() as u64;
         flush_batch(&mut batch, &mut acc, s, wmax);
+        eprintln!(
+            "[ingest] {path}: done ({done} entries, {} primes)",
+            acc.len()
+        );
     }
     let mut out: Vec<BadSetEntry> = acc
         .into_iter()

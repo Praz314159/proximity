@@ -317,9 +317,11 @@ fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec
 /// Ingest GPU-campaign norm-table JSON shards into the s-64-scale bad set.
 /// Returns (rows, mass_by_weight, n_max_by_weight, entries_parsed) where
 /// rows = list of (p, counts_by_weight, unsafe_split).
-/// Writes <out_prefix>.primes.bin (u64 le), .counts.bin (u32 le, row-major
+/// Writes <out_prefix>.primes.bin (u64 le), .counts.bin (u64 le, row-major
 /// n x (wmax+1)), .flags.bin (u8) and returns
 /// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed).
+/// Counts are u64: at w = 12 the smallest primes carry per-weight counts
+/// beyond u32 (a u32 format cost a full ingest run to discover).
 #[pyfunction]
 fn badset_from_gpu_json(
     py: Python<'_>,
@@ -334,13 +336,12 @@ fn badset_from_gpu_json(
     let n = rows.len() as u64;
     let werr = |e: std::io::Error| PyValueError::new_err(e.to_string());
     let mut pb = Vec::with_capacity(rows.len() * 8);
-    let mut cb = Vec::with_capacity(rows.len() * (wmax + 1) * 4);
+    let mut cb = Vec::with_capacity(rows.len() * (wmax + 1) * 8);
     let mut fb = Vec::with_capacity(rows.len());
     for e in &rows {
         pb.extend_from_slice(&e.p.to_le_bytes());
         for &c in &e.counts {
-            let c32 = u32::try_from(c).map_err(|_| PyValueError::new_err("count exceeds u32"))?;
-            cb.extend_from_slice(&c32.to_le_bytes());
+            cb.extend_from_slice(&c.to_le_bytes());
         }
         fb.push(u8::from(!e.provenance.is_exact()));
     }

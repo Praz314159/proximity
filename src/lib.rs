@@ -59,6 +59,7 @@ pub mod code;
 pub mod domain;
 pub mod error;
 pub mod field;
+pub mod norms;
 pub mod toy;
 
 pub use error::{Error, Result};

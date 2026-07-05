@@ -289,6 +289,32 @@ fn certify_many(
     .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// A bad-set row: (p, per-weight Galois-normalized counts, census_fallback).
+type BadRow = (u64, Vec<u64>, bool);
+
+/// Complete bad set for weights <= wmax, coefficients in [-cmax, cmax]:
+/// every prime p = 1 mod s that any such kernel vector can visit, with
+/// exact per-weight counts (p^2-divisibility handled by census fallback).
+#[pyfunction]
+fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<BadRow>> {
+    py.allow_threads(|| crate::norms::bad_set(s, wmax, cmax))
+        .map(|v| {
+            v.into_iter()
+                .map(|e| (e.p, e.counts, e.census_fallback))
+                .collect()
+        })
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Per-weight maximum cyclotomic norms (the anticorrelation profile),
+/// as decimal strings (values can exceed u64 at large s).
+#[pyfunction]
+fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<String>> {
+    py.allow_threads(|| crate::norms::norm_table(s, wmax, cmax))
+        .map(|t| t.n_max_by_weight().iter().map(|n| n.to_string()).collect())
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
@@ -315,5 +341,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(toy_soundness, m)?)?;
     m.add_function(wrap_pyfunction!(rung_buckets_many, m)?)?;
     m.add_function(wrap_pyfunction!(certify_many, m)?)?;
+    m.add_function(wrap_pyfunction!(norms_bad_set, m)?)?;
+    m.add_function(wrap_pyfunction!(norms_n_max, m)?)?;
     Ok(())
 }

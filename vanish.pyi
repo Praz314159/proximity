@@ -76,3 +76,9 @@ def rung_buckets_many(s: int, r: int, qs: List[int], primes: List[int]) -> List[
 
 def certify_many(s: int, r: int, primes: List[int]) -> List[Tuple[int, int, int, int]]:
     """Parallel certificates: rows of (p, tier, m_struct, zero_bucket)."""
+
+def norms_bad_set(s: int, wmax: int, cmax: int) -> List[Tuple[int, List[int], bool]]:
+    """Complete bad set: rows of (p, per-weight counts, census_fallback)."""
+
+def norms_n_max(s: int, wmax: int, cmax: int) -> List[str]:
+    """Per-weight maximum cyclotomic norms (decimal strings)."""

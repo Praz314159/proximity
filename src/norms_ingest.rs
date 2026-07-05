@@ -19,6 +19,12 @@ use crate::field::factor;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+/// Inline per-weight counts: avoids a heap allocation per parsed entry
+/// (the JSON/bin ingest touches billions of entries; per-entry Vec
+/// allocation dominated the w=12 ingest wall time).
+pub(crate) const MAXW: usize = 16;
+type Counts = [u64; MAXW];
+
 /// Accumulated bad-set row (pre-normalization counts are valuation-weighted).
 #[derive(Debug, Clone)]
 pub struct IngestEntry {
@@ -186,15 +192,15 @@ fn parse_bin_weight(
 }
 
 fn flush_batch(
-    batch: &mut Vec<(u64, Vec<u64>)>,
-    acc: &mut HashMap<u64, (Vec<u64>, bool)>,
+    batch: &mut Vec<(u64, Counts)>,
+    acc: &mut HashMap<u64, (Counts, bool)>,
     s: usize,
     _wmax: usize,
 ) {
-    let partial: Vec<HashMap<u64, (Vec<u64>, bool)>> = batch
+    let partial: Vec<HashMap<u64, (Counts, bool)>> = batch
         .par_chunks(1.max(batch.len() / 128))
         .map(|chunk| {
-            let mut local: HashMap<u64, (Vec<u64>, bool)> = HashMap::new();
+            let mut local: HashMap<u64, (Counts, bool)> = HashMap::new();
             for (n, counts) in chunk {
                 if *n <= 1 {
                     continue;
@@ -209,9 +215,7 @@ fn flush_batch(
                         i += 1;
                     }
                     if p > s as u64 && (p - 1) % s as u64 == 0 {
-                        let entry = local
-                            .entry(p)
-                            .or_insert_with(|| (vec![0; counts.len()], false));
+                        let entry = local.entry(p).or_insert(([0; MAXW], false));
                         for (w, &c) in counts.iter().enumerate() {
                             entry.0[w] += e * c;
                         }
@@ -226,7 +230,7 @@ fn flush_batch(
         .collect();
     for m in partial {
         for (p, (cs, flag)) in m {
-            let entry = acc.entry(p).or_insert_with(|| (vec![0; cs.len()], false));
+            let entry = acc.entry(p).or_insert(([0; MAXW], false));
             for (w, c) in cs.iter().enumerate() {
                 entry.0[w] += c;
             }
@@ -245,11 +249,14 @@ pub fn badset_from_gpu_json(
     s: usize,
     wmax: usize,
 ) -> Result<(Vec<IngestEntry>, IngestStats)> {
+    if wmax >= MAXW {
+        return Err(Error::OutOfRange("wmax >= 16 unsupported by inline counts".into()));
+    }
     if !s.is_power_of_two() || s < 4 {
         return Err(Error::Unsupported("power-of-two s >= 4 required".into()));
     }
     let half = (s / 2) as u64;
-    let mut acc: HashMap<u64, (Vec<u64>, bool)> = HashMap::new();
+    let mut acc: HashMap<u64, (Counts, bool)> = HashMap::new();
     let mut stats = IngestStats {
         mass_by_weight: vec![0; wmax + 1],
         n_max_by_weight: vec![0; wmax + 1],
@@ -258,7 +265,7 @@ pub fn badset_from_gpu_json(
     for path in paths {
         if !path.ends_with(".json") {
             // binary prefix: ingest every existing per-weight dump
-            let mut batch: Vec<(u64, Vec<u64>)> = Vec::with_capacity(1 << 20);
+            let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(1 << 20);
             for w in 1..=wmax {
                 if !std::path::Path::new(&format!("{path}.w{w}.norms.bin")).exists() {
                     continue;
@@ -272,7 +279,9 @@ pub fn badset_from_gpu_json(
                             }
                         }
                     }
-                    batch.push((n, counts.to_vec()));
+                    let mut c = [0u64; MAXW];
+                    c[..counts.len()].copy_from_slice(counts);
+                    batch.push((n, c));
                 })?;
             }
             flush_batch(&mut batch, &mut acc, s, wmax);
@@ -281,7 +290,7 @@ pub fn badset_from_gpu_json(
         let buf =
             std::fs::read(path).map_err(|e| Error::Unsupported(format!("read {path}: {e}")))?;
         // collect entries in batches, factor in parallel
-        let mut batch: Vec<(u64, Vec<u64>)> = Vec::with_capacity(1 << 20);
+        let mut batch: Vec<(u64, Counts)> = Vec::with_capacity(1 << 20);
 
         stats.entries_parsed += parse_shard(&buf, wmax, |n, counts| {
             for (w, &c) in counts.iter().enumerate() {
@@ -290,14 +299,16 @@ pub fn badset_from_gpu_json(
                     stats.n_max_by_weight[w] = n;
                 }
             }
-            batch.push((n, counts.to_vec()));
+            let mut c = [0u64; MAXW];
+            c[..counts.len()].copy_from_slice(counts);
+            batch.push((n, c));
         })?;
         flush_batch(&mut batch, &mut acc, s, wmax);
     }
     let mut out: Vec<IngestEntry> = acc
         .into_iter()
         .map(|(p, (val_counts, mut flag))| {
-            let counts: Vec<u64> = val_counts
+            let counts: Vec<u64> = val_counts[..=wmax]
                 .iter()
                 .map(|&v| {
                     if v % half != 0 {

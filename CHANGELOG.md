@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.0 (2026-07-05)
+
+- **norms::ingest**: `norms_ingest` moved under its parent domain as
+  `norms::ingest` (Rust path change only; the Python API is unchanged).
+  Streaming ingestion of GPU norm-table shards (JSON and per-weight binary
+  dumps) with Galois normalization and provenance flags.
+- **field**: Montgomery arithmetic behind `is_prime` and Brent-variant
+  Pollard rho (12.6x on hard semiprimes); `primes_one_mod` sweep iterator.
+- **error**: `Io` and `MalformedInput` variants — ingest I/O and parse
+  failures no longer masquerade as `Unsupported`.
+- Idiomatic pass: `#[must_use]` across the pure API, missing derives
+  (`HalfTables`, `NormTable`, `Certificate`), `census::direct` takes
+  `cmax: i64` (matching `mitm`), shared `census::kernel_side` enumeration
+  guaranteeing census/decomposition agreement by construction.
+
 ## v0.3.0 (2026-07-04) — public-release candidate
 
 - **attack**: threshold calculator — `best_attack` (quantized-ladder optimum),

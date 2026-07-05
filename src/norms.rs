@@ -19,6 +19,8 @@
 //! (multiplicity may sit inside one embedding), so such primes are flagged and
 //! their counts replaced by a direct census where available.
 
+pub mod ingest;
+
 use crate::census;
 use crate::domain::Subgroup;
 use crate::error::{Error, Result};

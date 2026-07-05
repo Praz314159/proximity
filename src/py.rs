@@ -324,7 +324,7 @@ fn badset_from_gpu_json(
     out_prefix: String,
 ) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64)> {
     let (rows, stats) = py
-        .allow_threads(|| crate::norms_ingest::badset_from_gpu_json(&paths, s, wmax))
+        .allow_threads(|| crate::norms::ingest::badset_from_gpu_json(&paths, s, wmax))
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let n = rows.len() as u64;
     let werr = |e: std::io::Error| PyValueError::new_err(e.to_string());

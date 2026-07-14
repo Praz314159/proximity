@@ -1,23 +1,31 @@
-//! The bucket-vs-entropy diagnostic (D1's classifier).
+//! The bucket-vs-entropy diagnostic (D1's classifier), graded.
 //!
 //! The open question the data program turns on: below the Elias wall, is the
 //! *extremal* (max-list) word a **bucket** — its near-codewords sharing frozen
-//! top-`q` symmetric functions — or **entropy-typical**, with no such algebraic
-//! coherence? The answer decides the defense lane: bucket-reduction if the
-//! former, a characteristic-`p` entropy converse if the latter. This module
-//! reads that structure straight off a word's decoded list.
+//! top-`q` symmetric functions — or **entropy-typical**, with no such coherence?
+//! The answer decides the defense lane (bucket-reduction vs a characteristic-`p`
+//! entropy converse). But real objects live on a *spectrum* between those poles
+//! — a union of a few buckets is still bucket-reducible yet is not perfectly
+//! frozen — so a binary label misroutes the fork. The order parameter is the
+//! **Shannon entropy of the symmetric-function distribution over the list**: for
+//! each `e_i`, form the distribution of `e_i(A(c))` over the codewords `c` and
+//! measure its spread. Zero entropy = a frozen bucket; `log2 L` = maximally
+//! scattered; in between = the structured-but-not-frozen middle. This is (up to
+//! normalization) the characteristic-`p` entropy quantity CS25 conjectures
+//! governs the wall.
 //!
-//! Mechanism: for each codeword `c` in `List(w)`, its agreement set
-//! `A(c) = {x : c(x) = w(x)}` is the algebraic fingerprint. For a C.5 bucket
-//! word the `A(c)` are exactly the frozen subsets `{S : e_i(S) = lambda_i}`, so
-//! their top symmetric functions are *constant across the list*. For an
-//! entropy-typical word they scatter. The classifier measures the longest
-//! frozen prefix.
+//! [`structure`] returns that data — per-`e_i` distributions and entropies —
+//! for post-processing and visualization. [`classify`] is a thin thresholded
+//! label on top of it.
 
 use crate::code::top_elementary_symmetric;
-use crate::decode::{DecodeOracle, Radius};
 use crate::code::ReedSolomon;
+use crate::decode::{DecodeOracle, Radius};
 use crate::error::Result;
+use std::collections::BTreeMap;
+
+/// The largest number of leading symmetric functions to profile.
+const SIG_CAP: usize = 8;
 
 /// How far the symmetric structure of a bucket is prime-specific.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,15 +39,54 @@ pub enum Accidental {
     Unknown,
 }
 
-/// The structural verdict on a word, read from its decoded list.
+/// Distributional summary of one symmetric function `e_i` over a list's
+/// agreement sets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SymStat {
+    /// Which symmetric function: `1` for `e_1`, etc.
+    pub index: usize,
+    /// Shannon entropy (bits) of the `e_i` distribution over the list. `0` iff
+    /// `e_i` is frozen to a single value (a bucket in this coordinate).
+    pub entropy: f64,
+    /// Number of distinct `e_i` values.
+    pub distinct: usize,
+    /// Fraction of the list in the largest `e_i` class.
+    pub max_class_fraction: f64,
+    /// The most common `e_i` value (the frozen value when entropy is `0`).
+    pub mode_value: u64,
+    /// The full distribution `(e_i value, count)`, sorted by value — the raw
+    /// material for a histogram/plot.
+    pub distribution: Vec<(u64, u64)>,
+}
+
+/// The graded structure of a word's list: agreement-size spread and the
+/// symmetric-function distributions. The post-processable / visualizable output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListStructure {
+    /// The list size `L`.
+    pub list_size: u64,
+    /// Agreement-set sizes `(size, count)`, sorted.
+    pub agreement_sizes: Vec<(usize, u64)>,
+    /// Shannon entropy (bits) of the agreement-size distribution.
+    pub size_entropy: f64,
+    /// Per-`e_i` distributional stats, `e_1` first, up to `min(SIG_CAP, r)`.
+    pub symmetric: Vec<SymStat>,
+    /// Shannon entropy (bits) of the *joint* signature `(e_1, ..., e_cap)`
+    /// distribution — the overall algebraic-coherence order parameter.
+    pub joint_entropy: f64,
+    /// Number of distinct joint signatures.
+    pub joint_distinct: usize,
+}
+
+/// The thresholded label derived from [`ListStructure`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WordKind {
-    /// The list's agreement sets share the top-`frozen_q` symmetric functions:
-    /// a bucket at radius `1 - r/n`.
+    /// Same agreement size and a nonempty frozen symmetric prefix (`e_1..e_q`
+    /// each at zero entropy): a bucket at radius `1 - r/n`.
     Bucket {
         /// Common agreement-set size.
         r: usize,
-        /// Longest frozen symmetric prefix (`e_1..e_{frozen_q}` constant).
+        /// Length of the zero-entropy (frozen) symmetric prefix.
         frozen_q: usize,
         /// The frozen values `(e_1, ..., e_{frozen_q})`.
         lambda: Vec<u64>,
@@ -48,9 +95,9 @@ pub enum WordKind {
         /// The list size.
         list_size: u64,
     },
-    /// The agreement sets do not share a frozen symmetric signature.
+    /// No frozen symmetric prefix: the list scatters across signatures.
     EntropyTypical {
-        /// Number of distinct symmetric signatures among the list.
+        /// Number of distinct joint signatures.
         distinct_signatures: usize,
         /// The list size.
         list_size: u64,
@@ -62,20 +109,13 @@ pub enum WordKind {
     },
 }
 
-/// The largest number of leading symmetric functions to test for freezing.
-const SIG_CAP: usize = 8;
-
-/// Classify a word by the algebraic structure of its list at `radius`.
-pub fn classify(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<WordKind> {
+/// The graded structure of `word`'s list at `radius`: the primary, post-
+/// processable diagnostic.
+pub fn structure(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<ListStructure> {
     let list = DecodeOracle::new(rs).list(word, radius)?;
-    if list.len() <= 1 {
-        return Ok(WordKind::Trivial {
-            list_size: list.len() as u64,
-        });
-    }
+    let list_size = list.len() as u64;
     let p = rs.domain().p();
     let dom = rs.domain().elements();
-    // Agreement set of each codeword, as the domain elements where it meets w.
     let sets: Vec<Vec<u64>> = list
         .iter()
         .map(|cw| {
@@ -86,62 +126,107 @@ pub fn classify(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<WordKi
                 .collect()
         })
         .collect();
-    let a = analyze_sets(&sets, p);
-    let list_size = list.len() as u64;
-    if a.same_size && a.frozen_q >= 1 {
-        let accident = accident_status(rs, a.r);
-        Ok(WordKind::Bucket {
-            r: a.r,
-            frozen_q: a.frozen_q,
-            lambda: a.lambda,
-            accident,
-            list_size,
-        })
-    } else {
-        Ok(WordKind::EntropyTypical {
-            distinct_signatures: a.distinct_signatures,
-            list_size,
-        })
+
+    let mut size_map: BTreeMap<usize, u64> = BTreeMap::new();
+    for s in &sets {
+        *size_map.entry(s.len()).or_insert(0) += 1;
     }
-}
+    let agreement_sizes: Vec<(usize, u64)> = size_map.iter().map(|(&k, &v)| (k, v)).collect();
+    let size_entropy = shannon_bits(&size_map.values().copied().collect::<Vec<_>>());
 
-struct SetAnalysis {
-    same_size: bool,
-    r: usize,
-    frozen_q: usize,
-    lambda: Vec<u64>,
-    distinct_signatures: usize,
-}
-
-/// Symmetric analysis of a family of agreement sets: whether they share size,
-/// the longest constant symmetric prefix, and how many distinct signatures
-/// they span.
-fn analyze_sets(sets: &[Vec<u64>], p: u64) -> SetAnalysis {
-    let r = sets[0].len();
-    let same_size = sets.iter().all(|s| s.len() == r);
-    let cap = SIG_CAP.min(r);
+    let min_size = sets.iter().map(Vec::len).min().unwrap_or(0);
+    let cap = SIG_CAP.min(min_size);
     let sigs: Vec<Vec<u64>> = sets
         .iter()
         .map(|s| top_elementary_symmetric(s, cap, p))
         .collect();
-    let mut frozen_q = 0;
-    for j in 0..cap {
-        if sigs.iter().all(|s| s[j] == sigs[0][j]) {
-            frozen_q = j + 1;
-        } else {
-            break;
+
+    let mut symmetric = Vec::with_capacity(cap);
+    for i in 0..cap {
+        let mut dist: BTreeMap<u64, u64> = BTreeMap::new();
+        for sig in &sigs {
+            *dist.entry(sig[i]).or_insert(0) += 1;
         }
+        let counts: Vec<u64> = dist.values().copied().collect();
+        let (mode_value, max_count) = dist
+            .iter()
+            .max_by_key(|(_, &c)| c)
+            .map(|(&v, &c)| (v, c))
+            .unwrap_or((0, 0));
+        symmetric.push(SymStat {
+            index: i + 1,
+            entropy: shannon_bits(&counts),
+            distinct: dist.len(),
+            max_class_fraction: if list_size > 0 {
+                max_count as f64 / list_size as f64
+            } else {
+                0.0
+            },
+            mode_value,
+            distribution: dist.into_iter().collect(),
+        });
     }
-    let mut distinct = sigs.clone();
-    distinct.sort_unstable();
-    distinct.dedup();
-    SetAnalysis {
-        same_size,
-        r,
-        frozen_q,
-        lambda: sigs[0][..frozen_q].to_vec(),
-        distinct_signatures: distinct.len(),
+
+    let mut joint: BTreeMap<Vec<u64>, u64> = BTreeMap::new();
+    for sig in &sigs {
+        *joint.entry(sig.clone()).or_insert(0) += 1;
     }
+    Ok(ListStructure {
+        list_size,
+        agreement_sizes,
+        size_entropy,
+        symmetric,
+        joint_entropy: shannon_bits(&joint.values().copied().collect::<Vec<_>>()),
+        joint_distinct: joint.len(),
+    })
+}
+
+/// A thresholded label over [`structure`]: `Bucket` when the agreement size is
+/// constant and a nonempty symmetric prefix is frozen (zero entropy), else
+/// `EntropyTypical`. Prefer [`structure`] for analysis — the label discards the
+/// gradation.
+pub fn classify(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<WordKind> {
+    let st = structure(rs, word, radius)?;
+    if st.list_size <= 1 {
+        return Ok(WordKind::Trivial {
+            list_size: st.list_size,
+        });
+    }
+    let same_size = st.agreement_sizes.len() == 1;
+    let frozen_q = st.symmetric.iter().take_while(|s| s.entropy == 0.0).count();
+    if same_size && frozen_q >= 1 {
+        let r = st.agreement_sizes[0].0;
+        let lambda = st.symmetric[..frozen_q].iter().map(|s| s.mode_value).collect();
+        Ok(WordKind::Bucket {
+            r,
+            frozen_q,
+            lambda,
+            accident: accident_status(rs, r),
+            list_size: st.list_size,
+        })
+    } else {
+        Ok(WordKind::EntropyTypical {
+            distinct_signatures: st.joint_distinct,
+            list_size: st.list_size,
+        })
+    }
+}
+
+/// Shannon entropy in bits of a distribution given its class counts.
+fn shannon_bits(counts: &[u64]) -> f64 {
+    let total: u64 = counts.iter().sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let t = total as f64;
+    -counts
+        .iter()
+        .filter(|&&c| c > 0)
+        .map(|&c| {
+            let pr = c as f64 / t;
+            pr * pr.log2()
+        })
+        .sum::<f64>()
 }
 
 /// Best-effort structural-vs-accident flag via [`crate::certify`] (only the
@@ -166,6 +251,26 @@ mod tests {
     use crate::domain::Subgroup;
 
     #[test]
+    fn shannon_is_zero_for_frozen_and_one_bit_for_even_split() {
+        assert_eq!(shannon_bits(&[70]), 0.0);
+        assert!((shannon_bits(&[5, 5]) - 1.0).abs() < 1e-12);
+        assert!((shannon_bits(&[1, 1, 1, 1]) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bucket_has_frozen_e1_and_positive_e2_entropy() {
+        let sg = Subgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let f = rs.c5_word(8, &[0]).unwrap();
+        let st = structure(&rs, &f, Radius::agreement(8)).unwrap();
+        assert_eq!(st.list_size, 70);
+        assert_eq!(st.symmetric[0].index, 1);
+        assert_eq!(st.symmetric[0].entropy, 0.0, "e_1 is frozen");
+        assert_eq!(st.symmetric[0].mode_value, 0);
+        assert!(st.symmetric[1].entropy > 0.0, "e_2 is not frozen");
+    }
+
+    #[test]
     fn c5_word_classifies_as_structural_bucket() {
         let sg = Subgroup::new(65537, 16).unwrap();
         let rs = ReedSolomon::new(&sg, 7).unwrap();
@@ -178,29 +283,11 @@ mod tests {
                 accident,
                 list_size,
             } => {
-                assert_eq!(r, 8);
-                assert_eq!(frozen_q, 1, "only e_1 is frozen (q = 1)");
+                assert_eq!((r, frozen_q, list_size), (8, 1, 70));
                 assert_eq!(lambda, vec![0]);
                 assert_eq!(accident, Accidental::Structural);
-                assert_eq!(list_size, 70);
             }
             other => panic!("expected structural bucket, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn frozen_prefix_detects_shared_e1() {
-        // Two sets with equal element-sum (e_1) but different e_2.
-        let p = 65537;
-        let a = analyze_sets(&[vec![1, p - 1, 5], vec![2, p - 2, 5]], p);
-        assert!(a.frozen_q >= 1, "e_1 = 5 is shared");
-    }
-
-    #[test]
-    fn frozen_prefix_rejects_scattered_e1() {
-        let p = 65537;
-        let a = analyze_sets(&[vec![1, 2, 3], vec![10, 20, 30]], p);
-        assert_eq!(a.frozen_q, 0, "e_1 differs (6 vs 60)");
-        assert_eq!(a.distinct_signatures, 2);
     }
 }

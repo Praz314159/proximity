@@ -10,7 +10,7 @@
 
 use crate::domain::Subgroup;
 use crate::error::{Error, Result};
-use crate::field::binom;
+use crate::field::{binom, mulmod, powmod};
 
 /// `RS[F_p, mu_s, k]`: polynomials of degree `< k` evaluated on the subgroup.
 #[derive(Debug, Clone)]
@@ -87,6 +87,47 @@ impl<'a> ReedSolomon<'a> {
                     .iter()
                     .rev()
                     .fold(0u64, |acc, &c| (crate::field::mulmod(acc, x, p) + c) % p)
+            })
+            .collect())
+    }
+}
+
+impl ReedSolomon<'_> {
+    /// Materialize the C.5-form (payoff) word on the domain: the "frozen head"
+    /// `f(x) = sum_{i=0}^q (-1)^i lambda_i x^{r-i}` (with `lambda_0 = 1`, `m = 1`).
+    ///
+    /// This is the *received word* whose list at radius `1 - r/n` is, by the
+    /// exactness theorem, exactly the bucket `{S : e_i(S) = lambda_i}` (see the
+    /// module intro and [`crate::buckets`]). It is the bridge between the
+    /// count axis ([`crate::buckets`]) and the decode axis
+    /// ([`crate::decode`]): decoding this word and counting its bucket must
+    /// return the same list size.
+    ///
+    /// `lambda` holds the `e`-values `(e_1, ..., e_q)`; the alternating signs
+    /// are the `c_i = (-1)^i e_i` sign convention institutionalized in
+    /// [`crate::buckets::mitm`]. Requires `q <= r < n`.
+    pub fn c5_word(&self, r: usize, lambda: &[u64]) -> Result<Vec<u64>> {
+        let q = lambda.len();
+        if r >= self.n() || q > r {
+            return Err(Error::OutOfRange("need q <= r < n".into()));
+        }
+        let p = self.domain.p();
+        Ok(self
+            .domain
+            .elements()
+            .iter()
+            .map(|&x| {
+                let mut acc = 0u64;
+                for i in 0..=q {
+                    let lam = if i == 0 { 1 } else { lambda[i - 1] % p };
+                    let term = mulmod(lam, powmod(x, (r - i) as u64, p), p);
+                    acc = if i % 2 == 0 {
+                        (acc + term) % p
+                    } else {
+                        (acc + p - term) % p
+                    };
+                }
+                acc
             })
             .collect())
     }

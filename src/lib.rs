@@ -69,6 +69,7 @@ pub mod buckets;
 pub mod census;
 pub mod certify;
 pub mod code;
+pub mod decode;
 pub mod domain;
 pub mod error;
 pub mod field;

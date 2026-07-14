@@ -137,11 +137,34 @@ impl<'a> DecodeOracle<'a> {
         Ok(out)
     }
 
-    /// A Monte-Carlo *lower bound* on the list size: sample `samples` random
-    /// information sets, interpolate, and count the distinct codewords found at
-    /// agreement `>= t`. Stops early once `threshold` distinct codewords are
-    /// seen (returning exactly `threshold`). Never overcounts; the true list is
-    /// at least the returned value. Deterministic in `seed`.
+    /// Whether the exact engine will run (`C(n, k)` within the cap); if not,
+    /// the sampling methods are the way in.
+    #[must_use]
+    pub fn exact_feasible(&self) -> bool {
+        binom(self.rs.n() as u64, self.rs.k() as u64) <= EXACT_SUBSET_CAP
+    }
+
+    /// Sample `samples` information sets and return the *distinct* codewords
+    /// found at agreement `>= t` — a subset of the true list, and the
+    /// recruitment primitive for cluster growth ([`crate::cluster`]).
+    /// Deterministic in `seed`.
+    pub fn sample_list(
+        &self,
+        word: &[u64],
+        radius: Radius,
+        samples: u64,
+        seed: u64,
+    ) -> Result<Vec<Vec<u64>>> {
+        Ok(self
+            .sample_codewords(word, radius, samples, seed, None)?
+            .into_iter()
+            .collect())
+    }
+
+    /// A Monte-Carlo *lower bound* on the list size: distinct codewords found
+    /// at agreement `>= t` over `samples` random information sets, capped at
+    /// `threshold` (early-stops there). Never overcounts; the true list is at
+    /// least the returned value. Deterministic in `seed`.
     pub fn list_size_atleast(
         &self,
         word: &[u64],
@@ -150,6 +173,20 @@ impl<'a> DecodeOracle<'a> {
         samples: u64,
         seed: u64,
     ) -> Result<u64> {
+        let set = self.sample_codewords(word, radius, samples, seed, Some(threshold))?;
+        Ok((set.len() as u64).min(threshold))
+    }
+
+    /// Shared sampling core: distinct codewords at agreement `>= t` over
+    /// `samples` information sets, optionally early-stopping at `stop_at`.
+    fn sample_codewords(
+        &self,
+        word: &[u64],
+        radius: Radius,
+        samples: u64,
+        seed: u64,
+        stop_at: Option<u64>,
+    ) -> Result<HashSet<Vec<u64>>> {
         let n = self.rs.n();
         let k = self.rs.k();
         let t = radius.min_agreement();
@@ -171,12 +208,14 @@ impl<'a> DecodeOracle<'a> {
             let agree = cw.iter().zip(word).filter(|(a, b)| a == b).count();
             if agree >= t {
                 seen.insert(cw);
-                if seen.len() as u64 >= threshold {
-                    return Ok(threshold);
+                if let Some(cap) = stop_at {
+                    if seen.len() as u64 >= cap {
+                        break;
+                    }
                 }
             }
         }
-        Ok(seen.len() as u64)
+        Ok(seen)
     }
 }
 

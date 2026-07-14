@@ -69,6 +69,7 @@ pub mod buckets;
 pub mod census;
 pub mod certify;
 pub mod classify;
+pub mod cluster;
 pub mod code;
 pub mod decode;
 pub mod domain;

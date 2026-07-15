@@ -10,7 +10,7 @@
 //!
 //! Generic over the evaluation domain — nothing here depends on the
 //! multiplicative-subgroup structure; it decodes `RS[F_p, D, k]` for any domain
-//! `D`. The exactness bridge to [`crate::buckets`] (decode a C.5 word, check its
+//! `D`. The exactness bridge to [`crate::smooth::buckets`] (decode a C.5 word, check its
 //! size equals the counted bucket) is validated in the tests, on a subgroup
 //! domain where buckets are defined.
 //!
@@ -25,7 +25,7 @@
 //! pruning) is the documented scaling path; the exact engine stays the ground
 //! truth the rest is validated against.
 
-use crate::code::ReedSolomon;
+use crate::rs::code::ReedSolomon;
 use crate::error::{Error, Result};
 use crate::field::{binom, mulmod, powmod};
 use std::collections::HashSet;
@@ -92,7 +92,7 @@ impl<'a> DecodeOracle<'a> {
     ///
     /// Requires `t >= k` (below `k` a codeword is not pinned by a `k`-subset of
     /// its agreements, i.e. the radius is at or beyond capacity). Refuses to
-    /// run past [`EXACT_SUBSET_CAP`] information sets.
+    /// run past `EXACT_SUBSET_CAP` information sets.
     pub fn list(&self, word: &[u64], radius: Radius) -> Result<Vec<Vec<u64>>> {
         let n = self.rs.n();
         let k = self.rs.k();
@@ -135,7 +135,7 @@ impl<'a> DecodeOracle<'a> {
 
     /// Sample `samples` information sets and return the *distinct* codewords
     /// found at agreement `>= t` — a subset of the true list, and the
-    /// recruitment primitive for cluster growth ([`crate::cluster`]).
+    /// recruitment primitive for cluster growth ([`crate::rs::cluster`]).
     /// Deterministic in `seed`.
     pub fn sample_list(
         &self,
@@ -232,7 +232,7 @@ fn inv(a: u64, p: u64) -> u64 {
 /// `(xs, ys)` and evaluate it at every point of `domain`, via the barycentric
 /// form (no monomial-coefficient conversion — the identity
 /// `sum_j w_j prod_{m != j}(X - x_m) = 1` keeps the denominator nonzero off the
-/// nodes). Shared with [`crate::cluster`] for building codewords from a pencil.
+/// nodes). Shared with [`crate::rs::cluster`] for building codewords from a pencil.
 pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
     let k = xs.len();
     let mut wts = vec![0u64; k];
@@ -327,7 +327,7 @@ mod tests {
     /// the count axis must agree on it.
     #[test]
     fn exactness_bridge_s16() {
-        use crate::buckets::mitm::HalfTables;
+        use crate::smooth::buckets::mitm::HalfTables;
         let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
         let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap(); // k = r - q = 7
         let f = rs.c5_word(8, &[0]).unwrap();

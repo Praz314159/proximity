@@ -17,8 +17,8 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::process::exit;
-use vanish::buckets::{dp, mitm};
-use vanish::code::{m_struct, rung_lambda};
+use vanish::smooth::buckets::{dp, mitm};
+use vanish::smooth::rung::{m_struct, rung_lambda};
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
 
@@ -115,9 +115,9 @@ fn main() {
             let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let counts = if let Some(w) = m.get("wmax") {
                 let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
-                vanish::census::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
+                vanish::smooth::census::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
             } else {
-                vanish::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
+                vanish::smooth::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
             };
             for (w, c) in counts.iter().enumerate() {
                 if *c > 0 {
@@ -189,7 +189,7 @@ fn main() {
             );
         }
         "certify" => {
-            use vanish::certify::{certify_q1, Verdict};
+            use vanish::smooth::certify::{certify_q1, Verdict};
             let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
             let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let c = certify_q1(&sg, r).unwrap_or_else(|e| die(e));

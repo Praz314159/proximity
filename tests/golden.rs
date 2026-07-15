@@ -4,9 +4,9 @@
 //! Optimization passes and refactors must keep this suite green; new kernels
 //! must add their own pins. See CONTRIBUTING.md.
 
-use vanish::buckets::{dp, mitm};
-use vanish::census;
-use vanish::code::{class_size, m_struct, rung_lambda};
+use vanish::smooth::buckets::{dp, mitm};
+use vanish::smooth::census;
+use vanish::smooth::rung::{class_size, m_struct, rung_lambda};
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, factor, is_prime};
 
@@ -14,7 +14,7 @@ fn sg(p: u64, s: usize) -> MultiplicativeSubgroup {
     MultiplicativeSubgroup::new(p, s).unwrap()
 }
 
-fn mass_check(dist: &vanish::buckets::BucketDistribution, s: u64, r: u64) {
+fn mass_check(dist: &vanish::smooth::buckets::BucketDistribution, s: u64, r: u64) {
     assert_eq!(dist.total(), binom(s, r), "total mass must be C(s, r)");
 }
 

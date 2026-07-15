@@ -10,7 +10,7 @@
 //! `occupied_buckets / p` — identically `1` while `p` is below the structural
 //! class count (every challenge wins), then decaying like `classes / p`.
 
-use crate::buckets::dp;
+use crate::smooth::buckets::dp;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::Result;
 use crate::field::binom;

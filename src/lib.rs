@@ -5,36 +5,29 @@
 //! Reed–Solomon codes used in SNARKs (the setting of the Proximity Prize
 //! survey, ePrint 2026/680).
 //!
-//! ## The mathematical objects, bottom-up
+//! ## Layout
 //!
-//! - [`field`]: arithmetic over `F_p` (primality, generators, factorization).
-//! - [`domain`]: the core object — a multiplicative subgroup `mu_s <= F_p^*`
-//!   ([`domain::MultiplicativeSubgroup`]), with its cosets and dilation structure.
-//! - [`code`]: Reed–Solomon codes on a subgroup domain
-//!   ([`code::ReedSolomon`]), their radii (capacity, Johnson), the C.5-form
-//!   extremal words, and the quantized-ladder combinatorics
-//!   ([`code::m_struct`], [`code::rung_lambda`]).
-//! - [`buckets`]: the central analysis — *bucket* sizes
-//!   `#{ |S| = r : e_i(S) = lambda_i }`, which by the exactness theorem are
-//!   exact list sizes of the extremal words beyond the Johnson radius. Full
-//!   distributions ([`buckets::dp`], cost ~ `p`) and `p`-independent single
-//!   buckets / decompositions ([`buckets::mitm`]).
-//! - [`census`]: kernel censuses — the arithmetic accidents that inflate
-//!   buckets, in dilation orbits, governed by the anticorrelation law
-//!   `N(v) <= (sum v_i^2)^{s/4}`.
-//! - [`norms`]: cyclotomic norms and complete *bad sets* — every prime any
-//!   bounded-weight accident can ever visit, by enumerating and factoring
-//!   norms; [`norms::ingest`] streams externally computed (GPU) norm tables
-//!   through the same pipeline at the billions-of-entries scale.
-//! - [`certify`]: tiered, `p`-independent structural certificates — prove
-//!   that no accident inflates any bucket at given parameters, or report the
-//!   exact inflated anatomy.
-//! - [`toy`]: exact soundness of the survey's Section-6 toy protocol via the
-//!   winning-set identity (winning challenges = occupied buckets).
-//! - [`attack`]: the parameter-space calculator — best attack radius over the
-//!   quantized ladder, the antipodal baseline, the structural ceiling, and
-//!   the Elias threshold. Deliberately float-domain and standalone; its exact
-//!   integer counterpart is [`code::m_struct`].
+//! **Foundation.** [`field`] (`F_p` arithmetic), [`domain`] — the
+//! [`MultiplicativeSubgroup`](domain::MultiplicativeSubgroup) `mu_s <= F_p^*`
+//! (cosets, dilation) and the [`EvalDomain`](domain::EvalDomain) an RS code
+//! sits on. Shared by both families below.
+//!
+//! **[`rs`] — generic Reed–Solomon + list-decoding discovery.**
+//! [`ReedSolomon`](rs::code::ReedSolomon) over *any* evaluation domain; exact
+//! and sampled list decoding ([`rs::decode`]); bottom-up cluster growth and
+//! optimization ([`rs::cluster`]); the graded structure diagnostic
+//! ([`rs::classify`]). Decoupled from the subgroup structure.
+//!
+//! **[`smooth`] — the smooth multiplicative-subgroup program.** *Bucket* sizes
+//! `#{ |S| = r : e_i(S) = lambda_i }` ([`smooth::buckets`]), which by the
+//! exactness theorem are exact list sizes beyond the Johnson radius; the
+//! rung/ladder combinatorics ([`smooth::rung`]); the arithmetic accidents that
+//! inflate buckets ([`smooth::census`], [`smooth::norms`], with
+//! [`smooth::norms::ingest`] streaming GPU norm tables); and the structural
+//! certificates ([`smooth::certify`]).
+//!
+//! **Applications.** [`toy`] (Section-6 toy-protocol soundness) and [`attack`]
+//! (the float parameter-space attack-radius calculator).
 //!
 //! ## Validation contract
 //!
@@ -46,7 +39,7 @@
 //! ## Example
 //!
 //! ```
-//! use vanish::{domain::MultiplicativeSubgroup, buckets};
+//! use vanish::{domain::MultiplicativeSubgroup, smooth::buckets};
 //!
 //! let sg = MultiplicativeSubgroup::new(3457, 32).unwrap();
 //! let dist = buckets::dp::distribution_q1(&sg, 16).unwrap();
@@ -64,18 +57,19 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-pub mod attack;
-pub mod buckets;
-pub mod census;
-pub mod certify;
-pub mod classify;
-pub mod cluster;
-pub mod code;
-pub mod decode;
+// Foundation.
 pub mod domain;
 pub mod error;
 pub mod field;
-pub mod norms;
+
+// Generic Reed–Solomon codes + list-decoding discovery.
+pub mod rs;
+
+// Smooth multiplicative subgroup: bucket & accident program.
+pub mod smooth;
+
+// Applications.
+pub mod attack;
 pub mod toy;
 
 pub use error::{Error, Result};

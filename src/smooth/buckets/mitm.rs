@@ -12,7 +12,7 @@
 //! `Y^{r-i}` in `prod (Y - a)` is `c_i = (-1)^i e_i`. All convolutions are on
 //! the signed `c_i`; unsigned `e_i` appear only at the API boundary.
 
-use crate::code::class_size;
+use crate::smooth::rung::class_size;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use std::collections::HashMap;
@@ -162,8 +162,8 @@ pub fn decompose_bucket_q1(sg: &MultiplicativeSubgroup, r: usize, lam: u64) -> R
     let half = s / 2;
     let pows = sg.pow_table(half);
     let hh = half / 2;
-    let a = crate::census::kernel_side(&pows, p, 1, 0, hh);
-    let b = crate::census::kernel_side(&pows, p, 1, hh, half);
+    let a = crate::smooth::census::kernel_side(&pows, p, 1, 0, hh);
+    let b = crate::smooth::census::kernel_side(&pows, p, 1, hh, half);
     let mut per_weight = vec![0u64; half + 1];
     let mut total = 0u64;
     for (val, wsb) in &b {

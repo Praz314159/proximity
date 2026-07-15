@@ -2,9 +2,9 @@
 //! These complement the golden pins: invariants that must hold at *every*
 //! parameter point, checked across a pseudo-random sample of valid ones.
 
-use vanish::buckets::{dp, mitm};
-use vanish::census;
-use vanish::code::ReedSolomon;
+use vanish::smooth::buckets::{dp, mitm};
+use vanish::smooth::census;
+use vanish::rs::code::ReedSolomon;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
 use vanish::Error;
@@ -118,7 +118,7 @@ fn error_paths() {
     let s6 = MultiplicativeSubgroup::new(31, 6).unwrap();
     assert!(!s6.is_two_smooth());
     assert!(s6.cosets(1).is_err());
-    assert!(vanish::code::rung_lambda(&s6, 3, 1).is_err());
+    assert!(vanish::smooth::rung::rung_lambda(&s6, 3, 1).is_err());
 }
 
 /// Independent oracle: naive trial division. Slow but indisputable; the

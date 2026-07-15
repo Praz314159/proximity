@@ -18,9 +18,9 @@
 //! for post-processing and visualization. [`classify`] is a thin thresholded
 //! label on top of it.
 
-use crate::code::top_elementary_symmetric;
-use crate::code::ReedSolomon;
-use crate::decode::{DecodeOracle, Radius};
+use crate::rs::code::top_elementary_symmetric;
+use crate::rs::code::ReedSolomon;
+use crate::rs::decode::{DecodeOracle, Radius};
 use crate::error::Result;
 use std::collections::BTreeMap;
 

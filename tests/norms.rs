@@ -2,10 +2,10 @@
 //! s = 32 landscape (exp22b/exp24/exp27 reference data) and cross-checked
 //! against the independent decomposition engine.
 
-use vanish::buckets::mitm::decompose_bucket_q1;
-use vanish::code::class_size;
+use vanish::smooth::buckets::mitm::decompose_bucket_q1;
+use vanish::smooth::rung::class_size;
 use vanish::domain::MultiplicativeSubgroup;
-use vanish::norms::{bad_set, norm_table};
+use vanish::smooth::norms::{bad_set, norm_table};
 
 #[test]
 fn golden_nmax_profile_s32() {
@@ -24,7 +24,7 @@ fn badset_cross_checks_decompose_s16() {
     // s = 16 full bad set; predicted zero-buckets must match the independent
     // decomposition engine at every classical F3 prime.
     let bs = bad_set(16, 8, 1).unwrap();
-    let by_p: std::collections::HashMap<u64, &vanish::norms::BadSetEntry> =
+    let by_p: std::collections::HashMap<u64, &vanish::smooth::norms::BadSetEntry> =
         bs.iter().map(|e| (e.p, e)).collect();
     for p in [97u64, 193, 241, 257, 353, 577] {
         let pred: u64 = class_size(16, 8, 0)
@@ -51,7 +51,7 @@ fn badset_spot_pins_s32() {
     // p = 89633 carries exactly one weight-6 orbit (32 vectors)
     let e = bs.iter().find(|e| e.p == 89633).unwrap();
     assert_eq!(e.counts[6], 32);
-    assert_eq!(e.provenance, vanish::norms::Provenance::ValuationSplit);
+    assert_eq!(e.provenance, vanish::smooth::norms::Provenance::ValuationSplit);
     // predicted zero bucket from the weight<=6 slice already matches ground
     // truth at 89633 (its higher-weight counts contribute nothing even):
     let sg = MultiplicativeSubgroup::new(89633, 32).unwrap();
@@ -72,7 +72,7 @@ fn census_fallback_triggers_at_small_primes() {
     let e = bs.iter().find(|e| e.p == 17).unwrap();
     assert_eq!(
         e.provenance,
-        vanish::norms::Provenance::CensusCorrected,
+        vanish::smooth::norms::Provenance::CensusCorrected,
         "p^2 fallback must trigger at p = 17"
     );
     let pred: u64 = class_size(16, 8, 0)

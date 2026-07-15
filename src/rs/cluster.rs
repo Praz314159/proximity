@@ -7,7 +7,7 @@
 //! tightly. Whether that rigidity forces the frozen-symmetric-function
 //! structure of a bucket, or admits something else, is exactly the reduction
 //! question the data program turns on. This engine lets the answer emerge:
-//! grow a cluster, then read its structure with [`crate::classify`].
+//! grow a cluster, then read its structure with [`crate::rs::classify`].
 //!
 //! It is a **constructive probe of bucket-extremality**. If every large cluster
 //! it grows is algebraic (a bucket), that is evidence for the reduction; a
@@ -20,9 +20,9 @@
 //! heuristic local search — locally-extremal words, not a certified global
 //! maximum — so vary the seed for coverage.
 
-use crate::classify::{classify, WordKind};
-use crate::code::ReedSolomon;
-use crate::decode::{interp_eval_all, DecodeOracle, Radius};
+use crate::rs::classify::{classify, WordKind};
+use crate::rs::code::ReedSolomon;
+use crate::rs::decode::{interp_eval_all, DecodeOracle, Radius};
 use crate::error::{Error, Result};
 use std::collections::{HashMap, HashSet};
 

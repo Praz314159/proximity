@@ -131,7 +131,7 @@ impl MultiplicativeSubgroup {
 }
 
 /// An evaluation domain for a Reed–Solomon code: `n` distinct points in `F_p`.
-/// The generic object a [`crate::code::ReedSolomon`] sits on — build one from a
+/// The generic object a [`crate::rs::code::ReedSolomon`] sits on — build one from a
 /// subgroup ([`Self::subgroup`]), an explicit set ([`Self::from_points`]), or
 /// (later) a coset or an `m > 1` tower. This is the seam between the algebraic
 /// [`MultiplicativeSubgroup`] (cosets, dilation, cyclotomic structure) and the

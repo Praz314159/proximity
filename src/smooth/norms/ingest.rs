@@ -519,7 +519,7 @@ pub fn badset_from_gpu_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::norms::{bad_set, norm_table};
+    use crate::smooth::norms::{bad_set, norm_table};
 
     /// The ingest path must reproduce `bad_set` exactly on the golden
     /// s = 16 landscape when fed the CPU table serialized as GPU JSON

@@ -4,9 +4,9 @@
 
 use rayon::prelude::*;
 use std::time::Instant;
-use vanish::buckets::dp;
-use vanish::census;
-use vanish::code::m_struct;
+use vanish::smooth::buckets::dp;
+use vanish::smooth::census;
+use vanish::smooth::rung::m_struct;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
 

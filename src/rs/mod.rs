@@ -1,0 +1,10 @@
+//! Generic Reed–Solomon codes and the list-decoding **discovery** machinery —
+//! the `RS[F_p, D, k]` layer over any evaluation domain, decoupled from the
+//! smooth-subgroup structure: the code ([`code`]), exact/sampled list decoding
+//! ([`decode`]), bottom-up cluster growth and optimization ([`cluster`]), and
+//! the graded structure diagnostic ([`classify`]).
+
+pub mod classify;
+pub mod cluster;
+pub mod code;
+pub mod decode;

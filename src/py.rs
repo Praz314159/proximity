@@ -6,10 +6,11 @@
 // false positive at this expansion site.
 #![allow(clippy::useless_conversion)]
 
-use crate::buckets::{dp, mitm};
-use crate::code;
+use crate::smooth::buckets::{dp, mitm};
+use crate::rs::code;
+use crate::smooth::rung;
 use crate::domain::MultiplicativeSubgroup;
-use crate::{census, field};
+use crate::{field, smooth::census};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -71,7 +72,7 @@ fn buckets_e(p: u64, s: usize, r: usize, q: usize, lams: Vec<Vec<u64>>) -> PyRes
 /// The common `(e_1..e_q)` of the Theorem-A rung family (the optimal structural construction).
 #[pyfunction]
 fn rung_lambda_e(p: u64, s: usize, r: usize, q: usize) -> PyResult<Vec<u64>> {
-    err(code::rung_lambda(&sub(p, s)?, r, q))
+    err(rung::rung_lambda(&sub(p, s)?, r, q))
 }
 
 /// Anatomy of a q=1 bucket: returns `(total, per_weight_class_counts)`; total equals the DP bucket exactly.
@@ -83,7 +84,7 @@ fn decompose_bucket_q1(p: u64, s: usize, r: usize, lam: u64) -> PyResult<(u64, V
 /// The quantized-ladder structural maximum `C(s/2^t - [r0!=0], floor(r/2^t))`, `t = ceil(log2(q+1))`.
 #[pyfunction]
 fn m_struct(s: usize, r: usize, q: usize) -> u64 {
-    code::m_struct(s, r, q)
+    rung::m_struct(s, r, q)
 }
 
 /// Elements of the order-s subgroup of F_p^* as consecutive powers `[w^0, ..., w^{s-1}]`.
@@ -140,7 +141,7 @@ fn sweep_stats_q1(py: Python<'_>, s: usize, r: usize, primes: Vec<u64>) -> PyRes
 /// inflated value; tiers 1-2 return the structural zero-class size).
 #[pyfunction]
 fn certify_q1(p: u64, s: usize, r: usize) -> PyResult<(u8, u64, u64)> {
-    use crate::certify::{certify_q1 as cert, Verdict};
+    use crate::smooth::certify::{certify_q1 as cert, Verdict};
     let c = err(cert(&sub(p, s)?, r))?;
     Ok(match c.verdict {
         Verdict::AllBucketsStructural => (1, c.m_struct, c.zero_class),
@@ -161,7 +162,7 @@ fn primes_1_mod(s: u64, lo: u64, hi: u64) -> Vec<u64> {
 /// Structural class size C(s/2 - w, (r - w)/2) (0 when parity/range infeasible).
 #[pyfunction]
 fn class_size(s: usize, r: usize, w: usize) -> u64 {
-    code::class_size(s, r, w)
+    rung::class_size(s, r, w)
 }
 
 /// A decomposition row: (p, total, per-weight class counts).
@@ -246,7 +247,7 @@ fn rung_buckets_many(
                 let sg = MultiplicativeSubgroup::new(p, s)?;
                 let mut row = Vec::with_capacity(qs.len());
                 for &q in &qs {
-                    let lam = code::rung_lambda(&sg, r, q)?;
+                    let lam = rung::rung_lambda(&sg, r, q)?;
                     let t = mitm::HalfTables::build(&sg, r, q)?;
                     row.push(t.bucket(&lam)?);
                 }
@@ -265,7 +266,7 @@ fn certify_many(
     r: usize,
     primes: Vec<u64>,
 ) -> PyResult<Vec<(u64, u8, u64, u64)>> {
-    use crate::certify::{certify_q1 as cert, Verdict};
+    use crate::smooth::certify::{certify_q1 as cert, Verdict};
     use rayon::prelude::*;
     py.allow_threads(|| {
         primes
@@ -293,11 +294,11 @@ type BadRow = (u64, Vec<u64>, bool);
 /// exact per-weight counts (p^2-divisibility handled by census fallback).
 #[pyfunction]
 fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<BadRow>> {
-    py.allow_threads(|| crate::norms::bad_set(s, wmax, cmax))
+    py.allow_threads(|| crate::smooth::norms::bad_set(s, wmax, cmax))
         .map(|v| {
             v.into_iter()
                 .map(|e| {
-                    let cf = e.provenance == crate::norms::Provenance::CensusCorrected;
+                    let cf = e.provenance == crate::smooth::norms::Provenance::CensusCorrected;
                     (e.p, e.counts, cf)
                 })
                 .collect()
@@ -309,7 +310,7 @@ fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<V
 /// as decimal strings (values can exceed u64 at large s).
 #[pyfunction]
 fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<String>> {
-    py.allow_threads(|| crate::norms::norm_table(s, wmax, cmax))
+    py.allow_threads(|| crate::smooth::norms::norm_table(s, wmax, cmax))
         .map(|t| t.n_max_by_weight().iter().map(|n| n.to_string()).collect())
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
@@ -332,7 +333,7 @@ fn badset_from_gpu_json(
 ) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64)> {
     let (rows, stats) = py
         .allow_threads(|| {
-            crate::norms::ingest::badset_from_gpu_json(&paths, s, wmax, Some(&out_prefix))
+            crate::smooth::norms::ingest::badset_from_gpu_json(&paths, s, wmax, Some(&out_prefix))
         })
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let n = rows.len() as u64;
@@ -351,7 +352,7 @@ fn badset_from_gpu_json(
     std::fs::write(format!("{out_prefix}.counts.bin"), cb).map_err(werr)?;
     std::fs::write(format!("{out_prefix}.flags.bin"), fb).map_err(werr)?;
     // outputs are durable: the crash-recovery checkpoint has served its purpose
-    crate::norms::ingest::clear_checkpoint(&out_prefix);
+    crate::smooth::norms::ingest::clear_checkpoint(&out_prefix);
     Ok((
         n,
         stats.mass_by_weight,
@@ -373,8 +374,8 @@ fn list_decode(
     t: usize,
 ) -> PyResult<Vec<Vec<u64>>> {
     let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
-    let oracle = crate::decode::DecodeOracle::new(&rs);
-    err(oracle.list(&word, crate::decode::Radius::agreement(t)))
+    let oracle = crate::rs::decode::DecodeOracle::new(&rs);
+    err(oracle.list(&word, crate::rs::decode::Radius::agreement(t)))
 }
 
 /// One code-first optimization run on `RS[F_p, domain, k]`: build a random
@@ -394,9 +395,9 @@ fn anneal_pencil(
     seed: u64,
 ) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
     let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
-    let rad = crate::decode::Radius::agreement(t);
-    let seedw = err(crate::cluster::random_pencil_seed(&rs, petals, seed))?;
-    let (cl, tr) = err(crate::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed))?;
+    let rad = crate::rs::decode::Radius::agreement(t);
+    let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
+    let (cl, tr) = err(crate::rs::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed))?;
     Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
 }
 

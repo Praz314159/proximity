@@ -401,10 +401,35 @@ fn anneal_pencil(
     Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
 }
 
+/// One code-first run to **convergence**: build a random pencil seed and greedily
+/// hill-climb (boundary-alignment flips) until no flip increases the list — a
+/// true local maximum of the list size. `max_flips` is a safety cap (set it
+/// well above the achievable list size; convergence normally halts first).
+/// Returns `(center, members, size_trajectory)`; the trajectory is monotone and
+/// its last value is the converged local-max list size. Deterministic in `seed`.
+#[pyfunction]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn optimize_pencil(
+    p: u64,
+    domain: Vec<u64>,
+    k: usize,
+    t: usize,
+    petals: usize,
+    max_flips: usize,
+    seed: u64,
+) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
+    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
+    let rad = crate::rs::decode::Radius::agreement(t);
+    let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
+    let (cl, tr) = err(crate::rs::cluster::optimize(&rs, &seedw, rad, 1, max_flips))?;
+    Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q2, m)?)?;
     m.add_function(wrap_pyfunction!(census_direct, m)?)?;

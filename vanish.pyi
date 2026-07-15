@@ -105,3 +105,10 @@ def anneal_pencil(
     """One code-first optimization run: random pencil seed annealed to maximize
     list size. Returns (center, members, size_trajectory). Loop over `seed` to
     collect a discovery dataset."""
+
+def optimize_pencil(
+    p: int, domain: List[int], k: int, t: int, petals: int, max_flips: int, seed: int
+) -> Tuple[List[int], List[List[int]], List[int]]:
+    """One code-first run to convergence: random pencil seed, greedily hill-climb
+    boundary-alignment flips until no flip increases the list (a true local
+    maximum). Returns (center, members, monotone size_trajectory)."""

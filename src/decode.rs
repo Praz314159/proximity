@@ -8,19 +8,11 @@
 //! (`arbitrary word -> bucket`): the only tool that can compare a generic
 //! word's list against the structured buckets.
 //!
-//! ## The seam
-//!
-//! [`ListOracle`] is the shared contract — "the size of the list of a word."
-//! Two implementations meet here:
-//! - [`DecodeOracle`]: brute list decoding, valid for *any* word (the new
-//!   axis).
-//! - [`ExactC5Oracle`]: the count-via-exactness path for a C.5 word (the
-//!   existing axis, wrapping [`crate::buckets`]).
-//!
-//! The **exactness theorem** is then a checkable equality: the two oracles
-//! must return the same size on a C.5 word (`tests`). The **reduction defect**
-//! ([`reduction_defect`]) is a subtraction across the seam: a generic word's
-//! decoded list size minus the largest bucket the same radius can explain.
+//! Generic over the evaluation domain — nothing here depends on the
+//! multiplicative-subgroup structure; it decodes `RS[F_p, D, k]` for any domain
+//! `D`. The exactness bridge to [`crate::buckets`] (decode a C.5 word, check its
+//! size equals the counted bucket) is validated in the tests, on a subgroup
+//! domain where buckets are defined.
 //!
 //! ## Cost
 //!
@@ -33,7 +25,6 @@
 //! pruning) is the documented scaling path; the exact engine stays the ground
 //! truth the rest is validated against.
 
-use crate::buckets::mitm::HalfTables;
 use crate::code::ReedSolomon;
 use crate::error::{Error, Result};
 use crate::field::{binom, mulmod, powmod};
@@ -75,11 +66,9 @@ impl Radius {
     }
 }
 
-/// The shared contract of the two axes: the size of the list of a word.
-///
-/// Deliberately size-only — that is the common denominator. [`DecodeOracle`]
-/// additionally exposes the codewords themselves; [`ExactC5Oracle`] can only
-/// count.
+/// The contract "the size of the list of a word." Deliberately size-only, so a
+/// count-only path (e.g. the bucket count in the tests) can meet a full decoder
+/// through one interface; [`DecodeOracle`] additionally exposes the codewords.
 pub trait ListOracle {
     /// `|List(C, radius, word)|`.
     fn list_size(&self, word: &[u64], radius: Radius) -> Result<u64>;
@@ -88,13 +77,13 @@ pub trait ListOracle {
 /// Brute list decoder for an arbitrary word (the decode axis).
 #[derive(Debug, Clone, Copy)]
 pub struct DecodeOracle<'a> {
-    rs: &'a ReedSolomon<'a>,
+    rs: &'a ReedSolomon,
 }
 
 impl<'a> DecodeOracle<'a> {
     /// A decoder for the given code.
     #[must_use]
-    pub fn new(rs: &'a ReedSolomon<'a>) -> Self {
+    pub fn new(rs: &'a ReedSolomon) -> Self {
         DecodeOracle { rs }
     }
 
@@ -121,8 +110,8 @@ impl<'a> DecodeOracle<'a> {
                 "C(n, k) exceeds the exact cap; use list_size_atleast".into(),
             ));
         }
-        let p = self.rs.domain().p();
-        let dom = self.rs.domain().elements();
+        let p = self.rs.p();
+        let dom = self.rs.points();
         let mut seen: HashSet<Vec<u64>> = HashSet::new();
         let mut out: Vec<Vec<u64>> = Vec::new();
         for_each_combination(n, k, |idx| {
@@ -196,8 +185,8 @@ impl<'a> DecodeOracle<'a> {
         if t < k {
             return Err(Error::Unsupported("needs agreement t >= k".into()));
         }
-        let p = self.rs.domain().p();
-        let dom = self.rs.domain().elements();
+        let p = self.rs.p();
+        let dom = self.rs.points();
         let mut rng = SplitMix64::new(seed);
         let mut seen: HashSet<Vec<u64>> = HashSet::new();
         for _ in 0..samples {
@@ -225,79 +214,11 @@ impl ListOracle for DecodeOracle<'_> {
     }
 }
 
-/// The count-via-exactness path (the existing axis) as a [`ListOracle`]:
-/// answers for exactly one C.5 word, by counting its bucket.
-///
-/// Constructed from `(rs, r, lambda)`; materializes its own C.5 word via
-/// [`ReedSolomon::c5_word`]. Its [`ListOracle::list_size`] answers only for
-/// that word at radius `agreement(r)` — the regime where the exactness theorem
-/// applies — and returns [`Error::Unsupported`] otherwise. This is what makes
-/// the two axes comparable through one interface.
-#[derive(Debug, Clone)]
-pub struct ExactC5Oracle<'a> {
-    rs: &'a ReedSolomon<'a>,
-    r: usize,
-    lambda: Vec<u64>,
-    word: Vec<u64>,
-}
-
-impl<'a> ExactC5Oracle<'a> {
-    /// The exact oracle for the C.5 word at `(r, lambda)` (`q = lambda.len()`).
-    pub fn new(rs: &'a ReedSolomon<'a>, r: usize, lambda: &[u64]) -> Result<Self> {
-        let word = rs.c5_word(r, lambda)?;
-        Ok(ExactC5Oracle {
-            rs,
-            r,
-            lambda: lambda.to_vec(),
-            word,
-        })
-    }
-
-    /// The materialized C.5 word (feed this to a [`DecodeOracle`] to cross the
-    /// seam).
-    #[must_use]
-    pub fn word(&self) -> &[u64] {
-        &self.word
-    }
-}
-
-impl ListOracle for ExactC5Oracle<'_> {
-    fn list_size(&self, word: &[u64], radius: Radius) -> Result<u64> {
-        if word != self.word.as_slice() {
-            return Err(Error::Unsupported(
-                "ExactC5Oracle answers only for its own C.5 word".into(),
-            ));
-        }
-        if radius.min_agreement() != self.r {
-            return Err(Error::Unsupported(
-                "exactness holds at radius agreement(r) = 1 - r/n".into(),
-            ));
-        }
-        // Equality (not just the >= payoff bound) requires exactly q symmetric
-        // constraints on the r-subsets, i.e. k = r - q. Away from it the list
-        // is strictly larger (k > r - q) or smaller (k < r - q) than the bucket.
-        if self.rs.k() + self.lambda.len() != self.r {
-            return Err(Error::Unsupported(
-                "exactness (list == bucket) holds only at k = r - q".into(),
-            ));
-        }
-        let tables = HalfTables::build(self.rs.domain(), self.r, self.lambda.len())?;
-        tables.bucket(&self.lambda)
-    }
-}
-
-/// The reduction defect at a generic word (`q = 1`): its decoded list size at
-/// radius `1 - r/n`, minus the largest `q = 1` bucket at `(s, r)`.
-///
-/// `> 0` means the word out-lists *every* structured word at this radius — a
-/// violation of bucket-extremality, i.e. a candidate new attack. `<= 0` is
-/// consistent with buckets being the worst case. This is D4 of the data
-/// program, expressed as one subtraction across the seam.
-pub fn reduction_defect(rs: &ReedSolomon, word: &[u64], r: usize) -> Result<i128> {
-    let decoded = DecodeOracle::new(rs).list_size(word, Radius::agreement(r))? as i128;
-    let (best_bucket, _) = crate::buckets::dp::distribution_q1(rs.domain(), r)?.max();
-    Ok(decoded - best_bucket as i128)
-}
+// The exactness bridge (decode == bucket for a C.5 word) and the reduction
+// defect are subgroup/bucket-specific, so they are not part of the generic
+// decode API: the bridge is validated in this module's tests, and the defect
+// (D4) is computed in the Python discovery layer via `list_decode` + the bucket
+// bindings. Keeping them out leaves `decode` generic over the domain.
 
 // ---- interpolation, enumeration, rng ------------------------------------
 
@@ -406,28 +327,29 @@ mod tests {
     /// the count axis must agree on it.
     #[test]
     fn exactness_bridge_s16() {
+        use crate::buckets::mitm::HalfTables;
         let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
-        let exact = ExactC5Oracle::new(&rs, 8, &[0]).unwrap();
-        let f = exact.word().to_vec();
-        let rad = Radius::agreement(8);
-
-        let counted = exact.list_size(&f, rad).unwrap();
-        let decoded = DecodeOracle::new(&rs).list_size(&f, rad).unwrap();
-
+        let rs = ReedSolomon::new(&sg, 7).unwrap(); // k = r - q = 7
+        let f = rs.c5_word(8, &[0]).unwrap();
+        let decoded = DecodeOracle::new(&rs).list_size(&f, Radius::agreement(8)).unwrap();
+        let counted = HalfTables::build(&sg, 8, 1).unwrap().bucket(&[0]).unwrap();
         assert_eq!(counted, 70, "structural zero bucket C(8,4)");
-        assert_eq!(decoded, counted, "exactness theorem: decode == count");
+        assert_eq!(decoded, counted, "exactness: decode == counted bucket");
     }
 
-    /// At the max-bucket word the reduction defect is zero: the C.5 word for
-    /// `lambda = 0` realizes the largest `q = 1` bucket, so decode == best
-    /// bucket.
+    /// The decoder is generic over the domain: it works on an arbitrary
+    /// distinct-point domain that is not a multiplicative subgroup, and rejects
+    /// duplicate points.
     #[test]
-    fn defect_zero_at_max_word() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
-        let f = rs.c5_word(8, &[0]).unwrap();
-        assert_eq!(reduction_defect(&rs, &f, 8).unwrap(), 0);
+    fn decodes_on_a_generic_domain() {
+        let p = 65537;
+        let pts: Vec<u64> = (3u64..15).map(|x| x * x % p).collect(); // 12 non-subgroup points
+        let rs = ReedSolomon::on_domain(p, pts, 5).unwrap();
+        let cw = rs.encode(&[1, 2, 3, 4, 5]).unwrap();
+        let list = DecodeOracle::new(&rs).list(&cw, Radius::agreement(6)).unwrap();
+        assert_eq!(list.len(), 1, "only the codeword itself agrees on >= 6 points");
+        assert_eq!(list[0], cw);
+        assert!(ReedSolomon::on_domain(p, vec![1, 1, 2, 3, 4], 3).is_err());
     }
 
     /// The Monte-Carlo lower bound never exceeds the exact list size and, given

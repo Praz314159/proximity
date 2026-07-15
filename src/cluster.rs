@@ -126,8 +126,8 @@ pub fn pencil_seed(
     petal_point: usize,
     petal_values: &[u64],
 ) -> Result<Vec<u64>> {
-    let (n, k, p) = (rs.n(), rs.k(), rs.domain().p());
-    let dom = rs.domain().elements();
+    let (n, k, p) = (rs.n(), rs.k(), rs.p());
+    let dom = rs.points();
     if core_coords.len() != k - 1 || core_values.len() != k - 1 {
         return Err(Error::OutOfRange("core must have exactly k-1 points".into()));
     }
@@ -164,7 +164,7 @@ pub fn pencil_seed(
 /// a random codeword, and `petals` distinct petal values. The unbiased,
 /// code-first start for [`search`]. Deterministic in `seed`.
 pub fn random_pencil_seed(rs: &ReedSolomon, petals: usize, seed: u64) -> Result<Vec<u64>> {
-    let (n, k, p) = (rs.n(), rs.k(), rs.domain().p());
+    let (n, k, p) = (rs.n(), rs.k(), rs.p());
     let mut s = seed;
     let mut coords: Vec<usize> = (0..n).collect();
     for i in 0..k {

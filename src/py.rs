@@ -360,34 +360,40 @@ fn badset_from_gpu_json(
     ))
 }
 
-/// Exact list decode: every codeword (as its evaluation vector on the domain)
-/// agreeing with `word` on at least `t` of the n = s coordinates. Requires
-/// `t >= k`. The structure-neutral primitive for discovery.
+/// Exact list decode of a generic RS code `RS[F_p, domain, k]`: every codeword
+/// (as its evaluation vector) agreeing with `word` on at least `t` of the
+/// `n = len(domain)` coordinates. `domain` is any list of distinct field
+/// elements (e.g. `subgroup(p, s)`, or an arbitrary set). Requires `t >= k`.
 #[pyfunction]
-fn list_decode(p: u64, s: usize, k: usize, word: Vec<u64>, t: usize) -> PyResult<Vec<Vec<u64>>> {
-    let sg = sub(p, s)?;
-    let rs = err(code::ReedSolomon::new(&sg, k))?;
+fn list_decode(
+    p: u64,
+    domain: Vec<u64>,
+    k: usize,
+    word: Vec<u64>,
+    t: usize,
+) -> PyResult<Vec<Vec<u64>>> {
+    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
     let oracle = crate::decode::DecodeOracle::new(&rs);
     err(oracle.list(&word, crate::decode::Radius::agreement(t)))
 }
 
-/// One code-first optimization run: build a random pencil seed and anneal it to
-/// maximize list size. Returns `(center, members, size_trajectory)` — the raw
-/// cluster (member codewords as evaluation vectors) plus the per-move list-size
-/// trajectory. Loop over `seed` in Python to collect a discovery dataset.
+/// One code-first optimization run on `RS[F_p, domain, k]`: build a random
+/// pencil seed and anneal it to maximize list size. Returns
+/// `(center, members, size_trajectory)` — the raw cluster (member codewords as
+/// evaluation vectors) plus the per-move list-size trajectory. Loop over `seed`
+/// in Python to collect a discovery dataset. `domain` is any distinct-point set.
 #[pyfunction]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn anneal_pencil(
     p: u64,
-    s: usize,
+    domain: Vec<u64>,
     k: usize,
     t: usize,
     petals: usize,
     steps: usize,
     seed: u64,
 ) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
-    let sg = sub(p, s)?;
-    let rs = err(code::ReedSolomon::new(&sg, k))?;
+    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
     let rad = crate::decode::Radius::agreement(t);
     let seedw = err(crate::cluster::random_pencil_seed(&rs, petals, seed))?;
     let (cl, tr) = err(crate::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed))?;

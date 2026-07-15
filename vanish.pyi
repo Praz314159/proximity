@@ -94,12 +94,13 @@ def badset_from_gpu_json(
     completed shard, a rerun resumes from it automatically (re-factoring at
     most one shard), and the checkpoint is removed once outputs are written."""
 
-def list_decode(p: int, s: int, k: int, word: List[int], t: int) -> List[List[int]]:
-    """Exact list decode: every codeword (evaluation vector on the domain)
-    agreeing with `word` on >= t of the n = s coordinates. Requires t >= k."""
+def list_decode(p: int, domain: List[int], k: int, word: List[int], t: int) -> List[List[int]]:
+    """Exact list decode of RS[F_p, domain, k]: every codeword (evaluation
+    vector) agreeing with `word` on >= t of the n = len(domain) coordinates.
+    `domain` is any distinct-point set (e.g. subgroup(p, s)). Requires t >= k."""
 
 def anneal_pencil(
-    p: int, s: int, k: int, t: int, petals: int, steps: int, seed: int
+    p: int, domain: List[int], k: int, t: int, petals: int, steps: int, seed: int
 ) -> Tuple[List[int], List[List[int]], List[int]]:
     """One code-first optimization run: random pencil seed annealed to maximize
     list size. Returns (center, members, size_trajectory). Loop over `seed` to

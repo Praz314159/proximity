@@ -12,35 +12,61 @@ use crate::domain::Subgroup;
 use crate::error::{Error, Result};
 use crate::field::{binom, mulmod, powmod};
 
-/// `RS[F_p, mu_s, k]`: polynomials of degree `< k` evaluated on the subgroup.
+/// `RS[F_p, D, k]`: polynomials of degree `< k` evaluated on an explicit domain
+/// `D` of `n` distinct points in `F_p`. Generic — a multiplicative subgroup
+/// ([`Self::on_subgroup`]) is one way to build `D`, not a requirement. The
+/// discovery layer (`decode`/`cluster`/`classify`) works on any `D`; the
+/// bucket/census/accident machinery stays subgroup-specific.
 #[derive(Debug, Clone)]
-pub struct ReedSolomon<'a> {
-    domain: &'a Subgroup,
+pub struct ReedSolomon {
+    p: u64,
+    points: Vec<u64>,
     k: usize,
 }
 
-impl<'a> ReedSolomon<'a> {
-    /// Construct `RS[F_p, mu_s, k]` on the given domain; validates
-    /// `1 <= k <= n`.
-    pub fn new(domain: &'a Subgroup, k: usize) -> Result<Self> {
-        if k == 0 || k > domain.order() {
+impl ReedSolomon {
+    /// Construct `RS[F_p, D, k]` on an explicit domain: `points` distinct
+    /// elements of `F_p`, degree `< k`. Validates `1 <= k <= n` and distinctness.
+    pub fn on_domain(p: u64, points: Vec<u64>, k: usize) -> Result<Self> {
+        let n = points.len();
+        if k == 0 || k > n {
             return Err(Error::OutOfRange(format!(
-                "message length k = {k} outside [1, n = {}]",
-                domain.order()
+                "message length k = {k} outside [1, n = {n}]"
             )));
         }
-        Ok(ReedSolomon { domain, k })
+        let mut sorted = points.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != n {
+            return Err(Error::OutOfRange("evaluation points must be distinct".into()));
+        }
+        Ok(ReedSolomon { p, points, k })
     }
 
-    /// The evaluation domain.
-    #[must_use]
-    pub fn domain(&self) -> &Subgroup {
-        self.domain
+    /// Construct on a multiplicative-subgroup domain (the smooth SNARK case).
+    pub fn on_subgroup(sg: &Subgroup, k: usize) -> Result<Self> {
+        Self::on_domain(sg.p(), sg.elements().to_vec(), k)
     }
-    /// Code length `n = s`.
+
+    /// Alias for [`Self::on_subgroup`], kept for existing callers.
+    pub fn new(sg: &Subgroup, k: usize) -> Result<Self> {
+        Self::on_subgroup(sg, k)
+    }
+
+    /// The field characteristic.
+    #[must_use]
+    pub fn p(&self) -> u64 {
+        self.p
+    }
+    /// The evaluation domain (`n` points).
+    #[must_use]
+    pub fn points(&self) -> &[u64] {
+        &self.points
+    }
+    /// Code length `n = |D|`.
     #[must_use]
     pub fn n(&self) -> usize {
-        self.domain.order()
+        self.points.len()
     }
     /// Message length `k`.
     #[must_use]
@@ -77,10 +103,9 @@ impl<'a> ReedSolomon<'a> {
         if message.len() != self.k {
             return Err(Error::OutOfRange("message length != k".into()));
         }
-        let p = self.domain.p();
+        let p = self.p;
         Ok(self
-            .domain
-            .elements()
+            .points
             .iter()
             .map(|&x| {
                 message
@@ -92,7 +117,7 @@ impl<'a> ReedSolomon<'a> {
     }
 }
 
-impl ReedSolomon<'_> {
+impl ReedSolomon {
     /// Materialize the C.5-form (payoff) word on the domain: the "frozen head"
     /// `f(x) = sum_{i=0}^q (-1)^i lambda_i x^{r-i}` (with `lambda_0 = 1`, `m = 1`).
     ///
@@ -111,10 +136,9 @@ impl ReedSolomon<'_> {
         if r >= self.n() || q > r {
             return Err(Error::OutOfRange("need q <= r < n".into()));
         }
-        let p = self.domain.p();
+        let p = self.p;
         Ok(self
-            .domain
-            .elements()
+            .points
             .iter()
             .map(|&x| {
                 let mut acc = 0u64;

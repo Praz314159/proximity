@@ -27,18 +27,6 @@ use std::collections::BTreeMap;
 /// The largest number of leading symmetric functions to profile.
 const SIG_CAP: usize = 8;
 
-/// How far the symmetric structure of a bucket is prime-specific.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Accidental {
-    /// No accident inflates any bucket at these parameters (certified).
-    Structural,
-    /// Accidents at this prime merge structural classes (certified nonempty
-    /// census).
-    Inflated,
-    /// Not determined (outside the `q = 1`, `s <= 32` certification range).
-    Unknown,
-}
-
 /// Distributional summary of one symmetric function `e_i` over a list's
 /// agreement sets.
 #[derive(Debug, Clone, PartialEq)]
@@ -90,8 +78,6 @@ pub enum WordKind {
         frozen_q: usize,
         /// The frozen values `(e_1, ..., e_{frozen_q})`.
         lambda: Vec<u64>,
-        /// Whether an accident inflates the bucket at this prime (best effort).
-        accident: Accidental,
         /// The list size.
         list_size: u64,
     },
@@ -114,8 +100,8 @@ pub enum WordKind {
 pub fn structure(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<ListStructure> {
     let list = DecodeOracle::new(rs).list(word, radius)?;
     let list_size = list.len() as u64;
-    let p = rs.domain().p();
-    let dom = rs.domain().elements();
+    let p = rs.p();
+    let dom = rs.points();
     let sets: Vec<Vec<u64>> = list
         .iter()
         .map(|cw| {
@@ -201,7 +187,6 @@ pub fn classify(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<WordKi
             r,
             frozen_q,
             lambda,
-            accident: accident_status(rs, r),
             list_size: st.list_size,
         })
     } else {
@@ -227,22 +212,6 @@ fn shannon_bits(counts: &[u64]) -> f64 {
             pr * pr.log2()
         })
         .sum::<f64>()
-}
-
-/// Best-effort structural-vs-accident flag via [`crate::certify`] (only the
-/// `q = 1`, power-of-two `s <= 32` range is certifiable; `Unknown` otherwise).
-fn accident_status(rs: &ReedSolomon, r: usize) -> Accidental {
-    let sg = rs.domain();
-    if !sg.is_two_smooth() || sg.order() > 32 || r == 0 || r >= sg.order() {
-        return Accidental::Unknown;
-    }
-    match crate::certify::certify_q1(sg, r) {
-        Ok(cert) => match cert.verdict {
-            crate::certify::Verdict::AllBucketsStructural => Accidental::Structural,
-            _ => Accidental::Inflated,
-        },
-        Err(_) => Accidental::Unknown,
-    }
 }
 
 #[cfg(test)]
@@ -271,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn c5_word_classifies_as_structural_bucket() {
+    fn c5_word_classifies_as_bucket() {
         let sg = Subgroup::new(65537, 16).unwrap();
         let rs = ReedSolomon::new(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
@@ -280,14 +249,12 @@ mod tests {
                 r,
                 frozen_q,
                 lambda,
-                accident,
                 list_size,
             } => {
                 assert_eq!((r, frozen_q, list_size), (8, 1, 70));
                 assert_eq!(lambda, vec![0]);
-                assert_eq!(accident, Accidental::Structural);
             }
-            other => panic!("expected structural bucket, got {other:?}"),
+            other => panic!("expected bucket, got {other:?}"),
         }
     }
 }

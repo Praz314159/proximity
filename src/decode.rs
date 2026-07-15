@@ -311,8 +311,8 @@ fn inv(a: u64, p: u64) -> u64 {
 /// `(xs, ys)` and evaluate it at every point of `domain`, via the barycentric
 /// form (no monomial-coefficient conversion — the identity
 /// `sum_j w_j prod_{m != j}(X - x_m) = 1` keeps the denominator nonzero off the
-/// nodes).
-fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
+/// nodes). Shared with [`crate::cluster`] for building codewords from a pencil.
+pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
     let k = xs.len();
     let mut wts = vec![0u64; k];
     for j in 0..k {

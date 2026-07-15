@@ -8,14 +8,14 @@
 
 use crate::buckets::{dp, mitm};
 use crate::code;
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::{census, field};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-fn sub(p: u64, s: usize) -> PyResult<Subgroup> {
-    Subgroup::new(p, s).map_err(|e| PyValueError::new_err(e.to_string()))
+fn sub(p: u64, s: usize) -> PyResult<MultiplicativeSubgroup> {
+    MultiplicativeSubgroup::new(p, s).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 fn err<T>(r: crate::Result<T>) -> PyResult<T> {
@@ -125,7 +125,7 @@ fn sweep_stats_q1(py: Python<'_>, s: usize, r: usize, primes: Vec<u64>) -> PyRes
         primes
             .par_iter()
             .map(|&p| {
-                let d = dp::distribution_q1(&Subgroup::new(p, s)?, r)?;
+                let d = dp::distribution_q1(&MultiplicativeSubgroup::new(p, s)?, r)?;
                 let (mx, arg) = d.max();
                 Ok((p, mx, arg, d.occupied(), d.total(), d.second_moment()))
             })
@@ -181,7 +181,7 @@ fn decompose_many(
         primes
             .par_iter()
             .map(|&p| {
-                let sg = Subgroup::new(p, s)?;
+                let sg = MultiplicativeSubgroup::new(p, s)?;
                 let (t, pw) = mitm::decompose_bucket_q1(&sg, r, 0)?;
                 Ok((p, t, pw))
             })
@@ -243,7 +243,7 @@ fn rung_buckets_many(
         primes
             .par_iter()
             .map(|&p| {
-                let sg = Subgroup::new(p, s)?;
+                let sg = MultiplicativeSubgroup::new(p, s)?;
                 let mut row = Vec::with_capacity(qs.len());
                 for &q in &qs {
                     let lam = code::rung_lambda(&sg, r, q)?;
@@ -271,7 +271,7 @@ fn certify_many(
         primes
             .par_iter()
             .map(|&p| {
-                let c = cert(&Subgroup::new(p, s)?, r)?;
+                let c = cert(&MultiplicativeSubgroup::new(p, s)?, r)?;
                 Ok(match c.verdict {
                     Verdict::AllBucketsStructural => (p, 1u8, c.m_struct, c.zero_class),
                     Verdict::ZeroBucketStructural { .. } => (p, 2, c.m_struct, c.zero_class),

@@ -10,7 +10,7 @@
 //! rotation. Intended for `p <= ~700`.
 
 use crate::buckets::BucketDistribution;
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use rayon::prelude::*;
 
@@ -33,7 +33,7 @@ fn add_rotated(dst: &mut [u64], src: &[u64], shift: usize) {
     add(d2, &src[..n - s]);
 }
 
-fn check(sg: &Subgroup, r: usize) -> Result<()> {
+fn check(sg: &MultiplicativeSubgroup, r: usize) -> Result<()> {
     if sg.order() > 64 {
         return Err(Error::Unsupported(
             "u64-exact DP requires s <= 64 (CRT variant is a tracked issue)".into(),
@@ -47,7 +47,7 @@ fn check(sg: &Subgroup, r: usize) -> Result<()> {
 
 /// Exact `q = 1` distribution: `N(lambda) = #{ |S| = r : e_1(S) = lambda }`
 /// for every `lambda in F_p`.
-pub fn distribution_q1(sg: &Subgroup, r: usize) -> Result<BucketDistribution> {
+pub fn distribution_q1(sg: &MultiplicativeSubgroup, r: usize) -> Result<BucketDistribution> {
     check(sg, r)?;
     let pp = sg.p() as usize;
     let mut t: Vec<Vec<u64>> = (0..=r).map(|_| vec![0u64; pp]).collect();
@@ -66,7 +66,7 @@ pub fn distribution_q1(sg: &Subgroup, r: usize) -> Result<BucketDistribution> {
 
 /// Exact `q = 2` joint distribution, row-major `p x p`
 /// (`index = e1 * p + e2`).
-pub fn distribution_q2(sg: &Subgroup, r: usize) -> Result<Vec<u64>> {
+pub fn distribution_q2(sg: &MultiplicativeSubgroup, r: usize) -> Result<Vec<u64>> {
     check(sg, r)?;
     let pp = sg.p() as usize;
     if pp > 1 << 11 {

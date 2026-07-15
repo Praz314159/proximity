@@ -9,7 +9,7 @@
 //!
 //! - [`field`]: arithmetic over `F_p` (primality, generators, factorization).
 //! - [`domain`]: the core object — a multiplicative subgroup `mu_s <= F_p^*`
-//!   ([`domain::Subgroup`]), with its cosets and dilation structure.
+//!   ([`domain::MultiplicativeSubgroup`]), with its cosets and dilation structure.
 //! - [`code`]: Reed–Solomon codes on a subgroup domain
 //!   ([`code::ReedSolomon`]), their radii (capacity, Johnson), the C.5-form
 //!   extremal words, and the quantized-ladder combinatorics
@@ -46,9 +46,9 @@
 //! ## Example
 //!
 //! ```
-//! use vanish::{domain::Subgroup, buckets};
+//! use vanish::{domain::MultiplicativeSubgroup, buckets};
 //!
-//! let sg = Subgroup::new(3457, 32).unwrap();
+//! let sg = MultiplicativeSubgroup::new(3457, 32).unwrap();
 //! let dist = buckets::dp::distribution_q1(&sg, 16).unwrap();
 //! let (max, lambda) = dist.max();
 //! assert_eq!(max, 220134);          // exhaustively verified golden value

@@ -22,7 +22,7 @@
 pub mod ingest;
 
 use crate::census;
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{factor, mulmod, powmod, primes_one_mod};
 use rayon::prelude::*;
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 /// Unique norm values with per-weight vector counts.
 #[derive(Debug, Clone)]
 pub struct NormTable {
-    /// Subgroup order the table was built for.
+    /// MultiplicativeSubgroup order the table was built for.
     pub s: usize,
     /// Weight cap.
     pub wmax: usize,
@@ -171,7 +171,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
     let tables: Vec<(u64, Vec<u64>)> = qs
         .iter()
         .map(|&q| {
-            let sg = Subgroup::new(q, s).expect("split prime");
+            let sg = MultiplicativeSubgroup::new(q, s).expect("split prime");
             (q, sg.elements().to_vec())
         })
         .collect();
@@ -281,7 +281,7 @@ pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
         .map(|(p, (val_counts, pp))| {
             if pp && s <= 32 {
                 // direct census: exact per-embedding counts by construction
-                let sg = Subgroup::new(p, s).expect("bad-set prime");
+                let sg = MultiplicativeSubgroup::new(p, s).expect("bad-set prime");
                 let c = census::mitm(&sg, cmax).expect("census fallback");
                 let mut counts = vec![0u64; wmax + 1];
                 for (w, slot) in counts.iter_mut().enumerate() {

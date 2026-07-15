@@ -1,5 +1,5 @@
 //! Error type for the public API. Construction of the core types
-//! ([`crate::domain::Subgroup`], [`crate::code::ReedSolomon`]) validates
+//! ([`crate::domain::MultiplicativeSubgroup`], [`crate::code::ReedSolomon`]) validates
 //! inputs once, so the analysis kernels can assume well-formed parameters.
 
 /// Errors returned by the public API.

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::process::exit;
 use vanish::buckets::{dp, mitm};
 use vanish::code::{m_struct, rung_lambda};
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
@@ -70,7 +70,7 @@ fn main() {
     match cmd.as_str() {
         "info" => {
             let (p, s) = (req(&m, "p"), req(&m, "s"));
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             println!(
                 "F_{p}, subgroup order {s}, w = {}, two-smooth = {}",
                 sg.w(),
@@ -94,13 +94,13 @@ fn main() {
                         .collect()
                 })
                 .unwrap_or_else(|| die("missing --lam (comma-separated e-values)"));
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let t = mitm::HalfTables::build(&sg, r, lam.len()).unwrap_or_else(|e| die(e));
             println!("{}", t.bucket(&lam).unwrap_or_else(|e| die(e)));
         }
         "rung" => {
             let (p, s, r, q) = (req(&m, "p"), req(&m, "s"), req(&m, "r"), req(&m, "q"));
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let lam = rung_lambda(&sg, r, q).unwrap_or_else(|e| die(e));
             let t = mitm::HalfTables::build(&sg, r, q).unwrap_or_else(|e| die(e));
             let b = t.bucket(&lam).unwrap_or_else(|e| die(e));
@@ -112,7 +112,7 @@ fn main() {
         "census" => {
             let (p, s) = (req(&m, "p"), req(&m, "s"));
             let cmax: i64 = opt(&m, "cmax", 2);
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let counts = if let Some(w) = m.get("wmax") {
                 let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
                 vanish::census::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
@@ -128,7 +128,7 @@ fn main() {
         "decompose" => {
             let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
             let lam: u64 = req(&m, "lam");
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let (total, per_w) = mitm::decompose_bucket_q1(&sg, r, lam).unwrap_or_else(|e| die(e));
             println!("bucket({lam}) = {total}");
             for (w, c) in per_w.iter().enumerate() {
@@ -149,7 +149,7 @@ fn main() {
             let mut rows: Vec<(f64, u64, u64, u64)> = primes
                 .par_iter()
                 .filter_map(|&p| {
-                    let sg = Subgroup::new(p, s).ok()?;
+                    let sg = MultiplicativeSubgroup::new(p, s).ok()?;
                     let d = dp::distribution_q1(&sg, r).ok()?;
                     let (mx, _) = d.max();
                     let ratio = mx as f64 / (m0 + cs / p as f64);
@@ -171,7 +171,7 @@ fn main() {
         }
         "toy" => {
             let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let t = vanish::toy::exact_soundness(&sg, r).unwrap_or_else(|e| die(e));
             println!(
                 "toy protocol (survey Sec. 6), canonical pair (x^{r}, x^{}), k = {}, \
@@ -191,7 +191,7 @@ fn main() {
         "certify" => {
             use vanish::certify::{certify_q1, Verdict};
             let (p, s, r) = (req(&m, "p"), req(&m, "s"), req(&m, "r"));
-            let sg = Subgroup::new(p, s).unwrap_or_else(|e| die(e));
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let c = certify_q1(&sg, r).unwrap_or_else(|e| die(e));
             match c.verdict {
                 Verdict::AllBucketsStructural => println!(

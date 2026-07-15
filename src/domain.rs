@@ -2,7 +2,7 @@
 //!
 //! Everything in this toolkit is an analysis of subsets of such a subgroup —
 //! bucket distributions, kernel censuses, winning sets. Constructing a
-//! [`Subgroup`] validates the arithmetic once (`p` prime, `s | p - 1`), after
+//! [`MultiplicativeSubgroup`] validates the arithmetic once (`p` prime, `s | p - 1`), after
 //! which the analysis kernels can assume well-formed inputs.
 //!
 //! Conventions: the subgroup is stored as consecutive powers
@@ -17,14 +17,14 @@ use crate::field::{find_generator, is_prime, mulmod, powmod};
 
 /// A multiplicative subgroup of order `s` in `F_p^*`.
 #[derive(Debug, Clone)]
-pub struct Subgroup {
+pub struct MultiplicativeSubgroup {
     p: u64,
     s: usize,
     w: u64,
     elements: Vec<u64>,
 }
 
-impl Subgroup {
+impl MultiplicativeSubgroup {
     /// Construct the order-`s` subgroup of `F_p^*`.
     ///
     /// Validates that `p` is prime, `s >= 2`, and `s | p - 1`.
@@ -50,7 +50,7 @@ impl Subgroup {
             x = mulmod(x, w, p);
         }
         debug_assert_eq!(x, 1);
-        Ok(Subgroup { p, s, w, elements })
+        Ok(MultiplicativeSubgroup { p, s, w, elements })
     }
 
     /// The field characteristic.
@@ -119,5 +119,66 @@ impl Subgroup {
                     .collect()
             })
             .collect())
+    }
+
+    /// This subgroup as an [`EvalDomain`] — the `m = 1` case where the RS
+    /// evaluation domain *is* the subgroup. (For `m > 1` towers, build the
+    /// domain from the fibers instead.)
+    #[must_use]
+    pub fn eval_domain(&self) -> EvalDomain {
+        EvalDomain::subgroup(self)
+    }
+}
+
+/// An evaluation domain for a Reed–Solomon code: `n` distinct points in `F_p`.
+/// The generic object a [`crate::code::ReedSolomon`] sits on — build one from a
+/// subgroup ([`Self::subgroup`]), an explicit set ([`Self::from_points`]), or
+/// (later) a coset or an `m > 1` tower. This is the seam between the algebraic
+/// [`MultiplicativeSubgroup`] (cosets, dilation, cyclotomic structure) and the
+/// bare point list the decoder needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalDomain {
+    p: u64,
+    points: Vec<u64>,
+}
+
+impl EvalDomain {
+    /// From an explicit list of distinct points in `F_p` (`n >= 2`).
+    pub fn from_points(p: u64, points: Vec<u64>) -> Result<Self> {
+        if points.len() < 2 {
+            return Err(Error::OutOfRange("need at least 2 evaluation points".into()));
+        }
+        let mut sorted = points.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != points.len() {
+            return Err(Error::OutOfRange("evaluation points must be distinct".into()));
+        }
+        Ok(EvalDomain { p, points })
+    }
+
+    /// The whole multiplicative subgroup as the domain (`m = 1`).
+    #[must_use]
+    pub fn subgroup(sg: &MultiplicativeSubgroup) -> Self {
+        EvalDomain {
+            p: sg.p(),
+            points: sg.elements().to_vec(),
+        }
+    }
+
+    /// The field characteristic.
+    #[must_use]
+    pub fn p(&self) -> u64 {
+        self.p
+    }
+    /// The `n` evaluation points.
+    #[must_use]
+    pub fn points(&self) -> &[u64] {
+        &self.points
+    }
+    /// The number of points `n`.
+    #[must_use]
+    pub fn n(&self) -> usize {
+        self.points.len()
     }
 }

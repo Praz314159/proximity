@@ -318,7 +318,7 @@ impl SplitMix64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Subgroup;
+    use crate::domain::MultiplicativeSubgroup;
 
     /// The exactness bridge: at `p = 65537` (accident-free at `s = 16`, since
     /// any `{-1,0,1}` accident needs `p <= w^{s/4} <= 8^4 = 4096`), the C.5
@@ -328,8 +328,8 @@ mod tests {
     #[test]
     fn exactness_bridge_s16() {
         use crate::buckets::mitm::HalfTables;
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap(); // k = r - q = 7
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap(); // k = r - q = 7
         let f = rs.c5_word(8, &[0]).unwrap();
         let decoded = DecodeOracle::new(&rs).list_size(&f, Radius::agreement(8)).unwrap();
         let counted = HalfTables::build(&sg, 8, 1).unwrap().bucket(&[0]).unwrap();
@@ -356,8 +356,8 @@ mod tests {
     /// enough samples, reaches it.
     #[test]
     fn sampling_is_a_lower_bound() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let rad = Radius::agreement(8);
         let exact = DecodeOracle::new(&rs).list_size(&f, rad).unwrap();

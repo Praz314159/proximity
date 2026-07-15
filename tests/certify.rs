@@ -4,12 +4,12 @@
 
 use vanish::buckets::dp;
 use vanish::certify::{certify_q1, Verdict};
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 
 #[test]
 fn golden_inflated_prime() {
     // p = 89633: one weight-6 orbit inflates the zero bucket to 29382
-    let sg = Subgroup::new(89633, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(89633, 32).unwrap();
     let c = certify_q1(&sg, 16).unwrap();
     match c.verdict {
         Verdict::Inflated {
@@ -32,7 +32,7 @@ fn golden_fermat_prime_tiers() {
     // p = 65537: {-1,0,1} census empty (zero bucket exactly structural 12870),
     // but [-2,2] vectors exist (w=2: 32) -> tier 2, matching the measured
     // landscape (DP max = 12870 = M_struct).
-    let sg = Subgroup::new(65537, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(65537, 32).unwrap();
     let c = certify_q1(&sg, 16).unwrap();
     match c.verdict {
         Verdict::ZeroBucketStructural {
@@ -53,23 +53,23 @@ fn certified_structural_at_large_prime() {
     // this a fast check even at 50-bit primes.
     let p = 562949953421729u64; // prime, = 1 mod 32, > 2^49
     assert!(vanish::field::is_prime(p) && (p - 1) % 32 == 0);
-    let sg = Subgroup::new(p, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(p, 32).unwrap();
     let c = certify_q1(&sg, 16).unwrap();
     assert_eq!(c.verdict, Verdict::AllBucketsStructural);
     assert_eq!(c.m_struct, 12870);
 
     // just above 2^32 the {-1,0,1} census is empty but [-2,2] vectors persist:
     // tier 2 (zero bucket exactly structural, other buckets unprotected).
-    let sg = Subgroup::new(4294967681, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(4294967681, 32).unwrap();
     let c = certify_q1(&sg, 16).unwrap();
     assert!(matches!(c.verdict, Verdict::ZeroBucketStructural { .. }));
 }
 
 #[test]
 fn certify_error_paths() {
-    let s6 = Subgroup::new(31, 6).unwrap();
+    let s6 = MultiplicativeSubgroup::new(31, 6).unwrap();
     assert!(certify_q1(&s6, 3).is_err(), "non-two-smooth rejected");
-    let sg = Subgroup::new(97, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(97, 32).unwrap();
     assert!(certify_q1(&sg, 0).is_err());
     assert!(certify_q1(&sg, 32).is_err());
 }

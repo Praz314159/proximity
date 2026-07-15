@@ -13,7 +13,7 @@
 //! the signed `c_i`; unsigned `e_i` appear only at the API boundary.
 
 use crate::code::class_size;
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use std::collections::HashMap;
 
@@ -69,7 +69,7 @@ fn e_to_signed(e: &[u64], p: u64) -> [u64; QCAP] {
 impl HalfTables {
     /// Build the tables. Requires an even subgroup order `s <= 32` and
     /// `1 <= q <= 8`, `r <= s`.
-    pub fn build(sg: &Subgroup, r: usize, q: usize) -> Result<Self> {
+    pub fn build(sg: &MultiplicativeSubgroup, r: usize, q: usize) -> Result<Self> {
         let s = sg.order();
         if s > 32 || s % 2 != 0 {
             return Err(Error::Unsupported(
@@ -151,7 +151,7 @@ impl HalfTables {
 /// enumerate every `eps in {-1, 0, 1}^{s/2}` with `sum eps_i w^i = lambda`
 /// by MitM over coordinate halves; returns `(sum of class sizes,
 /// per-weight class counts)`. The sum equals the DP bucket `N(lambda)`.
-pub fn decompose_bucket_q1(sg: &Subgroup, r: usize, lam: u64) -> Result<(u64, Vec<u64>)> {
+pub fn decompose_bucket_q1(sg: &MultiplicativeSubgroup, r: usize, lam: u64) -> Result<(u64, Vec<u64>)> {
     let s = sg.order();
     if s > 32 || !sg.is_two_smooth() {
         return Err(Error::Unsupported(

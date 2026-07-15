@@ -11,7 +11,7 @@
 //! class count (every challenge wins), then decaying like `classes / p`.
 
 use crate::buckets::dp;
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::Result;
 use crate::field::binom;
 
@@ -45,7 +45,7 @@ pub fn classes_count(s: usize, r: usize) -> u64 {
 
 /// Exact winning-set size and soundness for the canonical attack pair at
 /// `(p, s, r)` (cost scales with `p` via the full DP distribution).
-pub fn exact_soundness(sg: &Subgroup, r: usize) -> Result<ToySoundness> {
+pub fn exact_soundness(sg: &MultiplicativeSubgroup, r: usize) -> Result<ToySoundness> {
     let d = dp::distribution_q1(sg, r)?;
     let winning = d.occupied();
     Ok(ToySoundness {

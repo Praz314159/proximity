@@ -5,7 +5,7 @@
 use vanish::buckets::{dp, mitm};
 use vanish::census;
 use vanish::code::ReedSolomon;
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
 use vanish::Error;
 
@@ -41,7 +41,7 @@ fn random_invariants_mass_dilation_mitm() {
     let mut rng = Lcg(0xC0FFEE);
     for s in [8usize, 16, 32] {
         for &p in &primes_1_mod(s as u64, 100 + rng.below(1000), 2) {
-            let sg = Subgroup::new(p, s).unwrap();
+            let sg = MultiplicativeSubgroup::new(p, s).unwrap();
             let r = 2 + rng.below(s as u64 - 3) as usize;
             let d = dp::distribution_q1(&sg, r).unwrap();
             // mass
@@ -82,17 +82,17 @@ fn random_invariants_mass_dilation_mitm() {
 #[test]
 fn error_paths() {
     // core-type validation
-    assert!(matches!(Subgroup::new(3458, 32), Err(Error::NotPrime(_))));
+    assert!(matches!(MultiplicativeSubgroup::new(3458, 32), Err(Error::NotPrime(_))));
     assert!(matches!(
-        Subgroup::new(97, 31),
+        MultiplicativeSubgroup::new(97, 31),
         Err(Error::OrderDoesNotDivide { .. })
     ));
-    assert!(Subgroup::new(97, 1).is_err());
-    let sg = Subgroup::new(97, 32).unwrap();
-    assert!(ReedSolomon::new(&sg, 0).is_err());
-    assert!(ReedSolomon::new(&sg, 33).is_err());
+    assert!(MultiplicativeSubgroup::new(97, 1).is_err());
+    let sg = MultiplicativeSubgroup::new(97, 32).unwrap();
+    assert!(ReedSolomon::on_subgroup(&sg, 0).is_err());
+    assert!(ReedSolomon::on_subgroup(&sg, 33).is_err());
     // engine limits are errors, not panics
-    let big = Subgroup::new(257, 128).unwrap();
+    let big = MultiplicativeSubgroup::new(257, 128).unwrap();
     assert!(matches!(
         dp::distribution_q1(&big, 64),
         Err(Error::Unsupported(_))
@@ -115,7 +115,7 @@ fn error_paths() {
     let t = mitm::HalfTables::build(&sg, 16, 2).unwrap();
     assert!(t.bucket(&[1]).is_err());
     // non-two-smooth subgroup: construction fine, smooth-only ops fail
-    let s6 = Subgroup::new(31, 6).unwrap();
+    let s6 = MultiplicativeSubgroup::new(31, 6).unwrap();
     assert!(!s6.is_two_smooth());
     assert!(s6.cosets(1).is_err());
     assert!(vanish::code::rung_lambda(&s6, 3, 1).is_err());

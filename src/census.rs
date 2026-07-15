@@ -15,13 +15,13 @@
 //! - [`mitm`]: full census by weight via meet-in-the-middle halves; cost and
 //!   memory `(2c + 1)^{s/4}`, so `s <= 32` at `c = 2`.
 
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use rayon::prelude::*;
 
 /// `counts[w]` = number of nonzero kernel vectors of weight exactly `w`
 /// (`w <= wmax`), coefficients in `[-cmax, cmax] \ {0}` on the support.
-pub fn direct(sg: &Subgroup, cmax: i64, wmax: usize) -> Result<Vec<u64>> {
+pub fn direct(sg: &MultiplicativeSubgroup, cmax: i64, wmax: usize) -> Result<Vec<u64>> {
     if cmax < 1 {
         return Err(Error::OutOfRange("cmax must be >= 1".into()));
     }
@@ -144,7 +144,7 @@ pub(crate) fn kernel_side(
 
 /// Full census by weight via meet-in-the-middle over coordinate halves.
 /// Requires `s <= 32` at `cmax = 2` (`(2c+1)^{s/4}` table entries).
-pub fn mitm(sg: &Subgroup, cmax: i64) -> Result<Vec<u64>> {
+pub fn mitm(sg: &MultiplicativeSubgroup, cmax: i64) -> Result<Vec<u64>> {
     let s = sg.order();
     if s > 32 || s % 4 != 0 {
         return Err(Error::Unsupported(

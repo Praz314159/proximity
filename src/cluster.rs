@@ -477,12 +477,12 @@ fn majority_center(members: &[Vec<u64>], n: usize, prev: &[u64]) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Subgroup;
+    use crate::domain::MultiplicativeSubgroup;
 
     #[test]
     fn bucket_seed_grows_full_bucket() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let cl = grow(&rs, &f, Radius::agreement(8), 0, 8, 1).unwrap();
         assert_eq!(cl.size(), 70, "recovers the full 70-codeword bucket");
@@ -494,8 +494,8 @@ mod tests {
 
     #[test]
     fn grows_from_arbitrary_seed() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let seed: Vec<u64> = sg.elements().iter().map(|&x| (x * 7 + 3) % 65537).collect();
         let cl = grow(&rs, &seed, Radius::agreement(8), 0, 8, 1).unwrap();
         assert!(cl.size() <= 70);
@@ -505,8 +505,8 @@ mod tests {
     fn pencil_builds_a_cluster_from_the_code_at_large_p() {
         // At p = 65537 a cold random seed lists 0; a code-first pencil of 5
         // petals constructs a >= 5 cluster with no bucket presupposed.
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let rad = Radius::agreement(8);
         let cold: Vec<u64> = (0..16).map(|i| (i as u64 * 31 + 7) % 65537).collect();
         let cold_size = grow(&rs, &cold, rad, 0, 8, 1).unwrap().size();
@@ -517,8 +517,8 @@ mod tests {
 
     #[test]
     fn optimize_climbs_and_holds_bucket() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let (opt, tr) = optimize(&rs, &f, Radius::agreement(8), 1, 6).unwrap();
         assert!(opt.size() >= 70, "should not lose the bucket, got {}", opt.size());
@@ -527,8 +527,8 @@ mod tests {
 
     #[test]
     fn anneal_reports_best_and_never_below_seed() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let (cl, tr) = anneal(&rs, &f, Radius::agreement(8), 4, 2.0, 0.9, 3).unwrap();
         assert!(tr.best_size >= 70, "best must be >= the 70-bucket seed");
@@ -537,8 +537,8 @@ mod tests {
 
     #[test]
     fn search_returns_best_and_all_traces() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let (best, traces) = search(&rs, Radius::agreement(8), 2, 5, 2, 1).unwrap();
         assert_eq!(traces.len(), 2, "one trace per restart");
         assert!(best.size() >= 5, "best of the restarts >= a pencil seed");

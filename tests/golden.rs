@@ -7,11 +7,11 @@
 use vanish::buckets::{dp, mitm};
 use vanish::census;
 use vanish::code::{class_size, m_struct, rung_lambda};
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, factor, is_prime};
 
-fn sg(p: u64, s: usize) -> Subgroup {
-    Subgroup::new(p, s).unwrap()
+fn sg(p: u64, s: usize) -> MultiplicativeSubgroup {
+    MultiplicativeSubgroup::new(p, s).unwrap()
 }
 
 fn mass_check(dist: &vanish::buckets::BucketDistribution, s: u64, r: u64) {
@@ -161,8 +161,8 @@ fn property_domain_and_field() {
     els.sort_unstable();
     assert_eq!(all, els, "cosets must partition the subgroup");
     // construction errors
-    assert!(Subgroup::new(3458, 32).is_err(), "composite p rejected");
-    assert!(Subgroup::new(97, 31).is_err(), "s must divide p - 1");
+    assert!(MultiplicativeSubgroup::new(3458, 32).is_err(), "composite p rejected");
+    assert!(MultiplicativeSubgroup::new(97, 31).is_err(), "s must divide p - 1");
     // factorization: known case + product reconstruction on a norm-scale value
     assert_eq!(factor(6 * 35), vec![2, 3, 5, 7]);
     let n = 1_331_716u64; // max weight-6 cyclotomic norm at s = 32

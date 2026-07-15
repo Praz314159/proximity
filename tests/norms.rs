@@ -4,7 +4,7 @@
 
 use vanish::buckets::mitm::decompose_bucket_q1;
 use vanish::code::class_size;
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::norms::{bad_set, norm_table};
 
 #[test]
@@ -36,7 +36,7 @@ fn badset_cross_checks_decompose_s16() {
                     .map(|(w, &c)| c * class_size(16, 8, w))
                     .sum()
             });
-        let sg = Subgroup::new(p, 16).unwrap();
+        let sg = MultiplicativeSubgroup::new(p, 16).unwrap();
         let (exact, _) = decompose_bucket_q1(&sg, 8, 0).unwrap();
         assert_eq!(pred, exact, "zero-bucket prediction at p={p}");
     }
@@ -54,7 +54,7 @@ fn badset_spot_pins_s32() {
     assert_eq!(e.provenance, vanish::norms::Provenance::ValuationSplit);
     // predicted zero bucket from the weight<=6 slice already matches ground
     // truth at 89633 (its higher-weight counts contribute nothing even):
-    let sg = Subgroup::new(89633, 32).unwrap();
+    let sg = MultiplicativeSubgroup::new(89633, 32).unwrap();
     let (exact, profile) = decompose_bucket_q1(&sg, 16, 0).unwrap();
     assert_eq!(exact, 29382);
     assert_eq!(profile[6], 32, "consistent with the norms-derived census");
@@ -82,7 +82,7 @@ fn census_fallback_triggers_at_small_primes() {
             .filter(|(w, _)| w % 2 == 0 && *w > 0)
             .map(|(w, &c)| c * class_size(16, 8, w))
             .sum::<u64>();
-    let sg = Subgroup::new(17, 16).unwrap();
+    let sg = MultiplicativeSubgroup::new(17, 16).unwrap();
     let (exact, _) = decompose_bucket_q1(&sg, 8, 0).unwrap();
     assert_eq!(
         pred, exact,

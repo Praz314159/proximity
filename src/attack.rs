@@ -38,7 +38,7 @@ pub struct RungAttack {
     pub deficit: f64,
     /// Rung level (`q = 2^t - 1` symmetric functions pinned).
     pub t: u32,
-    /// Subgroup order used.
+    /// MultiplicativeSubgroup order used.
     pub s_g: u64,
     /// Subset size (agreement `r/s_g` fraction of the subgroup).
     pub r: u64,

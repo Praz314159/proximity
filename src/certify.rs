@@ -20,7 +20,7 @@
 use crate::buckets::mitm::decompose_bucket_q1;
 use crate::census;
 use crate::code::{class_size, m_struct};
-use crate::domain::Subgroup;
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 
 /// Certification verdict for `(p, s, r)`, `q = 1`.
@@ -64,7 +64,7 @@ pub struct Certificate {
 /// Certify the `q = 1` landscape at `(p, s, r)`. Requires power-of-two
 /// `s <= 32` (the full-census meet-in-the-middle range); the census cost is
 /// `p`-independent, so `p` may be arbitrarily large.
-pub fn certify_q1(sg: &Subgroup, r: usize) -> Result<Certificate> {
+pub fn certify_q1(sg: &MultiplicativeSubgroup, r: usize) -> Result<Certificate> {
     if !sg.is_two_smooth() || sg.order() > 32 {
         return Err(Error::Unsupported(
             "certification requires power-of-two s <= 32".into(),

@@ -8,7 +8,7 @@
 //! *exactly* the bucket `{S : e_i(S) = lambda_i}` — so bucket sizes computed
 //! by [`crate::buckets`] are exact list sizes beyond the Johnson radius.
 
-use crate::domain::Subgroup;
+use crate::domain::{EvalDomain, MultiplicativeSubgroup};
 use crate::error::{Error, Result};
 use crate::field::{binom, mulmod, powmod};
 
@@ -19,54 +19,52 @@ use crate::field::{binom, mulmod, powmod};
 /// bucket/census/accident machinery stays subgroup-specific.
 #[derive(Debug, Clone)]
 pub struct ReedSolomon {
-    p: u64,
-    points: Vec<u64>,
+    domain: EvalDomain,
     k: usize,
 }
 
 impl ReedSolomon {
-    /// Construct `RS[F_p, D, k]` on an explicit domain: `points` distinct
-    /// elements of `F_p`, degree `< k`. Validates `1 <= k <= n` and distinctness.
-    pub fn on_domain(p: u64, points: Vec<u64>, k: usize) -> Result<Self> {
-        let n = points.len();
+    /// Construct `RS[F_p, D, k]` on an evaluation domain; validates `1 <= k <= n`.
+    pub fn new(domain: EvalDomain, k: usize) -> Result<Self> {
+        let n = domain.n();
         if k == 0 || k > n {
             return Err(Error::OutOfRange(format!(
                 "message length k = {k} outside [1, n = {n}]"
             )));
         }
-        let mut sorted = points.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        if sorted.len() != n {
-            return Err(Error::OutOfRange("evaluation points must be distinct".into()));
-        }
-        Ok(ReedSolomon { p, points, k })
+        Ok(ReedSolomon { domain, k })
+    }
+
+    /// Construct on an explicit distinct-point domain (sugar over
+    /// [`EvalDomain::from_points`] + [`Self::new`]).
+    pub fn on_domain(p: u64, points: Vec<u64>, k: usize) -> Result<Self> {
+        Self::new(EvalDomain::from_points(p, points)?, k)
     }
 
     /// Construct on a multiplicative-subgroup domain (the smooth SNARK case).
-    pub fn on_subgroup(sg: &Subgroup, k: usize) -> Result<Self> {
-        Self::on_domain(sg.p(), sg.elements().to_vec(), k)
+    pub fn on_subgroup(sg: &MultiplicativeSubgroup, k: usize) -> Result<Self> {
+        Self::new(sg.eval_domain(), k)
     }
 
-    /// Alias for [`Self::on_subgroup`], kept for existing callers.
-    pub fn new(sg: &Subgroup, k: usize) -> Result<Self> {
-        Self::on_subgroup(sg, k)
+    /// The evaluation domain.
+    #[must_use]
+    pub fn domain(&self) -> &EvalDomain {
+        &self.domain
     }
-
     /// The field characteristic.
     #[must_use]
     pub fn p(&self) -> u64 {
-        self.p
+        self.domain.p()
     }
-    /// The evaluation domain (`n` points).
+    /// The evaluation points (`n` of them).
     #[must_use]
     pub fn points(&self) -> &[u64] {
-        &self.points
+        self.domain.points()
     }
     /// Code length `n = |D|`.
     #[must_use]
     pub fn n(&self) -> usize {
-        self.points.len()
+        self.domain.n()
     }
     /// Message length `k`.
     #[must_use]
@@ -103,9 +101,9 @@ impl ReedSolomon {
         if message.len() != self.k {
             return Err(Error::OutOfRange("message length != k".into()));
         }
-        let p = self.p;
+        let p = self.p();
         Ok(self
-            .points
+            .points()
             .iter()
             .map(|&x| {
                 message
@@ -136,9 +134,9 @@ impl ReedSolomon {
         if r >= self.n() || q > r {
             return Err(Error::OutOfRange("need q <= r < n".into()));
         }
-        let p = self.p;
+        let p = self.p();
         Ok(self
-            .points
+            .points()
             .iter()
             .map(|&x| {
                 let mut acc = 0u64;
@@ -201,7 +199,7 @@ pub fn class_size(s: usize, r: usize, w: usize) -> u64 {
 /// `(e_1, ..., e_q)` of the Theorem-A rung family (fixed `r0`-subset of one
 /// `mu_{2^t}` coset plus `b` full cosets), for `q = 2^t - 1`-quantized `q`.
 /// Any member subset realizes them; all members share them.
-pub fn rung_lambda(sg: &Subgroup, r: usize, q: usize) -> Result<Vec<u64>> {
+pub fn rung_lambda(sg: &MultiplicativeSubgroup, r: usize, q: usize) -> Result<Vec<u64>> {
     if !sg.is_two_smooth() {
         return Err(Error::Unsupported(
             "rung construction needs power-of-two s".into(),

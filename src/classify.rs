@@ -217,7 +217,7 @@ fn shannon_bits(counts: &[u64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Subgroup;
+    use crate::domain::MultiplicativeSubgroup;
 
     #[test]
     fn shannon_is_zero_for_frozen_and_one_bit_for_even_split() {
@@ -228,8 +228,8 @@ mod tests {
 
     #[test]
     fn bucket_has_frozen_e1_and_positive_e2_entropy() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let st = structure(&rs, &f, Radius::agreement(8)).unwrap();
         assert_eq!(st.list_size, 70);
@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn c5_word_classifies_as_bucket() {
-        let sg = Subgroup::new(65537, 16).unwrap();
-        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         match classify(&rs, &f, Radius::agreement(8)).unwrap() {
             WordKind::Bucket {

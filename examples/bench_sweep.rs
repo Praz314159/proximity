@@ -7,7 +7,7 @@ use std::time::Instant;
 use vanish::buckets::dp;
 use vanish::census;
 use vanish::code::m_struct;
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
 
 fn main() {
@@ -23,7 +23,7 @@ fn main() {
     let mut rows: Vec<(f64, u64, u64, u64)> = primes
         .par_iter()
         .filter_map(|&p| {
-            let sg = Subgroup::new(p, s).ok()?;
+            let sg = MultiplicativeSubgroup::new(p, s).ok()?;
             let d = dp::distribution_q1(&sg, r).ok()?;
             let (mx, _) = d.max();
             let cen = census::direct(&sg, 2, 4).ok()?;

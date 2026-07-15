@@ -2,12 +2,12 @@
 
 use std::time::Instant;
 use vanish::buckets::dp;
-use vanish::domain::Subgroup;
+use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
 
 fn main() {
     for (p, s, r) in [(180001u64, 32usize, 16usize), (299969, 64, 32)] {
-        let sg = match Subgroup::new(p, s) {
+        let sg = match MultiplicativeSubgroup::new(p, s) {
             Ok(sg) => sg,
             Err(e) => {
                 println!("skip p={p}: {e}");

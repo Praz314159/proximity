@@ -360,8 +360,44 @@ fn badset_from_gpu_json(
     ))
 }
 
+/// Exact list decode: every codeword (as its evaluation vector on the domain)
+/// agreeing with `word` on at least `t` of the n = s coordinates. Requires
+/// `t >= k`. The structure-neutral primitive for discovery.
+#[pyfunction]
+fn list_decode(p: u64, s: usize, k: usize, word: Vec<u64>, t: usize) -> PyResult<Vec<Vec<u64>>> {
+    let sg = sub(p, s)?;
+    let rs = err(code::ReedSolomon::new(&sg, k))?;
+    let oracle = crate::decode::DecodeOracle::new(&rs);
+    err(oracle.list(&word, crate::decode::Radius::agreement(t)))
+}
+
+/// One code-first optimization run: build a random pencil seed and anneal it to
+/// maximize list size. Returns `(center, members, size_trajectory)` — the raw
+/// cluster (member codewords as evaluation vectors) plus the per-move list-size
+/// trajectory. Loop over `seed` in Python to collect a discovery dataset.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn anneal_pencil(
+    p: u64,
+    s: usize,
+    k: usize,
+    t: usize,
+    petals: usize,
+    steps: usize,
+    seed: u64,
+) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
+    let sg = sub(p, s)?;
+    let rs = err(code::ReedSolomon::new(&sg, k))?;
+    let rad = crate::decode::Radius::agreement(t);
+    let seedw = err(crate::cluster::random_pencil_seed(&rs, petals, seed))?;
+    let (cl, tr) = err(crate::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed))?;
+    Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(list_decode, m)?)?;
+    m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q2, m)?)?;
     m.add_function(wrap_pyfunction!(census_direct, m)?)?;

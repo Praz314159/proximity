@@ -93,3 +93,14 @@ def badset_from_gpu_json(
     Crash-safe: the accumulator checkpoints to <out_prefix>.ckpt.* after every
     completed shard, a rerun resumes from it automatically (re-factoring at
     most one shard), and the checkpoint is removed once outputs are written."""
+
+def list_decode(p: int, s: int, k: int, word: List[int], t: int) -> List[List[int]]:
+    """Exact list decode: every codeword (evaluation vector on the domain)
+    agreeing with `word` on >= t of the n = s coordinates. Requires t >= k."""
+
+def anneal_pencil(
+    p: int, s: int, k: int, t: int, petals: int, steps: int, seed: int
+) -> Tuple[List[int], List[List[int]], List[int]]:
+    """One code-first optimization run: random pencil seed annealed to maximize
+    list size. Returns (center, members, size_trajectory). Loop over `seed` to
+    collect a discovery dataset."""

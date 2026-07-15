@@ -18,10 +18,10 @@
 //! for post-processing and visualization. [`classify`] is a thin thresholded
 //! label on top of it.
 
+use crate::error::Result;
 use crate::rs::code::top_elementary_symmetric;
 use crate::rs::code::ReedSolomon;
 use crate::rs::decode::{DecodeOracle, Radius};
-use crate::error::Result;
 use std::collections::BTreeMap;
 
 /// The largest number of leading symmetric functions to profile.
@@ -182,7 +182,10 @@ pub fn classify(rs: &ReedSolomon, word: &[u64], radius: Radius) -> Result<WordKi
     let frozen_q = st.symmetric.iter().take_while(|s| s.entropy == 0.0).count();
     if same_size && frozen_q >= 1 {
         let r = st.agreement_sizes[0].0;
-        let lambda = st.symmetric[..frozen_q].iter().map(|s| s.mode_value).collect();
+        let lambda = st.symmetric[..frozen_q]
+            .iter()
+            .map(|s| s.mode_value)
+            .collect();
         Ok(WordKind::Bucket {
             r,
             frozen_q,

@@ -2,11 +2,11 @@
 //! These complement the golden pins: invariants that must hold at *every*
 //! parameter point, checked across a pseudo-random sample of valid ones.
 
-use vanish::smooth::buckets::{dp, mitm};
-use vanish::smooth::census;
-use vanish::rs::code::ReedSolomon;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
+use vanish::rs::code::ReedSolomon;
+use vanish::smooth::buckets::{dp, mitm};
+use vanish::smooth::census;
 use vanish::Error;
 
 /// Tiny deterministic LCG so the sample is reproducible without dependencies.
@@ -82,7 +82,10 @@ fn random_invariants_mass_dilation_mitm() {
 #[test]
 fn error_paths() {
     // core-type validation
-    assert!(matches!(MultiplicativeSubgroup::new(3458, 32), Err(Error::NotPrime(_))));
+    assert!(matches!(
+        MultiplicativeSubgroup::new(3458, 32),
+        Err(Error::NotPrime(_))
+    ));
     assert!(matches!(
         MultiplicativeSubgroup::new(97, 31),
         Err(Error::OrderDoesNotDivide { .. })

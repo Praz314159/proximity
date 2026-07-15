@@ -6,10 +6,10 @@
 // false positive at this expansion site.
 #![allow(clippy::useless_conversion)]
 
-use crate::smooth::buckets::{dp, mitm};
-use crate::rs::code;
-use crate::smooth::rung;
 use crate::domain::MultiplicativeSubgroup;
+use crate::rs::code;
+use crate::smooth::buckets::{dp, mitm};
+use crate::smooth::rung;
 use crate::{field, smooth::census};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::exceptions::PyValueError;
@@ -397,8 +397,14 @@ fn anneal_pencil(
     let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
     let rad = crate::rs::decode::Radius::agreement(t);
     let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
-    let (cl, tr) = err(crate::rs::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed))?;
-    Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
+    let (cl, tr) = err(crate::rs::cluster::anneal(
+        &rs, &seedw, rad, steps, 2.0, 0.92, seed,
+    ))?;
+    Ok((
+        cl.center().to_vec(),
+        cl.members().to_vec(),
+        tr.sizes.clone(),
+    ))
 }
 
 /// One code-first run to **convergence**: build a random pencil seed and greedily
@@ -422,7 +428,11 @@ fn optimize_pencil(
     let rad = crate::rs::decode::Radius::agreement(t);
     let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
     let (cl, tr) = err(crate::rs::cluster::optimize(&rs, &seedw, rad, 1, max_flips))?;
-    Ok((cl.center().to_vec(), cl.members().to_vec(), tr.sizes.clone()))
+    Ok((
+        cl.center().to_vec(),
+        cl.members().to_vec(),
+        tr.sizes.clone(),
+    ))
 }
 
 #[pymodule]

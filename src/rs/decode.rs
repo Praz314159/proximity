@@ -25,9 +25,9 @@
 //! pruning) is the documented scaling path; the exact engine stays the ground
 //! truth the rest is validated against.
 
-use crate::rs::code::ReedSolomon;
 use crate::error::{Error, Result};
 use crate::field::{binom, mulmod, powmod};
+use crate::rs::code::ReedSolomon;
 use std::collections::HashSet;
 
 /// Beyond this many information sets the exact engine refuses to run; use
@@ -331,7 +331,9 @@ mod tests {
         let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
         let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap(); // k = r - q = 7
         let f = rs.c5_word(8, &[0]).unwrap();
-        let decoded = DecodeOracle::new(&rs).list_size(&f, Radius::agreement(8)).unwrap();
+        let decoded = DecodeOracle::new(&rs)
+            .list_size(&f, Radius::agreement(8))
+            .unwrap();
         let counted = HalfTables::build(&sg, 8, 1).unwrap().bucket(&[0]).unwrap();
         assert_eq!(counted, 70, "structural zero bucket C(8,4)");
         assert_eq!(decoded, counted, "exactness: decode == counted bucket");
@@ -346,8 +348,14 @@ mod tests {
         let pts: Vec<u64> = (3u64..15).map(|x| x * x % p).collect(); // 12 non-subgroup points
         let rs = ReedSolomon::on_domain(p, pts, 5).unwrap();
         let cw = rs.encode(&[1, 2, 3, 4, 5]).unwrap();
-        let list = DecodeOracle::new(&rs).list(&cw, Radius::agreement(6)).unwrap();
-        assert_eq!(list.len(), 1, "only the codeword itself agrees on >= 6 points");
+        let list = DecodeOracle::new(&rs)
+            .list(&cw, Radius::agreement(6))
+            .unwrap();
+        assert_eq!(
+            list.len(),
+            1,
+            "only the codeword itself agrees on >= 6 points"
+        );
         assert_eq!(list[0], cw);
         assert!(ReedSolomon::on_domain(p, vec![1, 1, 2, 3, 4], 3).is_err());
     }

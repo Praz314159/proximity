@@ -1,9 +1,9 @@
 //! Single-DP wall-clock check. `cargo run --release --example bench_dp`
 
 use std::time::Instant;
-use vanish::smooth::buckets::dp;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
+use vanish::smooth::buckets::dp;
 
 fn main() {
     for (p, s, r) in [(180001u64, 32usize, 16usize), (299969, 64, 32)] {

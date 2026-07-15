@@ -17,11 +17,11 @@
 //! the *exact* inflated zero-bucket via the decomposition engine instead —
 //! the output is exact either way; only its classification differs.
 
+use crate::domain::MultiplicativeSubgroup;
+use crate::error::{Error, Result};
 use crate::smooth::buckets::mitm::decompose_bucket_q1;
 use crate::smooth::census;
 use crate::smooth::rung::{class_size, m_struct};
-use crate::domain::MultiplicativeSubgroup;
-use crate::error::{Error, Result};
 
 /// Certification verdict for `(p, s, r)`, `q = 1`.
 #[derive(Debug, Clone, PartialEq, Eq)]

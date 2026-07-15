@@ -12,9 +12,9 @@
 //! `Y^{r-i}` in `prod (Y - a)` is `c_i = (-1)^i e_i`. All convolutions are on
 //! the signed `c_i`; unsigned `e_i` appear only at the API boundary.
 
-use crate::smooth::rung::class_size;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
+use crate::smooth::rung::class_size;
 use std::collections::HashMap;
 
 const QCAP: usize = 8;
@@ -151,7 +151,11 @@ impl HalfTables {
 /// enumerate every `eps in {-1, 0, 1}^{s/2}` with `sum eps_i w^i = lambda`
 /// by MitM over coordinate halves; returns `(sum of class sizes,
 /// per-weight class counts)`. The sum equals the DP bucket `N(lambda)`.
-pub fn decompose_bucket_q1(sg: &MultiplicativeSubgroup, r: usize, lam: u64) -> Result<(u64, Vec<u64>)> {
+pub fn decompose_bucket_q1(
+    sg: &MultiplicativeSubgroup,
+    r: usize,
+    lam: u64,
+) -> Result<(u64, Vec<u64>)> {
     let s = sg.order();
     if s > 32 || !sg.is_two_smooth() {
         return Err(Error::Unsupported(

@@ -20,10 +20,10 @@
 //! heuristic local search — locally-extremal words, not a certified global
 //! maximum — so vary the seed for coverage.
 
+use crate::error::{Error, Result};
 use crate::rs::classify::{classify, WordKind};
 use crate::rs::code::ReedSolomon;
 use crate::rs::decode::{interp_eval_all, DecodeOracle, Radius};
-use crate::error::{Error, Result};
 use std::collections::{HashMap, HashSet};
 
 /// A cluster: a center word and the codewords within a fixed radius of it.
@@ -96,7 +96,10 @@ pub fn grow(
             oracle.sample_list(&center, radius, samples, rng_seed)?
         };
         rng_seed = rng_seed.wrapping_add(1);
-        if best.as_ref().map_or(true, |b| members.len() > b.members.len()) {
+        if best
+            .as_ref()
+            .map_or(true, |b| members.len() > b.members.len())
+        {
             best = Some(Cluster {
                 center: center.clone(),
                 members: members.clone(),
@@ -129,10 +132,14 @@ pub fn pencil_seed(
     let (n, k, p) = (rs.n(), rs.k(), rs.p());
     let dom = rs.points();
     if core_coords.len() != k - 1 || core_values.len() != k - 1 {
-        return Err(Error::OutOfRange("core must have exactly k-1 points".into()));
+        return Err(Error::OutOfRange(
+            "core must have exactly k-1 points".into(),
+        ));
     }
     if petal_values.is_empty() || petal_point >= n || core_coords.iter().any(|&c| c >= n) {
-        return Err(Error::OutOfRange("need >=1 petal and in-range coords".into()));
+        return Err(Error::OutOfRange(
+            "need >=1 petal and in-range coords".into(),
+        ));
     }
     let mut xs: Vec<u64> = core_coords.iter().map(|&i| dom[i]).collect();
     xs.push(dom[petal_point]);
@@ -309,7 +316,13 @@ pub fn optimize(
     }
 
     let members = oracle.list(&w, radius)?;
-    trace.best_size = trace.sizes.iter().copied().max().unwrap_or(0).max(members.len());
+    trace.best_size = trace
+        .sizes
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(members.len());
     Ok((
         Cluster {
             center: w,
@@ -379,9 +392,7 @@ pub fn anneal(
         let nl = pool
             .iter()
             .enumerate()
-            .filter(|(i, c)| {
-                ag[*i] as i64 + (c[x] == v) as i64 - (c[x] == w[x]) as i64 >= t as i64
-            })
+            .filter(|(i, c)| ag[*i] as i64 + (c[x] == v) as i64 - (c[x] == w[x]) as i64 >= t as i64)
             .count();
         let dl = nl as i64 - cur as i64;
         let accept = dl >= 0 || {
@@ -430,7 +441,15 @@ pub fn search(
     let mut traces = Vec::with_capacity(restarts);
     for i in 0..restarts {
         let seed = random_pencil_seed(rs, petals, rng_seed.wrapping_add(i as u64 * 0x100))?;
-        let (cl, tr) = anneal(rs, &seed, radius, steps, 2.0, 0.92, rng_seed.wrapping_add(i as u64))?;
+        let (cl, tr) = anneal(
+            rs,
+            &seed,
+            radius,
+            steps,
+            2.0,
+            0.92,
+            rng_seed.wrapping_add(i as u64),
+        )?;
         if best.as_ref().map_or(true, |b| cl.size() > b.size()) {
             best = Some(cl);
         }
@@ -486,10 +505,7 @@ mod tests {
         let f = rs.c5_word(8, &[0]).unwrap();
         let cl = grow(&rs, &f, Radius::agreement(8), 0, 8, 1).unwrap();
         assert_eq!(cl.size(), 70, "recovers the full 70-codeword bucket");
-        assert!(matches!(
-            cl.classify(&rs).unwrap(),
-            WordKind::Bucket { .. }
-        ));
+        assert!(matches!(cl.classify(&rs).unwrap(), WordKind::Bucket { .. }));
     }
 
     #[test]
@@ -511,8 +527,15 @@ mod tests {
         let cold: Vec<u64> = (0..16).map(|i| (i as u64 * 31 + 7) % 65537).collect();
         let cold_size = grow(&rs, &cold, rad, 0, 8, 1).unwrap().size();
         let cl = grow_random_pencil(&rs, 5, rad, 42).unwrap();
-        assert!(cold_size < 5, "cold seed has only an incidental list ({cold_size})");
-        assert!(cl.size() >= 5, "pencil constructs >= 5 members, got {}", cl.size());
+        assert!(
+            cold_size < 5,
+            "cold seed has only an incidental list ({cold_size})"
+        );
+        assert!(
+            cl.size() >= 5,
+            "pencil constructs >= 5 members, got {}",
+            cl.size()
+        );
     }
 
     #[test]
@@ -521,8 +544,15 @@ mod tests {
         let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
         let f = rs.c5_word(8, &[0]).unwrap();
         let (opt, tr) = optimize(&rs, &f, Radius::agreement(8), 1, 6).unwrap();
-        assert!(opt.size() >= 70, "should not lose the bucket, got {}", opt.size());
-        assert!(tr.sizes.windows(2).all(|w| w[1] >= w[0]), "list size must not decrease");
+        assert!(
+            opt.size() >= 70,
+            "should not lose the bucket, got {}",
+            opt.size()
+        );
+        assert!(
+            tr.sizes.windows(2).all(|w| w[1] >= w[0]),
+            "list size must not decrease"
+        );
     }
 
     #[test]

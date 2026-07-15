@@ -146,13 +146,17 @@ impl EvalDomain {
     /// From an explicit list of distinct points in `F_p` (`n >= 2`).
     pub fn from_points(p: u64, points: Vec<u64>) -> Result<Self> {
         if points.len() < 2 {
-            return Err(Error::OutOfRange("need at least 2 evaluation points".into()));
+            return Err(Error::OutOfRange(
+                "need at least 2 evaluation points".into(),
+            ));
         }
         let mut sorted = points.clone();
         sorted.sort_unstable();
         sorted.dedup();
         if sorted.len() != points.len() {
-            return Err(Error::OutOfRange("evaluation points must be distinct".into()));
+            return Err(Error::OutOfRange(
+                "evaluation points must be distinct".into(),
+            ));
         }
         Ok(EvalDomain { p, points })
     }

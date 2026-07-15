@@ -4,11 +4,11 @@
 
 use rayon::prelude::*;
 use std::time::Instant;
+use vanish::domain::MultiplicativeSubgroup;
+use vanish::field::{binom, is_prime};
 use vanish::smooth::buckets::dp;
 use vanish::smooth::census;
 use vanish::smooth::rung::m_struct;
-use vanish::domain::MultiplicativeSubgroup;
-use vanish::field::{binom, is_prime};
 
 fn main() {
     let (s, r) = (32usize, 16usize);

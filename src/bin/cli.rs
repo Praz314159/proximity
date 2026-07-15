@@ -17,10 +17,10 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::process::exit;
-use vanish::smooth::buckets::{dp, mitm};
-use vanish::smooth::rung::{m_struct, rung_lambda};
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
+use vanish::smooth::buckets::{dp, mitm};
+use vanish::smooth::rung::{m_struct, rung_lambda};
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();

@@ -4,11 +4,11 @@
 //! Optimization passes and refactors must keep this suite green; new kernels
 //! must add their own pins. See CONTRIBUTING.md.
 
+use vanish::domain::MultiplicativeSubgroup;
+use vanish::field::{binom, factor, is_prime};
 use vanish::smooth::buckets::{dp, mitm};
 use vanish::smooth::census;
 use vanish::smooth::rung::{class_size, m_struct, rung_lambda};
-use vanish::domain::MultiplicativeSubgroup;
-use vanish::field::{binom, factor, is_prime};
 
 fn sg(p: u64, s: usize) -> MultiplicativeSubgroup {
     MultiplicativeSubgroup::new(p, s).unwrap()
@@ -161,8 +161,14 @@ fn property_domain_and_field() {
     els.sort_unstable();
     assert_eq!(all, els, "cosets must partition the subgroup");
     // construction errors
-    assert!(MultiplicativeSubgroup::new(3458, 32).is_err(), "composite p rejected");
-    assert!(MultiplicativeSubgroup::new(97, 31).is_err(), "s must divide p - 1");
+    assert!(
+        MultiplicativeSubgroup::new(3458, 32).is_err(),
+        "composite p rejected"
+    );
+    assert!(
+        MultiplicativeSubgroup::new(97, 31).is_err(),
+        "s must divide p - 1"
+    );
     // factorization: known case + product reconstruction on a norm-scale value
     assert_eq!(factor(6 * 35), vec![2, 3, 5, 7]);
     let n = 1_331_716u64; // max weight-6 cyclotomic norm at s = 32

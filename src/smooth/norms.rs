@@ -21,10 +21,10 @@
 
 pub mod ingest;
 
-use crate::smooth::census;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{factor, mulmod, powmod, primes_one_mod};
+use crate::smooth::census;
 use rayon::prelude::*;
 use std::collections::HashMap;
 

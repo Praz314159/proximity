@@ -9,9 +9,9 @@
 //! `(e1, e2) -> (e1 + g, e2 + g * e1)` — a row permutation plus per-row
 //! rotation. Intended for `p <= ~700`.
 
-use crate::smooth::buckets::BucketDistribution;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
+use crate::smooth::buckets::BucketDistribution;
 use rayon::prelude::*;
 
 const PAR_THRESHOLD: usize = 1 << 15;

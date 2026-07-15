@@ -2,10 +2,10 @@
 //! s = 32 landscape (exp22b/exp24/exp27 reference data) and cross-checked
 //! against the independent decomposition engine.
 
-use vanish::smooth::buckets::mitm::decompose_bucket_q1;
-use vanish::smooth::rung::class_size;
 use vanish::domain::MultiplicativeSubgroup;
+use vanish::smooth::buckets::mitm::decompose_bucket_q1;
 use vanish::smooth::norms::{bad_set, norm_table};
+use vanish::smooth::rung::class_size;
 
 #[test]
 fn golden_nmax_profile_s32() {
@@ -51,7 +51,10 @@ fn badset_spot_pins_s32() {
     // p = 89633 carries exactly one weight-6 orbit (32 vectors)
     let e = bs.iter().find(|e| e.p == 89633).unwrap();
     assert_eq!(e.counts[6], 32);
-    assert_eq!(e.provenance, vanish::smooth::norms::Provenance::ValuationSplit);
+    assert_eq!(
+        e.provenance,
+        vanish::smooth::norms::Provenance::ValuationSplit
+    );
     // predicted zero bucket from the weight<=6 slice already matches ground
     // truth at 89633 (its higher-weight counts contribute nothing even):
     let sg = MultiplicativeSubgroup::new(89633, 32).unwrap();

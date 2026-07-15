@@ -221,6 +221,105 @@ pub fn grow_random_pencil(
     )
 }
 
+/// Instrumentation for one [`optimize`] run — the raw material for studying the
+/// optimizer itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptTrace {
+    /// List size at the true radius after each step (`sizes[0]` = the seed).
+    pub sizes: Vec<usize>,
+    /// Accepted single-coordinate flips.
+    pub flips: usize,
+    /// Pool re-decodes performed.
+    pub refreshes: usize,
+}
+
+/// Maximize **list size** directly (no structural hypothesis) by a greedy
+/// hill-climb with boundary-alignment moves: at each step flip the single
+/// coordinate that most increases `|List|`, drawing candidate flips from
+/// near-member codewords (agreement `>= t - slack`) so the move actively pulls
+/// boundary codewords into the list. Bootstraps thin seeds where majority-vote
+/// re-centering stalls.
+///
+/// Because a one-coordinate flip changes any codeword's agreement by at most
+/// one, `slack >= 1` guarantees the near-member pool already contains every
+/// codeword a flip could promote — so each step's gain is evaluated exactly and
+/// incrementally over the pool. Returns the optimized cluster and a performance
+/// [`OptTrace`]. A local search: a local maximum of list size, not a certified
+/// global one; vary the seed.
+pub fn optimize(
+    rs: &ReedSolomon,
+    seed: &[u64],
+    radius: Radius,
+    slack: usize,
+    max_flips: usize,
+) -> Result<(Cluster, OptTrace)> {
+    if seed.len() != rs.n() {
+        return Err(Error::OutOfRange("seed length != n".into()));
+    }
+    let (k, t) = (rs.k(), radius.min_agreement());
+    let oracle = DecodeOracle::new(rs);
+    let relaxed = Radius::agreement(t.saturating_sub(slack.max(1)).max(k));
+    let mut w = seed.to_vec();
+    let mut trace = OptTrace {
+        sizes: Vec::new(),
+        flips: 0,
+        refreshes: 0,
+    };
+    let agree = |c: &[u64], w: &[u64]| c.iter().zip(w).filter(|(a, b)| a == b).count();
+
+    loop {
+        let pool = oracle.list(&w, relaxed)?;
+        trace.refreshes += 1;
+        let ag: Vec<usize> = pool.iter().map(|c| agree(c, &w)).collect();
+        let cur = ag.iter().filter(|&&a| a >= t).count();
+        trace.sizes.push(cur);
+
+        // Candidate flips: (coord, target value) from any pool codeword that
+        // disagrees with w there.
+        let mut cands: HashSet<(usize, u64)> = HashSet::new();
+        for c in &pool {
+            for (x, (&cx, &wx)) in c.iter().zip(&w).enumerate() {
+                if cx != wx {
+                    cands.insert((x, cx));
+                }
+            }
+        }
+        let mut best: Option<(usize, u64, usize)> = None;
+        for (x, v) in cands {
+            let mut nl = 0usize;
+            for (i, c) in pool.iter().enumerate() {
+                let d = (c[x] == v) as i64 - (c[x] == w[x]) as i64;
+                if ag[i] as i64 + d >= t as i64 {
+                    nl += 1;
+                }
+            }
+            if best.map_or(true, |(_, _, bl)| nl > bl) {
+                best = Some((x, v, nl));
+            }
+        }
+        match best {
+            Some((x, v, nl)) if nl > cur => {
+                w[x] = v;
+                trace.flips += 1;
+                if trace.flips >= max_flips {
+                    break;
+                }
+            }
+            _ => break, // no strictly improving flip: local maximum
+        }
+    }
+
+    let members = oracle.list(&w, radius)?;
+    Ok((
+        Cluster {
+            center: w,
+            members,
+            radius,
+        },
+        trace,
+    ))
+}
+
 /// Majority-vote center: at each coordinate, the value the most members take
 /// (ties broken toward the previous center, else the smallest value). This is
 /// the coordinate-wise maximizer of total agreement with the members.
@@ -285,5 +384,15 @@ mod tests {
         let cl = grow_random_pencil(&rs, 5, rad, 42).unwrap();
         assert!(cold_size < 5, "cold seed has only an incidental list ({cold_size})");
         assert!(cl.size() >= 5, "pencil constructs >= 5 members, got {}", cl.size());
+    }
+
+    #[test]
+    fn optimize_climbs_and_holds_bucket() {
+        let sg = Subgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::new(&sg, 7).unwrap();
+        let f = rs.c5_word(8, &[0]).unwrap();
+        let (opt, tr) = optimize(&rs, &f, Radius::agreement(8), 1, 6).unwrap();
+        assert!(opt.size() >= 70, "should not lose the bucket, got {}", opt.size());
+        assert!(tr.sizes.windows(2).all(|w| w[1] >= w[0]), "list size must not decrease");
     }
 }

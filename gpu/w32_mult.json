@@ -1,0 +1,17 @@
+{
+ "p": 2130706433,
+ "s": 32,
+ "k": 16,
+ "t": 17,
+ "cstar": 0,
+ "predicted_count": 17678835,
+ "diag": {
+  "rank": 15,
+  "kernel_dim": 17,
+  "fresh_inclass_allzero": true,
+  "random_T_zero_fraction": 0.005,
+  "class_counts_max": 17678835,
+  "class_counts_c": 0,
+  "class_second": 17678835
+ }
+}

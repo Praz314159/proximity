@@ -128,23 +128,49 @@ def pencil_seed(p, dom, k, petals, rng):
 
 def optimize_gpu(p, dom, k, t, seed, rng, max_flips=200):
     """Greedy list-size climb to convergence, GPU-decoding the (t-1) pool each
-    step; mirrors vanish rs::cluster::optimize."""
+    step; mirrors vanish rs::cluster::optimize.
+
+    Flip scoring is exact O(n*L) via the boundary-count identity (validated in
+    experiments/landscape/descent_verify.py against direct decodes):
+      nl(x,v) = |ag>=t+1| + |ag==t| - |ag==t & P[:,x]==w[x]|
+                + |ag==t-1 & P[:,x]==v|
+    with the best v per coordinate = mode of P[ag==t-1, x].
+
+    traj records per-step L2 slice statistics (survivors/recruits of the
+    accepted flip; exact_t = members at agreement exactly t) so the s=32 run
+    measures the growth law for free: growth = L_next/L, compare to n/(n-t)
+    [measured law at s=16] vs 1 + t/n [naive shell]."""
     n = len(dom); w = list(seed); relaxed = max(t - 1, k)
     traj = []
     for _ in range(max_flips):
         pool = gpu_decode(p, dom, w, k, relaxed)
-        ag = [sum(1 for a, b in zip(c, w) if a == b) for c in pool]
-        cur = sum(1 for a in ag if a >= t); traj.append(cur)
-        cands = {(x, c[x]) for c in pool for x in range(n) if c[x] != w[x]}
+        P = np.array(pool, dtype=np.int64).reshape(len(pool), n)
+        wv = np.array(w, dtype=np.int64)
+        ag = (P == wv[None, :]).sum(axis=1)
+        cur = int((ag >= t).sum())
+        exact_t = int((ag == t).sum())
         best = None
-        for (x, v) in cands:
-            nl = sum(1 for i, c in enumerate(pool)
-                     if ag[i] + (c[x] == v) - (c[x] == w[x]) >= t)
+        hi = int((ag >= t + 1).sum()) + exact_t
+        rows_t, rows_b = P[ag == t], P[ag == t - 1]
+        for x in range(n):
+            base = hi - int((rows_t[:, x] == wv[x]).sum())
+            if len(rows_b) == 0:
+                continue
+            col = rows_b[:, x]
+            col = col[col != wv[x]]
+            if len(col) == 0:
+                continue
+            vals, counts = np.unique(col, return_counts=True)
+            j = int(counts.argmax())
+            nl = base + int(counts[j])
             if best is None or nl > best[2]:
-                best = (x, v, nl)
-        if best and best[2] > cur:
+                best = (x, int(vals[j]), nl, base, int(counts[j]))
+        if best is not None and best[2] > cur:
+            traj.append(dict(L=cur, exact_t=exact_t,
+                             survivors=best[3], recruits=best[4]))
             w[best[0]] = best[1]
         else:
+            traj.append(dict(L=cur, exact_t=exact_t))
             break
     members = gpu_decode(p, dom, w, k, t)
     return w, members, traj
@@ -163,9 +189,14 @@ def run_cell(p, s, k, t, nseed):
     rng = np.random.default_rng(0)
     petals = max(1, (s - k + 1) // (t - k + 1))
     best = None
+    growths, exact_fr = [], []
     for sd in range(nseed):
         seed = pencil_seed(p, dom, k, petals, np.random.default_rng(sd))
-        w, m, _ = optimize_gpu(p, dom, k, t, seed, rng)
+        w, m, traj = optimize_gpu(p, dom, k, t, seed, rng)
+        for a, b in zip(traj, traj[1:]):        # L2 growth law, late phase
+            if a["L"] >= 20:
+                growths.append(b["L"] / a["L"])
+                exact_fr.append(a["exact_t"] / a["L"])
         if best is None or len(m) > best[1]:
             best = (w, len(m), m)
     maxL = best[1]
@@ -179,9 +210,13 @@ def run_cell(p, s, k, t, nseed):
     e1 = [sum(dom[i] for i in range(s) if members[j][i] == center[i]) % p for j in range(maxL)]
     e1H = (-sum((c / maxL) * math.log2(c / maxL)
                for c in np.bincount([e % maxL for e in e1]) if c) if maxL else 0.0)
+    g = np.array(growths) if growths else np.array([0.0])
     return dict(s=s, rho=round(rho, 3), delta=round(delta, 3), q=t - k, maxL=maxL,
                 bucket=bucket, list_exp=round(lx, 4), bucket_exp=round(bx, 4),
-                entropy_exp=round(ex, 4), e1H_max=round(e1H, 2))
+                entropy_exp=round(ex, 4), e1H_max=round(e1H, 2),
+                growth_med=round(float(np.median(g)), 3),
+                growth_law=round(s / (s - t), 3),
+                exact_t_fr=round(float(np.mean(exact_fr)), 4) if exact_fr else None)
 
 
 if __name__ == "__main__":
@@ -192,10 +227,12 @@ if __name__ == "__main__":
     ap.add_argument("--nseed", type=int, default=16)
     a = ap.parse_args()
     print(f"{'s':>3}{'rho':>6}{'delta':>7}{'q':>3}{'maxL':>8}{'bucket':>8}"
-          f"{'list_exp':>10}{'bucket_exp':>11}{'entropy_exp':>12}{'e1H_max':>9}")
+          f"{'list_exp':>10}{'bucket_exp':>11}{'entropy_exp':>12}{'e1H_max':>9}"
+          f"{'growth':>8}{'n/(n-t)':>9}{'exact_t':>9}")
     for cell in a.cells.split(","):
         k, t = map(int, cell.split(":"))
         r = run_cell(a.p, a.s, k, t, a.nseed)
         print(f"{r['s']:>3}{r['rho']:>6}{r['delta']:>7}{r['q']:>3}{r['maxL']:>8}"
               f"{r['bucket']:>8}{r['list_exp']:>10}{r['bucket_exp']:>11}"
-              f"{r['entropy_exp']:>12}{r['e1H_max']:>9}")
+              f"{r['entropy_exp']:>12}{r['e1H_max']:>9}"
+              f"{r['growth_med']:>8}{r['growth_law']:>9}{r['exact_t_fr']:>9}")

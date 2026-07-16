@@ -98,6 +98,163 @@ extern "C" __global__ void list_decode(
 
 _MOD = cp.RawKernel(KERNEL, "list_decode")
 
+# Count-mode kernel: dedup ON DEVICE via the lex-first rule — a thread counts
+# its codeword only if its information set I is the lexicographically first
+# k-subset of the codeword's agreement set. Each distinct codeword is counted
+# EXACTLY once (no emission buffer, no cap on the count), so lists far above
+# the emit cap (e.g. the predicted 17.7M multiplicative class at s=32, hit by
+# C(17,16)=17 threads each) are counted exactly. A hash-sampled subset of
+# codeword IDs is emitted for host-side structure checks (frozen product).
+KERNEL_COUNT = r"""
+extern "C" __global__ void list_count(
+    const int n, const int k, const int t,
+    const unsigned int p,
+    const unsigned int* dom,
+    const unsigned int* word,
+    const unsigned int* inv_diff,
+    const unsigned long long* binom,
+    const long long total,
+    const long long base,
+    const unsigned int sample_mask,   // emit if (fnv(idvals) & mask) == 0
+    unsigned int* out_ids,            // [scap*k] sampled codeword IDs
+    int* out_counts,                  // [0]=distinct count, [1]=emitted
+    const int scap)
+{
+    long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x + base;
+    if (tid >= total) return;
+
+    int I[32];
+    {
+        long long rem = tid; int x = 0;
+        for (int pos = 0; pos < k; pos++) {
+            while (1) {
+                unsigned long long cnt = binom[(long long)(n - x - 1) * (k + 1) + (k - pos - 1)];
+                if ((unsigned long long)rem < cnt) { I[pos] = x; x++; break; }
+                rem -= cnt; x++;
+            }
+        }
+    }
+
+    unsigned int wt[32];
+    for (int m = 0; m < k; m++) {
+        unsigned long long acc = 1;
+        for (int l = 0; l < k; l++)
+            if (l != m) acc = acc * inv_diff[(long long)I[m] * n + I[l]] % p;
+        wt[m] = (unsigned int)acc;
+    }
+
+    unsigned int idvals[32];
+    int agree = 0, lexok = 1;
+    for (int j = 0; j < n; j++) {
+        int inI = 0;
+        for (int m = 0; m < k; m++) if (I[m] == j) { inI = 1; break; }
+        unsigned int cj;
+        if (inI) {
+            cj = word[j];
+        } else {
+            unsigned long long num = 0, invden = 1;
+            for (int m = 0; m < k; m++) {
+                num = (num + (unsigned long long)wt[m] * word[I[m]] % p
+                             * inv_diff[(long long)j * n + I[m]]) % p;
+                unsigned int diff = (dom[j] + p - dom[I[m]]) % p;
+                invden = invden * diff % p;
+            }
+            cj = (unsigned int)(num * invden % p);
+        }
+        if (cj == word[j]) {
+            if (agree < k && I[agree] != j) lexok = 0;
+            agree++;
+        }
+        if (j < k) idvals[j] = cj;
+    }
+
+    if (agree >= t && lexok) {
+        atomicAdd(&out_counts[0], 1);
+        unsigned int h = 2166136261u;
+        for (int m = 0; m < k; m++) h = (h ^ idvals[m]) * 16777619u;
+        if ((h & sample_mask) == 0u) {
+            int slot = atomicAdd(&out_counts[1], 1);
+            if (slot < scap)
+                for (int m = 0; m < k; m++) out_ids[(long long)slot * k + m] = idvals[m];
+        }
+    }
+}
+"""
+
+_MOD_COUNT = cp.RawKernel(KERNEL_COUNT, "list_count")
+
+
+def _tables(p, dom, k):
+    n = len(dom)
+    inv = np.zeros((n, n), dtype=np.uint32)
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                inv[i, j] = pow(int((dom[i] - dom[j]) % p), p - 2, p)
+    binom = np.zeros((n + 1, k + 1), dtype=np.uint64)
+    for a in range(n + 1):
+        for b in range(min(a, k) + 1):
+            binom[a, b] = math.comb(a, b)
+    return (cp.asarray(inv.ravel(), dtype=cp.uint32),
+            cp.asarray(binom.ravel(), dtype=cp.uint64))
+
+
+def gpu_list_count(p, dom, word, k, t, sample_mask=0xFF, scap=1 << 20,
+                   tile=1 << 26):
+    """Exact DISTINCT-codeword count at agreement >= t via lex-first on-device
+    dedup (no cap on the count), plus a hash-sampled batch of codeword IDs
+    (values at the first k domain points) for structure checks.
+    Returns (count, sampled_ids ndarray[m, k], sample_overflowed)."""
+    n = len(dom)
+    total = math.comb(n, k)
+    dom_d = cp.asarray(dom, dtype=cp.uint32)
+    word_d = cp.asarray(word, dtype=cp.uint32)
+    inv_d, binom_d = _tables(p, dom, k)
+    out_ids = cp.zeros(scap * k, dtype=cp.uint32)
+    out_counts = cp.zeros(2, dtype=cp.int32)
+    threads = 256
+    for base in range(0, total, tile):
+        span = min(tile, total - base)
+        blocks = (span + threads - 1) // threads
+        _MOD_COUNT((blocks,), (threads,),
+                   (np.int32(n), np.int32(k), np.int32(t), np.uint32(p),
+                    dom_d, word_d, inv_d, binom_d,
+                    np.int64(total), np.int64(base), np.uint32(sample_mask),
+                    out_ids, out_counts, np.int32(scap)))
+    cp.cuda.Stream.null.synchronize()
+    count, emitted = int(out_counts[0]), int(out_counts[1])
+    m = min(emitted, scap)
+    ids = cp.asnumpy(out_ids[: m * k].reshape(m, k)) if m else np.zeros((0, k), dtype=np.uint32)
+    return count, ids, emitted > scap
+
+
+def _modinv(a, p):
+    return pow(int(a) % p, p - 2, p)
+
+
+def _interp_full(xs, ys, dom, p):
+    """Expand a codeword ID (values at k points) to its full eval vector."""
+    k = len(xs)
+    w = []
+    for j in range(k):
+        d = 1
+        for m in range(k):
+            if m != j:
+                d = d * ((xs[j] - xs[m]) % p) % p
+        w.append(_modinv(d, p))
+    out = []
+    for x in dom:
+        if x in xs:
+            out.append(ys[xs.index(x)])
+            continue
+        num = den = 0
+        for j in range(k):
+            tt = w[j] * _modinv((x - xs[j]) % p, p) % p
+            num = (num + tt * ys[j]) % p
+            den = (den + tt) % p
+        out.append(num * _modinv(den, p) % p)
+    return out
+
 
 def gpu_list_size(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
     """Exact list size of RS[F_p, dom, k] at agreement >= t. Returns
@@ -149,6 +306,34 @@ def validate():
         good = (gpu == cpu) and not ov
         ok &= good
         print(f"  {name:<12} gpu={gpu} cpu={cpu} overflow={ov}  {'PASS' if good else 'FAIL'}")
+
+    # multiplicative-word gate: pre-registered answer for the rate-1/2 q=1
+    # cell at s=16 (the exact scale-half of the s=32 target). Requires
+    # `python construct_word.py --s 16 --p 65537` to have been run (same dir).
+    import json as _json
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    wf, mf = os.path.join(here, "w16_mult.npy"), os.path.join(here, "w16_mult.json")
+    if os.path.exists(wf) and os.path.exists(mf):
+        meta = _json.load(open(mf))
+        km, tm, pred, cstar = meta["k"], meta["t"], meta["predicted_count"], meta["cstar"]
+        w = [int(v) for v in np.load(wf)]
+        cpu = len(vanish.list_decode(meta["p"], dom, km, w, tm))
+        gpu, ov = gpu_list_size(meta["p"], dom, w, km, tm)
+        cnt, ids, sov = gpu_list_count(meta["p"], dom, w, km, tm, sample_mask=0)
+        frozen = True
+        for row in ids:
+            c = _interp_full(dom[:km], [int(v) for v in row], dom, meta["p"])
+            A = [i for i in range(s) if c[i] == w[i]]
+            frozen &= (sum(A) % s == cstar) and (len(A) == tm)
+        good = (cpu == gpu == cnt == pred == len(ids)) and frozen and not ov and not sov
+        ok &= good
+        print(f"  mult-word    cpu={cpu} gpu={gpu} count={cnt} predicted={pred} "
+              f"sampled={len(ids)} frozen={frozen}  {'PASS' if good else 'FAIL'}")
+    else:
+        ok = False
+        print("  mult-word    MISSING w16_mult.npy/.json — run construct_word.py first  FAIL")
+
     print("VALIDATE:", "PASS" if ok else "FAIL")
     return ok
 
@@ -161,10 +346,25 @@ if __name__ == "__main__":
     ap.add_argument("--k", type=int)
     ap.add_argument("--t", type=int)
     ap.add_argument("--word-file", help="npy file: uint32 word of length s")
+    ap.add_argument("--count", action="store_true",
+                    help="count mode: exact distinct count via lex-first "
+                         "dedup (no emit cap) + hash-sampled member IDs")
+    ap.add_argument("--sample-mask", type=lambda x: int(x, 0), default=0xFF,
+                    help="emit codeword IDs where (fnv & mask)==0 (count mode)")
+    ap.add_argument("--out-ids", help="npy path for sampled IDs (count mode)")
     a = ap.parse_args()
     if a.validate:
         raise SystemExit(0 if validate() else 1)
     dom = list(vanish.subgroup(a.p, a.s))
     word = list(np.load(a.word_file).astype(np.uint32))
-    size, ov = gpu_list_size(a.p, dom, word, a.k, a.t)
-    print(f"list size = {size}" + ("  [OVERFLOW: raise cap]" if ov else ""))
+    if a.count:
+        cnt, ids, sov = gpu_list_count(a.p, dom, word, a.k, a.t,
+                                       sample_mask=a.sample_mask)
+        print(f"distinct list size = {cnt}  sampled ids = {len(ids)}"
+              + ("  [SAMPLE OVERFLOW: raise scap or mask]" if sov else ""))
+        if a.out_ids:
+            np.save(a.out_ids, ids)
+            print(f"wrote {a.out_ids}")
+    else:
+        size, ov = gpu_list_size(a.p, dom, word, a.k, a.t)
+        print(f"list size = {size}" + ("  [OVERFLOW: raise cap]" if ov else ""))

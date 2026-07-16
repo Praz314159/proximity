@@ -67,43 +67,95 @@ def interp_full(xs, ys, dom, p):
     return out
 
 
-# ----- GPU decode returning the codewords (not just size) -----------------
-def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
-    """Distinct codewords (as full eval vectors) of RS[F_p, dom, k] at agreement
-    >= t. Reuses the kernel; expands emitted IDs (values at first k pts) to full
-    codewords on host."""
+# ----- batch interpolation (host) -----------------------------------------
+_CTX = {}
+
+
+def _ctx(p, dom, k, cap):
+    """Per-(p,dom,k) constants, built once: device tables, the emit buffer, and
+    the batch-interpolation matrices. The interpolation NODES are always
+    dom[:k] (the kernel emits values there), so the barycentric weights and the
+    tt matrix are the same for every codeword of every pool — hoist them."""
+    key = (p, id(dom), k)
+    if key in _CTX:
+        return _CTX[key]
     n = len(dom)
-    total = math.comb(n, k)
-    dom_d = cp.asarray(dom, dtype=cp.uint32)
-    word_d = cp.asarray(word, dtype=cp.uint32)
     inv = np.zeros((n, n), dtype=np.uint32)
     for i in range(n):
         for j in range(n):
             if i != j:
                 inv[i, j] = modinv((dom[i] - dom[j]) % p, p)
-    inv_d = cp.asarray(inv.ravel(), dtype=cp.uint32)
     binom = np.zeros((n + 1, k + 1), dtype=np.uint64)
     for a in range(n + 1):
         for b in range(min(a, k) + 1):
             binom[a, b] = math.comb(a, b)
-    binom_d = cp.asarray(binom.ravel(), dtype=cp.uint64)
-    out_ids = cp.zeros(cap * k, dtype=cp.uint32)
-    out_count = cp.zeros(1, dtype=cp.int32)
+    xs, rest = dom[:k], dom[k:]
+    wj = []
+    for j in range(k):
+        d = 1
+        for m in range(k):
+            if m != j:
+                d = d * ((xs[j] - xs[m]) % p) % p
+        wj.append(modinv(d, p))
+    TT = np.zeros((len(rest), k), dtype=np.int64)
+    inv_den = np.zeros(len(rest), dtype=np.int64)
+    for i, x in enumerate(rest):
+        den = 0
+        for j in range(k):
+            t_ = wj[j] * modinv((x - xs[j]) % p, p) % p
+            TT[i, j] = t_
+            den = (den + t_) % p
+        inv_den[i] = modinv(den, p)
+    c = dict(dom_d=cp.asarray(dom, dtype=cp.uint32),
+             inv_d=cp.asarray(inv.ravel(), dtype=cp.uint32),
+             binom_d=cp.asarray(binom.ravel(), dtype=cp.uint64),
+             out_ids=cp.empty(cap * k, dtype=cp.uint32),
+             out_count=cp.empty(1, dtype=cp.int32),
+             TT=TT, inv_den=inv_den, n=n, total=math.comb(n, k))
+    _CTX[key] = c
+    return c
+
+
+def interp_batch(ids, dom, p, k, ctx):
+    """Expand emitted codeword IDs (values at dom[:k]) to full eval vectors —
+    one matmul mod p for the whole pool instead of a Lagrange loop per
+    codeword (validated exactly against interp_full; ~100x). The 16-bit split
+    keeps the int64 accumulators from overflowing at p < 2^31."""
+    Y = np.asarray(ids, dtype=np.int64)
+    if len(Y) == 0:
+        return np.zeros((0, ctx["n"]), dtype=np.int64)
+    TT, inv_den = ctx["TT"], ctx["inv_den"]
+    hi, lo = Y >> 16, Y & 0xFFFF
+    num = ((hi @ TT.T % p) * 65536 + (lo @ TT.T % p)) % p
+    out = np.empty((len(Y), ctx["n"]), dtype=np.int64)
+    out[:, :k] = Y
+    out[:, k:] = num * inv_den[None, :] % p
+    return out
+
+
+# ----- GPU decode returning the codewords (not just size) -----------------
+def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
+    """Distinct codewords (as full eval vectors, (L, n) int64) of
+    RS[F_p, dom, k] at agreement >= t."""
+    c = _ctx(p, dom, k, cap)
+    word_d = cp.asarray(word, dtype=cp.uint32)
+    c["out_count"].fill(0)
     threads = 256
-    for base in range(0, total, tile):
-        span = min(tile, total - base)
+    for base in range(0, c["total"], tile):
+        span = min(tile, c["total"] - base)
         blocks = (span + threads - 1) // threads
         _MOD((blocks,), (threads,),
-             (np.int32(n), np.int32(k), np.int32(t), np.uint32(p),
-              dom_d, word_d, inv_d, binom_d, np.int64(total), np.int64(base),
-              out_ids, out_count, np.int32(cap)))
+             (np.int32(c["n"]), np.int32(k), np.int32(t), np.uint32(p),
+              c["dom_d"], word_d, c["inv_d"], c["binom_d"],
+              np.int64(c["total"]), np.int64(base),
+              c["out_ids"], c["out_count"], np.int32(cap)))
     cp.cuda.Stream.null.synchronize()
-    hits = int(out_count[0])
+    hits = int(c["out_count"][0])
     assert hits <= cap, f"OVERFLOW: {hits} > cap {cap}; raise cap"
-    ids = cp.asnumpy(out_ids[: hits * k].reshape(hits, k)) if hits else np.zeros((0, k))
-    ids = np.unique(ids, axis=0)
-    xs = dom[:k]
-    return [interp_full(xs, list(map(int, row)), dom, p) for row in ids]
+    if not hits:
+        return np.zeros((0, c["n"]), dtype=np.int64)
+    ids = cp.asnumpy(cp.unique(c["out_ids"][: hits * k].reshape(hits, k), axis=0))
+    return interp_batch(ids, dom, p, k, c)
 
 
 # ----- Python greedy optimizer to convergence (GPU pool per step) ---------
@@ -143,8 +195,7 @@ def optimize_gpu(p, dom, k, t, seed, rng, max_flips=200):
     n = len(dom); w = list(seed); relaxed = max(t - 1, k)
     traj = []
     for _ in range(max_flips):
-        pool = gpu_decode(p, dom, w, k, relaxed)
-        P = np.array(pool, dtype=np.int64).reshape(len(pool), n)
+        P = gpu_decode(p, dom, w, k, relaxed)   # (L, n) int64
         wv = np.array(w, dtype=np.int64)
         ag = (P == wv[None, :]).sum(axis=1)
         cur = int((ag >= t).sum())
@@ -191,6 +242,7 @@ def run_cell(p, s, k, t, nseed):
     best = None
     growths, exact_fr = [], []
     for sd in range(nseed):
+        t0 = time.time()
         seed = pencil_seed(p, dom, k, petals, np.random.default_rng(sd))
         w, m, traj = optimize_gpu(p, dom, k, t, seed, rng)
         for a, b in zip(traj, traj[1:]):        # L2 growth law, late phase
@@ -199,6 +251,8 @@ def run_cell(p, s, k, t, nseed):
                 exact_fr.append(a["exact_t"] / a["L"])
         if best is None or len(m) > best[1]:
             best = (w, len(m), m)
+        print(f"  [k{k}t{t} seed {sd:>2}] L={len(m):<8} steps={len(traj):<3} "
+              f"best={best[1]:<8} {time.time() - t0:6.1f}s", flush=True)
     maxL = best[1]
     bucket = int(vanish.m_struct(s, t, t - k))
     rho, delta, q = k / s, 1 - t / s, p

@@ -63,16 +63,26 @@ sample the dense bulk — series for formula-hunting, not certificates.
 Driver: `zoo_campaign.py` (numpy fallback lets `--validate` run anywhere).
 
 Decode primes with mu_32: 2130706433 (KB), 77569, 65537, 97, 193, 257,
-449, 577. Cloud census additionally sweeps every p = 1 mod 32 below 3000
-(~25 more) — minutes each, and the large-prime accident discovery at
-s = 22/24 says thin large-p coverage cannot identify structural values.
+449, 577. The cloud census sweeps ALL 599 primes p = 1 mod 32 below 1e5
+(the accident spectrum is a number-theoretic object: jump-density
+statistics need the full spectrum, not a band) — spectroscopy-grade
+coverage matching the CPU sweep at s <= 24.
 
 ```bash
 python decode_gpu.py --validate          # decoder gate
 python zoo_campaign.py --validate        # campaign gate (CPU-checkable)
-for P in 2130706433 77569 65537 97 193 257 353 449 577 641 769 929 1153          1217 1249 1409 1601 1697 2113 2273 2593 2657 2689 2753 3041; do
+python - <<'EOF' > primes32.txt
+for p in range(33, 100000, 32):
+    d = 2
+    while d*d <= p and p % d: d += 1
+    if d*d > p: print(p)
+EOF
+echo 2130706433 >> primes32.txt; echo 77569 >> primes32.txt
+# single GPU (~30-120 s/prime => ~8-20 h), or shard on 4x A100:
+#   split -n l/4 primes32.txt shard_ ; one loop per CUDA_VISIBLE_DEVICES
+while read P; do
   python zoo_campaign.py --cloud --s 32 --p $P --out cloud_s32_$P.json
-done                                      # ~minutes each on A100
+done < primes32.txt
 for P in 2130706433 77569 65537 97 193 257 449 577; do
   python zoo_campaign.py --zoo --s 32 --p $P --depth 5 --out zoo_s32_$P.json
 done                                      # q <= 5 = the full strip at s=32
@@ -83,8 +93,8 @@ python zoo_campaign.py --bulk --s 32 --p 577 --n 20000 --out bulk_s32_577.json
 python concentration.py --p 2130706433 --s 32 --cells "14:17,14:18,14:19,15:17"
 ```
 
-Budget: cloud sweep ~2-3 h, zoo+depth ~3-4 h, bulk ~2-4 h, concentration
-~4-8 h => ~1.5 A100-days single-GPU, or ~6 h wall on 4x A100 (shard the
-cloud/zoo prime loops across CUDA_VISIBLE_DEVICES; dedicate one GPU to
-concentration). Bring JSONs home into
+Budget: cloud sweep (599 primes) ~8-20 h, zoo+depth ~3-4 h, bulk
+~2-4 h, concentration ~4-8 h => ~1.5-2 A100-days single-GPU, or ~8-12 h
+wall on 4x A100 (shard the cloud prime list across CUDA_VISIBLE_DEVICES;
+dedicate one GPU to concentration while shards run). Bring JSONs home into
 experiments/landscape/ (they extend census_zoo_scaling.json).

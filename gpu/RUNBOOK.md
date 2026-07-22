@@ -55,3 +55,28 @@ cd .. && mkdir campaign && cd campaign
   at the next scale — Pillar 1's key data point.
 - N_max(w) profile at s=64: the anticorrelation law's s-growth.
 - Cost estimate: A100 at ~$2.5/h — the whole campaign is O($10).
+
+## Zoo-scaling campaign (2026-07-22, data-first program)
+
+Goal: extend every coordinate-family series to s = 32 (601M subsets) and
+sample the dense bulk — series for formula-hunting, not certificates.
+Driver: `zoo_campaign.py` (numpy fallback lets `--validate` run anywhere).
+
+Primes with mu_32: 2130706433 (KB), 77569, 65537, 97, 193, 257, 449, 577.
+
+```bash
+python decode_gpu.py --validate          # decoder gate
+python zoo_campaign.py --validate        # campaign gate (CPU-checkable)
+for P in 2130706433 77569 65537 97 193 257 449 577; do
+  python zoo_campaign.py --cloud --s 32 --p $P --out cloud_s32_$P.json
+done                                      # ~minutes each on A100
+python zoo_campaign.py --zoo --s 32 --p 2130706433 --depth 2 --out zoo_s32_kb.json
+python zoo_campaign.py --zoo --s 32 --p 97 --depth 2 --out zoo_s32_97.json
+python zoo_campaign.py --bulk --s 32 --p 2130706433 --n 20000 --out bulk_s32_kb.json
+# native-dense odd-cell search (the SH/purification frontier):
+python concentration.py --p 2130706433 --s 32 --cells "14:17,14:18,14:19,15:17"
+```
+
+Budget: cloud sweep ~1 h, zoo+depth ~2 h, bulk ~2-4 h, concentration
+~4-8 h => one A100-day covers the full campaign. Bring JSONs home into
+experiments/landscape/ (they extend census_zoo_scaling.json).

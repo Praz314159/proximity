@@ -32,11 +32,11 @@ HOW
 
 Requires: cupy-cuda12x, vanish wheel, CUDA GPU.
 """
-import argparse, math, time
+import argparse, faulthandler, math, signal, time
 import numpy as np
 import cupy as cp
 import vanish
-from decode_gpu import _MOD  # reuse the validated kernel
+from decode_gpu import _mod_tmpl, barrett_minv  # validated templated kernel
 
 
 # ----- host helpers -------------------------------------------------------
@@ -141,11 +141,13 @@ def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
     word_d = cp.asarray(word, dtype=cp.uint32)
     c["out_count"].fill(0)
     threads = 256
+    kern = _mod_tmpl(c["n"], k)
+    minv = barrett_minv(p)
     for base in range(0, c["total"], tile):
         span = min(tile, c["total"] - base)
         blocks = (span + threads - 1) // threads
-        _MOD((blocks,), (threads,),
-             (np.int32(c["n"]), np.int32(k), np.int32(t), np.uint32(p),
+        kern((blocks,), (threads,),
+             (np.int32(t), np.uint32(p), minv,
               c["dom_d"], word_d, c["inv_d"], c["binom_d"],
               np.int64(c["total"]), np.int64(base),
               c["out_ids"], c["out_count"], np.int32(cap)))
@@ -154,7 +156,10 @@ def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
     assert hits <= cap, f"OVERFLOW: {hits} > cap {cap}; raise cap"
     if not hits:
         return np.zeros((0, c["n"]), dtype=np.int64)
-    ids = cp.asnumpy(cp.unique(c["out_ids"][: hits * k].reshape(hits, k), axis=0))
+    # host dedup: cp.unique(axis=0) stalls at structured-word hit counts
+    # (see decode_gpu module docs)
+    ids = np.unique(
+        cp.asnumpy(c["out_ids"][: hits * k]).reshape(hits, k), axis=0)
     return interp_batch(ids, dom, p, k, c)
 
 
@@ -194,7 +199,8 @@ def optimize_gpu(p, dom, k, t, seed, rng, max_flips=200):
     [measured law at s=16] vs 1 + t/n [naive shell]."""
     n = len(dom); w = list(seed); relaxed = max(t - 1, k)
     traj = []
-    for _ in range(max_flips):
+    for step in range(max_flips):
+        t_step = time.time()
         P = gpu_decode(p, dom, w, k, relaxed)   # (L, n) int64
         wv = np.array(w, dtype=np.int64)
         ag = (P == wv[None, :]).sum(axis=1)
@@ -220,6 +226,8 @@ def optimize_gpu(p, dom, k, t, seed, rng, max_flips=200):
             traj.append(dict(L=cur, exact_t=exact_t,
                              survivors=best[3], recruits=best[4]))
             w[best[0]] = best[1]
+            print(f"      [step {step}] L={cur} -> {best[2]} "
+                  f"pool={len(P)} ({time.time()-t_step:.1f}s)", flush=True)
         else:
             traj.append(dict(L=cur, exact_t=exact_t))
             break
@@ -273,7 +281,13 @@ def run_cell(p, s, k, t, nseed):
                 exact_t_fr=round(float(np.mean(exact_fr)), 4) if exact_fr else None)
 
 
+def _install_faulthandler():
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1)
+
+
 if __name__ == "__main__":
+    _install_faulthandler()
     ap = argparse.ArgumentParser()
     ap.add_argument("--p", type=int, required=True)
     ap.add_argument("--s", type=int, required=True)

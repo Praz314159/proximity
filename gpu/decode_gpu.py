@@ -283,6 +283,121 @@ extern "C" __global__ void list_decode_tmpl(
 }
 """
 
+KERNEL_POOL = _MODMATH + r"""
+extern "C" __global__ void pool_counts(
+    const int t, const int P,
+    const unsigned int p, const unsigned long long minv,
+    const unsigned int* __restrict__ dom,
+    const unsigned int* __restrict__ words,   // [P * NC], row per word
+    const unsigned int* __restrict__ inv_diff,
+    const unsigned long long* __restrict__ binom,
+    const long long total, const long long base,
+    const long long sample_mask,              // thread runs iff (tid & mask)==0
+    unsigned long long* out_hits)             // [P]
+{
+    long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x + base;
+    if (tid >= total) return;
+    if ((tid & sample_mask) != 0) return;
+
+    int I[KC];
+    unsigned int mask = 0u;
+    {
+        long long rem = tid; int x = 0;
+        #pragma unroll
+        for (int pos = 0; pos < KC; pos++) {
+            while (1) {
+                unsigned long long cnt =
+                    binom[(long long)(NC - x - 1) * (KC + 1) + (KC - pos - 1)];
+                if ((unsigned long long)rem < cnt) {
+                    I[pos] = x; mask |= (1u << x); x++; break;
+                }
+                rem -= cnt; x++;
+            }
+        }
+    }
+
+    // interpolation weights depend only on the info-set: shared by the pool
+    unsigned int wt[KC];
+    #pragma unroll
+    for (int m = 0; m < KC; m++) {
+        unsigned int acc = 1;
+        #pragma unroll
+        for (int l = 0; l < KC; l++)
+            if (l != m)
+                acc = mulmod(acc, inv_diff[(long long)I[m] * NC + I[l]], p, minv);
+        wt[m] = acc;
+    }
+
+    for (int w = 0; w < P; w++) {
+        const unsigned int* word = words + (long long)w * NC;
+        int agree = 0;
+        for (int j = 0; j < NC; j++) {
+            unsigned int cj;
+            if ((mask >> j) & 1u) {
+                cj = word[j];
+            } else {
+                unsigned int num = 0, invden = 1;
+                #pragma unroll
+                for (int m = 0; m < KC; m++) {
+                    unsigned int tmp = mulmod(wt[m], word[I[m]], p, minv);
+                    tmp = mulmod(tmp, inv_diff[(long long)j * NC + I[m]], p, minv);
+                    num = addmod(num, tmp, p);
+                    invden = mulmod(invden, submod(dom[j], dom[I[m]], p), p, minv);
+                }
+                cj = mulmod(num, invden, p, minv);
+            }
+            if (cj == word[j]) agree++;
+        }
+        if (agree >= t) atomicAdd(&out_hits[w], 1ULL);
+    }
+}
+"""
+
+_POOL_CACHE = {}
+
+
+def _mod_pool(n, k):
+    """Compile (or fetch) the (n, k)-templated pool-counting kernel."""
+    key = (n, k)
+    if key not in _POOL_CACHE:
+        assert n <= 32, "bitmask membership requires n <= 32"
+        src = KERNEL_POOL.replace("NC", str(n)).replace("KC", str(k))
+        _POOL_CACHE[key] = cp.RawKernel(src, "pool_counts")
+    return _POOL_CACHE[key]
+
+
+def gpu_pool_counts(p, dom, words, k, t, sample_mask=0, tile=1 << 26):
+    """Agreement-hit counts WITH multiplicity (sum of C(a_f, k) over
+    codewords at agreement >= t) for a pool of words in one launch per
+    tile. The unrank and interpolation weights are computed once per
+    info-set and shared across the pool (issue #15). `sample_mask`
+    restricts to info-sets with (index & mask) == 0 — a 1/(mask+1)
+    subsample for screening fitness (masks must be 2^m - 1).
+
+    Returns int64 array of shape (P,). This is the optimizer's screening
+    signal; it is NOT a distinct-codeword count (no dedup)."""
+    n = len(dom)
+    P = len(words)
+    total = math.comb(n, k)
+    dom_d = cp.asarray(dom, dtype=cp.uint32)
+    words_d = cp.asarray(np.asarray(words, dtype=np.uint32).reshape(P * n))
+    inv_d, binom_d = _tables(p, dom, k)
+    minv = barrett_minv(p)
+    out_hits = cp.zeros(P, dtype=cp.uint64)
+    threads = 256
+    kern = _mod_pool(n, k)
+    for base in range(0, total, tile):
+        span = min(tile, total - base)
+        blocks = (span + threads - 1) // threads
+        kern((blocks,), (threads,),
+             (np.int32(t), np.int32(P), np.uint32(p), minv,
+              dom_d, words_d, inv_d, binom_d,
+              np.int64(total), np.int64(base), np.int64(sample_mask),
+              out_hits))
+    cp.cuda.Stream.null.synchronize()
+    return cp.asnumpy(out_hits).astype(np.int64)
+
+
 _TMPL_CACHE = {}
 
 def _mod_tmpl(n, k):
@@ -584,6 +699,36 @@ def validate():
     # three-way kernel A/B at k=11 scale (templated vs runtime-fast vs
     # reference; 2.5M info-sets so the slow kernels stay gateable)
     ok &= _ab_check(30097, 24, 11, 12, n_words=2)
+
+    # pool kernel vs per-word hit counts (with multiplicity), full + sampled
+    rng = np.random.default_rng(11)
+    pdom = list(vanish.subgroup(65537, 16))
+    pool = [[pow(x, 8, 65537) for x in pdom],
+            [pow(x, 11, 65537) for x in pdom]] + \
+           [rng.integers(0, 65537, size=16).tolist() for _ in range(3)]
+    for mask in (0, 3):
+        got = gpu_pool_counts(65537, pdom, pool, 7, 8, sample_mask=mask)
+        want = []
+        for w in pool:
+            single = gpu_pool_counts(65537, pdom, [w], 7, 8, sample_mask=mask)
+            want.append(single[0])
+        good = got.tolist() == want
+        ok &= good
+        print(f"  pool mask={mask}: {got.tolist()} == per-word {want}  "
+              f"{'PASS' if good else 'FAIL'}")
+    # cross-check the full-population pool count against the CPU oracle:
+    # hits(word) = sum over codewords of C(agreement, k)
+    got = gpu_pool_counts(65537, pdom, pool[:2], 7, 8)
+    want = []
+    for w in pool[:2]:
+        members = vanish.list_decode(65537, pdom, 7, w, 8)
+        agree = (np.asarray(members).astype(np.int64)
+                 == np.array(w)[None, :]).sum(axis=1)
+        want.append(sum(math.comb(int(a), 7) for a in agree))
+    good = got.tolist() == want
+    ok &= good
+    print(f"  pool vs CPU oracle: {got.tolist()} == {want}  "
+          f"{'PASS' if good else 'FAIL'}")
     print("VALIDATE:", "PASS" if ok else "FAIL")
     return ok
 

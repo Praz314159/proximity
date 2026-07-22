@@ -86,6 +86,8 @@ def cloud_census(s, p, dom, chunk=1 << 22, progress=True):
     domx = cp.asarray(np.array(dom, dtype=np.int64))
     zero = np.zeros(r + 1, dtype=np.int64)
     top = {}
+    spectra = p < (1 << 24)
+    hists = [cp.zeros(p, dtype=cp.int64) for _ in range(r)] if spectra else None
     t0 = time.time()
     for lo in range(0, total, chunk):
         hi = min(lo + chunk, total)
@@ -102,6 +104,8 @@ def cloud_census(s, p, dom, chunk=1 << 22, progress=True):
             coef = (shifted + (p - xm) * coef) % p
         for j in range(1, r + 1):
             zero[j] += int((coef[:, r - j] == 0).sum())
+            if spectra:
+                hists[j - 1] += cp.bincount(coef[:, r - j], minlength=p)
         vals, cnts = (cp.unique(coef[:, 0], return_counts=True)
                       if GPU else np.unique(coef[:, 0], return_counts=True))
         for v, c in zip(vals.tolist(), cnts.tolist()):
@@ -110,10 +114,20 @@ def cloud_census(s, p, dom, chunk=1 << 22, progress=True):
             done = hi / total
             print(f"  cloud {100*done:5.1f}%  ({time.time()-t0:.0f}s)",
                   flush=True)
-    return {"s": s, "p": p, "total": total,
-            "zero_fiber": {j: int(zero[j]) for j in range(1, r + 1)},
-            "top_class_max": max(top.values()),
-            "top_hist": sorted(top.values(), reverse=True)}
+    out = {"s": s, "p": p, "total": total,
+           "zero_fiber": {j: int(zero[j]) for j in range(1, r + 1)},
+           "top_class_max": max(top.values()),
+           "top_hist": sorted(top.values(), reverse=True)}
+    if spectra:
+        spec = {}
+        for j in range(1, r + 1):
+            h = hists[j - 1]
+            sizes, mult = (cp.unique(h[h > 0], return_counts=True) if GPU
+                           else np.unique(h[h > 0], return_counts=True))
+            spec[j] = {int(sz): int(m) for sz, m in
+                       zip(sizes.tolist(), mult.tolist())}
+        out["fiber_size_spectrum"] = spec
+    return out
 
 
 # ---------------------------------------------------------------------------

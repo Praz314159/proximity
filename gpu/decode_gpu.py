@@ -203,6 +203,96 @@ extern "C" __global__ void list_decode_fast(
 
 _MOD_FAST = cp.RawKernel(KERNEL_FAST, "list_decode_fast")
 
+# ---------------------------------------------------------------------------
+# Templated fast kernel (issue #15): n and k are compile-time constants, so
+# the I/wt/idvals arrays become register-resident (the runtime kernels force
+# them to local memory -- measured ~50-100x slowdown at k=15) and the
+# membership test is a bitmask. Same algorithm, same emissions; validate()
+# A/B-checks it against the runtime kernels and the CPU oracle.
+KERNEL_TMPL = _MODMATH + r"""
+extern "C" __global__ void list_decode_tmpl(
+    const int t,
+    const unsigned int p, const unsigned long long minv,
+    const unsigned int* __restrict__ dom,
+    const unsigned int* __restrict__ word,
+    const unsigned int* __restrict__ inv_diff,
+    const unsigned long long* __restrict__ binom,
+    const long long total, const long long base,
+    unsigned int* out_ids, int* out_count, const int cap)
+{
+    long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x + base;
+    if (tid >= total) return;
+
+    int I[KC];
+    unsigned int mask = 0u;
+    {
+        long long rem = tid; int x = 0;
+        #pragma unroll
+        for (int pos = 0; pos < KC; pos++) {
+            while (1) {
+                unsigned long long cnt =
+                    binom[(long long)(NC - x - 1) * (KC + 1) + (KC - pos - 1)];
+                if ((unsigned long long)rem < cnt) {
+                    I[pos] = x; mask |= (1u << x); x++; break;
+                }
+                rem -= cnt; x++;
+            }
+        }
+    }
+
+    unsigned int wt[KC];
+    #pragma unroll
+    for (int m = 0; m < KC; m++) {
+        unsigned int acc = 1;
+        #pragma unroll
+        for (int l = 0; l < KC; l++)
+            if (l != m)
+                acc = mulmod(acc, inv_diff[(long long)I[m] * NC + I[l]], p, minv);
+        wt[m] = acc;
+    }
+
+    unsigned int idvals[KC];
+    int agree = 0;
+    for (int j = 0; j < NC; j++) {
+        unsigned int cj;
+        if ((mask >> j) & 1u) {
+            cj = word[j];
+        } else {
+            unsigned int num = 0, invden = 1;
+            #pragma unroll
+            for (int m = 0; m < KC; m++) {
+                unsigned int tmp = mulmod(wt[m], word[I[m]], p, minv);
+                tmp = mulmod(tmp, inv_diff[(long long)j * NC + I[m]], p, minv);
+                num = addmod(num, tmp, p);
+                invden = mulmod(invden, submod(dom[j], dom[I[m]], p), p, minv);
+            }
+            cj = mulmod(num, invden, p, minv);
+        }
+        if (cj == word[j]) agree++;
+        if (j < KC) idvals[j] = cj;
+    }
+
+    if (agree >= t) {
+        int slot = atomicAdd(out_count, 1);
+        if (slot < cap)
+            for (int j = 0; j < KC; j++)
+                out_ids[(long long)slot * KC + j] = idvals[j];
+    }
+}
+"""
+
+_TMPL_CACHE = {}
+
+def _mod_tmpl(n, k):
+    """Compile (or fetch) the (n, k)-templated kernel. n <= 32 (bitmask)."""
+    key = (n, k)
+    if key not in _TMPL_CACHE:
+        assert n <= 32, "bitmask membership requires n <= 32"
+        src = KERNEL_TMPL.replace("NC", str(n)).replace("KC", str(k))
+        _TMPL_CACHE[key] = cp.RawKernel(src, "list_decode_tmpl")
+    return _TMPL_CACHE[key]
+
+
 
 def barrett_minv(p):
     """floor(2^64 / p) — the Barrett constant (host side)."""
@@ -384,7 +474,13 @@ def gpu_list_size(p, dom, word, k, t, cap=1 << 26, tile=1 << 26, fast=True):
     for base in range(0, total, tile):
         span = min(tile, total - base)
         blocks = (span + threads - 1) // threads
-        if fast:
+        if fast == "tmpl" or (fast is True and n <= 32 and fast != "runtime"):
+            _mod_tmpl(n, k)((blocks,), (threads,),
+                      (np.int32(t), np.uint32(p), minv,
+                       dom_d, word_d, inv_d, binom_d,
+                       np.int64(total), np.int64(base),
+                       out_ids, out_count, np.int32(cap)))
+        elif fast:
             _MOD_FAST((blocks,), (threads,),
                       (np.int32(n), np.int32(k), np.int32(t), np.uint32(p),
                        minv, dom_d, word_d, inv_d, binom_d,
@@ -402,6 +498,23 @@ def gpu_list_size(p, dom, word, k, t, cap=1 << 26, tile=1 << 26, fast=True):
     ids = out_ids[: m * k].reshape(m, k)
     distinct = cp.unique(ids, axis=0).shape[0] if m else 0
     return int(distinct), overflow
+
+
+def _ab_check(p, s, k, t, n_words=4, seed=7):
+    """A/B: templated vs runtime-fast vs reference kernel on random words."""
+    rng = np.random.default_rng(seed)
+    dom = list(vanish.subgroup(p, s))
+    ok = True
+    for i in range(n_words):
+        w = rng.integers(0, p, size=s).tolist()
+        a = gpu_list_size(p, dom, w, k, t, fast="tmpl")
+        b = gpu_list_size(p, dom, w, k, t, fast="runtime")
+        c = gpu_list_size(p, dom, w, k, t, fast=False)
+        good = a == b == c
+        ok &= good
+        print(f"  A/B word {i}: tmpl={a} fast={b} ref={c} "
+              f"{'PASS' if good else 'FAIL'}")
+    return ok
 
 
 def validate():
@@ -447,6 +560,9 @@ def validate():
         ok = False
         print("  mult-word    MISSING w16_mult.npy/.json — run construct_word.py first  FAIL")
 
+    # three-way kernel A/B at k=11 scale (templated vs runtime-fast vs
+    # reference; 2.5M info-sets so the slow kernels stay gateable)
+    ok &= _ab_check(30097, 24, 11, 13, n_words=2)
     print("VALIDATE:", "PASS" if ok else "FAIL")
     return ok
 

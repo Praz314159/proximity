@@ -26,7 +26,7 @@
 //! truth the rest is validated against.
 
 use crate::error::{Error, Result};
-use crate::field::{binom, mulmod, powmod};
+use crate::field::{checked_binom, mulmod, powmod};
 use crate::rs::code::ReedSolomon;
 use std::collections::HashSet;
 
@@ -105,7 +105,7 @@ impl<'a> DecodeOracle<'a> {
                 "exact decode needs agreement t >= k (radius within capacity)".into(),
             ));
         }
-        if binom(n as u64, k as u64) > EXACT_SUBSET_CAP {
+        if !checked_binom(n as u64, k as u64).is_some_and(|c| c <= EXACT_SUBSET_CAP) {
             return Err(Error::Unsupported(
                 "C(n, k) exceeds the exact cap; use list_size_atleast".into(),
             ));
@@ -159,7 +159,7 @@ impl<'a> DecodeOracle<'a> {
     /// the sampling methods are the way in.
     #[must_use]
     pub fn exact_feasible(&self) -> bool {
-        binom(self.rs.n() as u64, self.rs.k() as u64) <= EXACT_SUBSET_CAP
+        checked_binom(self.rs.n() as u64, self.rs.k() as u64).is_some_and(|c| c <= EXACT_SUBSET_CAP)
     }
 
     /// Sample `samples` information sets and return the *distinct* codewords
@@ -444,6 +444,18 @@ mod tests {
         );
         assert_eq!(list[0], cw);
         assert!(ReedSolomon::on_domain(p, vec![1, 1, 2, 3, 4], 3).is_err());
+    }
+
+    /// An oversized instance must produce a clean `Unsupported`, not a
+    /// process-aborting overflow panic in the cap check: C(128, 64) > u64.
+    #[test]
+    fn oversized_cap_check_errs_instead_of_panicking() {
+        let pts: Vec<u64> = (1..=128).collect();
+        let rs = ReedSolomon::on_domain(65537, pts, 64).unwrap();
+        let oracle = DecodeOracle::new(&rs);
+        assert!(!oracle.exact_feasible());
+        let w = vec![0u64; 128];
+        assert!(oracle.list(&w, Radius::agreement(70)).is_err());
     }
 
     /// Deduplication and output determinism survive the parallel enumeration:

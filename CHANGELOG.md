@@ -16,6 +16,9 @@
   (two Fermat exponentiations per combination instead of ~(n-k)(k+1)), and
   clones codewords only when new instead of once per passing combination
   (issue #8).
+- **field / decode**: `checked_binom` (`None` on u64 overflow); the exact
+  decoder's cap checks use it, so an oversized instance (e.g. C(128, 64))
+  returns `Unsupported` instead of aborting the process from FFI (issue #9).
 
 ## v0.4.0 (2026-07-05)
 

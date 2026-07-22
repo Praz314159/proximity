@@ -19,6 +19,15 @@
 - **field / decode**: `checked_binom` (`None` on u64 overflow); the exact
   decoder's cap checks use it, so an oversized instance (e.g. C(128, 64))
   returns `Unsupported` instead of aborting the process from FFI (issue #9).
+- **py**: the discovery layer is now fully exposed — `optimize_word` (warm-start
+  greedy climb from a given word), `pencil_seed`, `decode_profile` (decode +
+  the full `classify::structure` profile in one call), plus theorem-word
+  constructors `c5_word`, `top_word` (Theorem B_mult), `word_from_syndrome`,
+  and `gs_class_counts`. `list_decode` and `optimize_word` return members as
+  `(L, n)` uint64 arrays; `buckets_e` returns a uint64 array (issue #10).
+- **rung**: `top_word`, `word_from_syndrome`, `gs_class_counts` in Rust with
+  golden pins (810 at 65537 AND the accident prime 97; 715; 17,678,835; the
+  e_1-coordinate cut = 70).
 
 ## v0.4.0 (2026-07-05)
 

@@ -78,3 +78,72 @@ pub fn rung_lambda(sg: &MultiplicativeSubgroup, r: usize, q: usize) -> Result<Ve
     debug_assert_eq!(subset.len(), r);
     Ok(top_elementary_symmetric(&subset, q, sg.p()))
 }
+
+/// The proven multiplicative extremal word (Theorem B_mult, 2026-07-21):
+/// `w(x) = x^{r-1} - (-1)^{r+1} zeta^c x^{s-1}` on `mu_s`, whose exact list at
+/// agreement `r` (code degree `< r - 1`) is the Graham--Sloane class
+/// `{ S : prod S = zeta^c }`, at every prime containing `mu_s`.
+pub fn top_word(sg: &MultiplicativeSubgroup, r: usize, c: usize) -> Result<Vec<u64>> {
+    use crate::field::{mulmod, powmod};
+    let (p, s) = (sg.p(), sg.order());
+    if r < 2 || r >= s {
+        return Err(Error::OutOfRange("need 2 <= r < s".into()));
+    }
+    let zeta_c = powmod(sg.w(), (c % s) as u64, p);
+    // gamma = (-1)^{r+1} zeta^c
+    let gamma = if r % 2 == 1 { zeta_c } else { (p - zeta_c) % p };
+    Ok(sg
+        .elements()
+        .iter()
+        .map(|&x| {
+            let lead = powmod(x, (r - 1) as u64, p);
+            let tail = mulmod(gamma, powmod(x, (s - 1) as u64, p), p);
+            (lead + p - tail) % p
+        })
+        .collect())
+}
+
+/// The word of a syndrome vector `b` in the moment convention:
+/// `w = sum_j (-1)^j b_j x^{r-1+j}` evaluated on `domain` — the inverse of the
+/// cut map `Z(b) = { S : <b, e-hat(complement of S)> = 0 }`, with the sign
+/// convention pinned so that `D_S(w) = sum_j b_j e_j(Sbar)` exactly.
+pub fn word_from_syndrome(p: u64, domain: &[u64], r: usize, b: &[u64]) -> Vec<u64> {
+    use crate::field::{mulmod, powmod};
+    domain
+        .iter()
+        .map(|&x| {
+            let mut acc = 0u64;
+            for (j, &bj) in b.iter().enumerate() {
+                let term = mulmod(bj % p, powmod(x, (r - 1 + j) as u64, p), p);
+                acc = if j % 2 == 0 {
+                    (acc + term) % p
+                } else {
+                    (acc + p - term) % p
+                };
+            }
+            acc
+        })
+        .collect()
+}
+
+/// Graham--Sloane class counts: `out[c] = #{ T subset Z_s, |T| = t :
+/// sum(T) = c mod s }`, by dynamic programming. `out` has length `s`.
+pub fn gs_class_counts(s: usize, t: usize) -> Result<Vec<u64>> {
+    if t > s {
+        return Err(Error::OutOfRange("need t <= s".into()));
+    }
+    // dp[j][c] = #{ j-subsets of {0..a-1} with sum c mod s }, folded over a.
+    let mut dp = vec![vec![0u64; s]; t + 1];
+    dp[0][0] = 1;
+    for a in 0..s {
+        for j in (1..=t.min(a + 1)).rev() {
+            for c in 0..s {
+                let prev = dp[j - 1][(c + s - (a % s)) % s];
+                dp[j][c] = dp[j][c]
+                    .checked_add(prev)
+                    .ok_or_else(|| Error::OutOfRange("class count overflows u64".into()))?;
+            }
+        }
+    }
+    Ok(dp.swap_remove(t))
+}

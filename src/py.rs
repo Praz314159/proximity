@@ -70,15 +70,16 @@ fn buckets_e(
     r: usize,
     q: usize,
     lams: Vec<Vec<u64>>,
-) -> PyResult<Vec<u64>> {
+) -> PyResult<Py<PyArray1<u64>>> {
     use rayon::prelude::*;
-    err(py.allow_threads(|| {
+    let v = err(py.allow_threads(|| {
         let sg = MultiplicativeSubgroup::new(p, s)?;
         let t = mitm::HalfTables::build(&sg, r, q)?;
         lams.par_iter()
             .map(|l| t.bucket(l))
             .collect::<crate::Result<Vec<_>>>()
-    }))
+    }))?;
+    Ok(v.into_pyarray_bound(py).into())
 }
 
 /// The common `(e_1..e_q)` of the Theorem-A rung family (the optimal structural construction).
@@ -390,12 +391,13 @@ fn list_decode(
     k: usize,
     word: Vec<u64>,
     t: usize,
-) -> PyResult<Vec<Vec<u64>>> {
-    err(py.allow_threads(|| {
+) -> PyResult<Py<PyArray2<u64>>> {
+    let members = err(py.allow_threads(|| {
         let rs = code::ReedSolomon::on_domain(p, domain, k)?;
         let oracle = crate::rs::decode::DecodeOracle::new(&rs);
         oracle.list(&word, crate::rs::decode::Radius::agreement(t))
-    }))
+    }))?;
+    rows_to_array(py, &members)
 }
 
 /// One code-first optimization run on `RS[F_p, domain, k]`: build a random
@@ -459,11 +461,156 @@ fn optimize_pencil(
     }))
 }
 
+/// Greedy list-size climb to convergence FROM A GIVEN WORD (warm start): the
+/// binding for `rs::cluster::optimize` with an explicit seed. Returns
+/// `(center, members, size_trajectory)` with `members` as an `(L, n)` uint64
+/// array. Deterministic.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn optimize_word(
+    py: Python<'_>,
+    p: u64,
+    domain: Vec<u64>,
+    k: usize,
+    t: usize,
+    word: Vec<u64>,
+    max_flips: usize,
+) -> PyResult<(Vec<u64>, Py<PyArray2<u64>>, Vec<usize>)> {
+    let (center, members, sizes) = err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let rad = crate::rs::decode::Radius::agreement(t);
+        let (cl, tr) = crate::rs::cluster::optimize(&rs, &word, rad, 1, max_flips)?;
+        Ok((
+            cl.center().to_vec(),
+            cl.members().to_vec(),
+            tr.sizes.clone(),
+        ))
+    }))?;
+    Ok((center, rows_to_array(py, &members)?, sizes))
+}
+
+/// A random pencil seed word (random `(k-1)`-core + `petals` petal codewords),
+/// the unbiased code-first start for the search engines. Deterministic in
+/// `seed`. The Rust engine `optimize_word` climbs from any word, this one
+/// included.
+#[pyfunction]
+fn pencil_seed(p: u64, domain: Vec<u64>, k: usize, petals: usize, seed: u64) -> PyResult<Vec<u64>> {
+    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
+    err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))
+}
+
+/// One symmetric-function stat row: (index, entropy_bits, distinct,
+/// max_class_fraction, mode_value, distribution as (value, count) pairs).
+type SymRow = (usize, f64, usize, f64, u64, Vec<(u64, u64)>);
+
+/// Decode with the full structural profile in one call: returns
+/// `(members, agreement_sizes, size_entropy, sym_stats, joint_entropy,
+/// joint_distinct)` where `members` is an `(L, n)` uint64 array,
+/// `agreement_sizes` is `[(size, count)]`, and `sym_stats` has one
+/// [`SymRow`] per `e_i` (`e_1` first). The canonical "is anything frozen?"
+/// probe — replaces the hand-rolled post-processing after `list_decode`.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn decode_profile(
+    py: Python<'_>,
+    p: u64,
+    domain: Vec<u64>,
+    k: usize,
+    word: Vec<u64>,
+    t: usize,
+) -> PyResult<(
+    Py<PyArray2<u64>>,
+    Vec<(usize, u64)>,
+    f64,
+    Vec<SymRow>,
+    f64,
+    usize,
+)> {
+    let (members, st) = err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let rad = crate::rs::decode::Radius::agreement(t);
+        let members = crate::rs::decode::DecodeOracle::new(&rs).list(&word, rad)?;
+        let st = crate::rs::classify::structure(&rs, &word, rad)?;
+        Ok((members, st))
+    }))?;
+    let sym = st
+        .symmetric
+        .into_iter()
+        .map(|s| {
+            (
+                s.index,
+                s.entropy,
+                s.distinct,
+                s.max_class_fraction,
+                s.mode_value,
+                s.distribution,
+            )
+        })
+        .collect();
+    Ok((
+        rows_to_array(py, &members)?,
+        st.agreement_sizes,
+        st.size_entropy,
+        sym,
+        st.joint_entropy,
+        st.joint_distinct,
+    ))
+}
+
+/// The additive C.5 word `sum_i (-1)^i lambda_i x^{r-i}` on `mu_s` (the
+/// Theorem-B word class; `lam` holds `(e_1..e_q)`).
+#[pyfunction]
+fn c5_word(p: u64, s: usize, r: usize, lam: Vec<u64>) -> PyResult<Vec<u64>> {
+    let sg = sub(p, s)?;
+    let k = r.saturating_sub(lam.len()).max(1);
+    let rs = err(code::ReedSolomon::on_subgroup(&sg, k))?;
+    err(rs.c5_word(r, &lam))
+}
+
+/// The proven multiplicative extremal word `x^{r-1} - (-1)^{r+1} zeta^c
+/// x^{s-1}` (Theorem B_mult): its exact list at agreement `r` over code degree
+/// `< r-1` is the Graham-Sloane class of `c`, at every prime containing mu_s.
+#[pyfunction]
+fn top_word(p: u64, s: usize, r: usize, c: usize) -> PyResult<Vec<u64>> {
+    err(rung::top_word(&sub(p, s)?, r, c))
+}
+
+/// The word of a syndrome vector: `w = sum_j (-1)^j b_j x^{r-1+j}` on
+/// `domain`, pinned to the convention `D_S(w) = sum_j b_j e_j(complement)`.
+#[pyfunction]
+fn word_from_syndrome(p: u64, domain: Vec<u64>, r: usize, b: Vec<u64>) -> Vec<u64> {
+    rung::word_from_syndrome(p, &domain, r, &b)
+}
+
+/// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.
+#[pyfunction]
+fn gs_class_counts(py: Python<'_>, s: usize, t: usize) -> PyResult<Py<PyArray1<u64>>> {
+    Ok(err(rung::gs_class_counts(s, t))?
+        .into_pyarray_bound(py)
+        .into())
+}
+
+/// Rows -> (L, n) uint64 array (empty -> shape (0, 0)).
+fn rows_to_array(py: Python<'_>, rows: &[Vec<u64>]) -> PyResult<Py<PyArray2<u64>>> {
+    let n = rows.first().map_or(0, Vec::len);
+    let flat: Vec<u64> = rows.iter().flatten().copied().collect();
+    let arr = numpy::ndarray::Array2::from_shape_vec((rows.len(), n), flat)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(arr.into_pyarray_bound(py).into())
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize_word, m)?)?;
+    m.add_function(wrap_pyfunction!(pencil_seed, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_profile, m)?)?;
+    m.add_function(wrap_pyfunction!(c5_word, m)?)?;
+    m.add_function(wrap_pyfunction!(top_word, m)?)?;
+    m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
+    m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q2, m)?)?;
     m.add_function(wrap_pyfunction!(census_direct, m)?)?;

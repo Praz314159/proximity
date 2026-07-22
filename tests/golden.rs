@@ -183,3 +183,44 @@ fn golden_s64_mass() {
     let d = dp::distribution_q1(&sg(193, 64), 32).unwrap();
     assert_eq!(d.total(), binom(64, 32));
 }
+
+/// Theorem B_mult pins (2026-07-21): the top word's exact list is the maximal
+/// Graham-Sloane class — field-independently, including at the worst s=16
+/// accident prime. And the class-count DP reproduces the headline integers.
+#[test]
+fn golden_top_word_and_gs_classes() {
+    use vanish::rs::decode::{DecodeOracle, ListOracle, Radius};
+    let n16 = vanish::smooth::rung::gs_class_counts(16, 8).unwrap();
+    assert_eq!(n16.iter().sum::<u64>(), 12870);
+    assert_eq!(*n16.iter().max().unwrap(), 810);
+    assert_eq!((n16[4], n16[12]), (810, 810));
+    assert_eq!(
+        vanish::smooth::rung::gs_class_counts(16, 9).unwrap()[3],
+        715
+    );
+    assert_eq!(
+        *vanish::smooth::rung::gs_class_counts(32, 17)
+            .unwrap()
+            .iter()
+            .max()
+            .unwrap(),
+        17_678_835
+    );
+    for p in [65537u64, 97] {
+        let sg = vanish::domain::MultiplicativeSubgroup::new(p, 16).unwrap();
+        let w = vanish::smooth::rung::top_word(&sg, 8, 4).unwrap();
+        let rs = vanish::rs::code::ReedSolomon::on_subgroup(&sg, 7).unwrap();
+        let l = DecodeOracle::new(&rs)
+            .list_size(&w, Radius::agreement(8))
+            .unwrap();
+        assert_eq!(l, 810, "top word exact list at p = {p}");
+    }
+    // syndrome-word convention: b supported on e_1 gives the additive cut (70)
+    let sg = vanish::domain::MultiplicativeSubgroup::new(65537, 16).unwrap();
+    let w = vanish::smooth::rung::word_from_syndrome(65537, sg.elements(), 8, &[0, 1]);
+    let rs = vanish::rs::code::ReedSolomon::on_subgroup(&sg, 7).unwrap();
+    let l = DecodeOracle::new(&rs)
+        .list_size(&w, Radius::agreement(8))
+        .unwrap();
+    assert_eq!(l, 70, "e_1 coordinate cut = the additive bucket");
+}

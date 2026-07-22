@@ -5,8 +5,10 @@ decoder), GPU-shaped: one thread per information set. Each thread unranks its
 C(n,k)-combination, interpolates the degree-<k polynomial through those k
 (point, word-value) pairs, evaluates it on all n domain points, counts agreement
 with the word, and — if agreement >= t — atomically emits the codeword's ID (its
-values at the first k domain points). Host deduplicates the IDs (cp.unique) to
-the list.
+values at the first k domain points). The host deduplicates the IDs with
+numpy's row-unique — NOT cp.unique(axis=0), whose axis implementation is
+pathologically slow at the row counts structured words produce (583k rows:
+>120 s on an A100 vs <1 s on the host; measured 2026-07-22).
 
 The interpolation uses a precomputed inverse-difference table and the identity
 den(X)*prod_m(X - x_m) = 1, so there is NO modular inverse in the per-thread
@@ -496,7 +498,12 @@ def gpu_list_size(p, dom, word, k, t, cap=1 << 26, tile=1 << 26, fast=True):
     overflow = hits > cap
     m = min(hits, cap)
     ids = out_ids[: m * k].reshape(m, k)
-    distinct = cp.unique(ids, axis=0).shape[0] if m else 0
+    if m:
+        # cp.unique(axis=0) stalls at these row counts (see module docs);
+        # exact dedup on the host is sub-second for typical hit counts.
+        distinct = np.unique(cp.asnumpy(ids), axis=0).shape[0]
+    else:
+        distinct = 0
     return int(distinct), overflow
 
 

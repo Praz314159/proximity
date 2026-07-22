@@ -151,7 +151,7 @@ pub fn cut_counts(p: u64, domain: &[u64], r: usize, bs: &[Vec<u64>]) -> Result<V
 /// (moment-coordinate indices, `1 <= i < ... <= n - r`), by direct counting
 /// with the last coefficient normalized to `-1` (words with a zero last
 /// coefficient live on a smaller support — certify those separately).
-/// `|support|` must be 3 or 4. Returns `(max cut, coefficients on support)`.
+/// `|support|` must be 3, 4, or 5 (5 costs p^3 slope triples). Returns `(max cut, coefficients on support)`.
 ///
 /// This is the audited kernel behind the top-cut certifications: for each
 /// slope tuple it bins `(e_last - sum slope_i e_mid_i) / e_first` over the
@@ -166,9 +166,9 @@ pub fn cut_max_sparse(
 ) -> Result<(u64, Vec<u64>)> {
     let n = domain.len();
     let cols = n - r + 1;
-    if !(support.len() == 3 || support.len() == 4) {
+    if !(3..=5).contains(&support.len()) {
         return Err(Error::Unsupported(
-            "support must have 3 or 4 coordinates".into(),
+            "support must have 3, 4, or 5 coordinates".into(),
         ));
     }
     if support.windows(2).any(|w| w[0] >= w[1]) || support.iter().any(|&i| i == 0 || i >= cols) {
@@ -224,6 +224,23 @@ pub fn cut_max_sparse(
             .map(|a| {
                 let (mx, c) = eval_slope(&[a]);
                 (mx, vec![c, a, p - 1])
+            })
+            .max()
+            .unwrap_or((0, vec![]))
+    } else if support.len() == 5 {
+        (0..p)
+            .into_par_iter()
+            .map(|a| {
+                let mut local = (0u64, Vec::new());
+                for b in 0..p {
+                    for cc in 0..p {
+                        let (mx, c0) = eval_slope(&[a, b, cc]);
+                        if mx > local.0 {
+                            local = (mx, vec![c0, a, b, cc, p - 1]);
+                        }
+                    }
+                }
+                local
             })
             .max()
             .unwrap_or((0, vec![]))

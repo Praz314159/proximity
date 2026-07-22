@@ -562,7 +562,7 @@ def validate():
 
     # three-way kernel A/B at k=11 scale (templated vs runtime-fast vs
     # reference; 2.5M info-sets so the slow kernels stay gateable)
-    ok &= _ab_check(30097, 24, 11, 13, n_words=2)
+    ok &= _ab_check(30097, 24, 11, 12, n_words=2)
     print("VALIDATE:", "PASS" if ok else "FAIL")
     return ok
 

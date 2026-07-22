@@ -137,7 +137,10 @@ def cloud_census(s, p, dom, chunk=1 << 22, progress=True):
 def decode_L(p, dom, word, k, t):
     if GPU:
         from decode_gpu import gpu_list_size
-        return int(gpu_list_size(p, list(dom), list(word), k, t))
+        L, overflow = gpu_list_size(p, list(dom), list(word), k, t)
+        if overflow:
+            raise RuntimeError(f"decoder cap overflow at t={t}; raise cap")
+        return int(L)
     import vanish
     return len(vanish.list_decode(p, list(dom), k, list(word), t))
 

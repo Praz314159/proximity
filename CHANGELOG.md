@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **error**: `Error` is now `#[non_exhaustive]`; module docs state the
+  crate-wide error policy (all public-API fallibility flows through
+  `Error`; internal invariants use `expect` with messages naming the
+  invariant; no bare `unwrap` on library paths). `EvalDomain::from_points`
+  reports a composite modulus as `Error::NotPrime` instead of a generic
+  `OutOfRange` string, so callers can match the variant.
+- **py**: one central `Error -> PyErr` mapper — I/O failures raise
+  `IOError`, engine/regime limits (`Error::Unsupported`) raise
+  `NotImplementedError` (previously `ValueError`), validation failures
+  raise `ValueError`.
+- **internal**: every remaining `unwrap` on a library path replaced by an
+  invariant-naming `expect` or a restructure (array destructuring for the
+  MITM half-tables, `total_cmp` for the CLI's float sort — no NaN panic).
+
 - **domain**: `EvalDomain::from_points` now validates the full construction
   contract — `p` prime and every point reduced `< p` — closing a silent
   wrong-answer path on the generic-domain decode API (issue #6).

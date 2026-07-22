@@ -12,18 +12,28 @@ use crate::smooth::buckets::{dp, mitm};
 use crate::smooth::rung;
 use crate::{field, smooth::census};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyIOError, PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
 
+/// Map a library error onto the closest builtin Python exception:
+/// I/O failures raise `IOError`, engine/parameter-regime limits raise
+/// `NotImplementedError`, and every validation failure raises
+/// `ValueError`. (The enum is `#[non_exhaustive]`; unknown future
+/// variants default to `ValueError`.)
+fn to_py(e: crate::Error) -> PyErr {
+    match e {
+        crate::Error::Io { .. } => PyIOError::new_err(e.to_string()),
+        crate::Error::Unsupported(_) => PyNotImplementedError::new_err(e.to_string()),
+        _ => PyValueError::new_err(e.to_string()),
+    }
+}
+
 fn sub(p: u64, s: usize) -> PyResult<MultiplicativeSubgroup> {
-    MultiplicativeSubgroup::new(p, s).map_err(|e| PyValueError::new_err(e.to_string()))
+    MultiplicativeSubgroup::new(p, s).map_err(to_py)
 }
 
 fn err<T>(r: crate::Result<T>) -> PyResult<T> {
-    r.map_err(|e| match e {
-        crate::Error::Io { .. } => pyo3::exceptions::PyIOError::new_err(e.to_string()),
-        _ => PyValueError::new_err(e.to_string()),
-    })
+    r.map_err(to_py)
 }
 
 /// Full exact q=1 bucket distribution: `out[lam]` counts r-subsets S of mu_s with `e_1(S) = lam`. Cost/memory scale with p.
@@ -152,7 +162,7 @@ fn sweep_stats_q1(py: Python<'_>, s: usize, r: usize, primes: Vec<u64>) -> PyRes
             })
             .collect::<crate::Result<Vec<_>>>()
     })
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    .map_err(to_py)
 }
 
 /// Tiered structural certificate for (p, s, r), q = 1 (p-independent).
@@ -208,7 +218,7 @@ fn decompose_many(
             })
             .collect::<crate::Result<Vec<_>>>()
     })
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    .map_err(to_py)
 }
 
 /// An attack row: (delta_star, deficit, t, s_g, r, log2_list).
@@ -275,7 +285,7 @@ fn rung_buckets_many(
             })
             .collect::<crate::Result<Vec<_>>>()
     })
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    .map_err(to_py)
 }
 
 /// Rayon-parallel certificates: rows of (p, tier, m_struct, zero_bucket).
@@ -301,7 +311,7 @@ fn certify_many(
             })
             .collect::<crate::Result<Vec<_>>>()
     })
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    .map_err(to_py)
 }
 
 /// A bad-set row: (p, per-weight Galois-normalized counts, census_fallback);
@@ -323,7 +333,7 @@ fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<V
                 })
                 .collect()
         })
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map_err(to_py)
 }
 
 /// Per-weight maximum cyclotomic norms (the anticorrelation profile),
@@ -332,7 +342,7 @@ fn norms_bad_set(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<V
 fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<String>> {
     py.allow_threads(|| crate::smooth::norms::norm_table(s, wmax, cmax))
         .map(|t| t.n_max_by_weight().iter().map(|n| n.to_string()).collect())
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map_err(to_py)
 }
 
 /// Ingest GPU-campaign norm-table JSON shards into the s-64-scale bad set.
@@ -353,9 +363,9 @@ fn badset_from_gpu_json(
         .allow_threads(|| {
             crate::smooth::norms::ingest::badset_from_gpu_json(&paths, s, wmax, Some(&out_prefix))
         })
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        .map_err(to_py)?;
     let n = rows.len() as u64;
-    let werr = |e: std::io::Error| PyValueError::new_err(e.to_string());
+    let werr = |e: std::io::Error| PyIOError::new_err(e.to_string());
     let mut pb = Vec::with_capacity(rows.len() * 8);
     let mut cb = Vec::with_capacity(rows.len() * (wmax + 1) * 8);
     let mut fb = Vec::with_capacity(rows.len());

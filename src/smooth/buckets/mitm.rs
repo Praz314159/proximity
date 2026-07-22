@@ -96,13 +96,10 @@ impl HalfTables {
                 *tables[t].entry(key).or_insert(0) += 1;
             }
         }
-        let b = tables
-            .pop()
-            .unwrap()
-            .into_iter()
-            .map(|((j, c), n)| (j, c, n))
-            .collect();
-        let a = tables.pop().unwrap();
+        let [a, b_map]: [_; 2] = tables
+            .try_into()
+            .expect("exactly two half tables are built above");
+        let b = b_map.into_iter().map(|((j, c), n)| (j, c, n)).collect();
         Ok(HalfTables { p, s, r, q, a, b })
     }
 

@@ -1,9 +1,21 @@
 //! Error type for the public API. Construction of the core types
 //! ([`crate::domain::MultiplicativeSubgroup`], [`crate::rs::code::ReedSolomon`]) validates
 //! inputs once, so the analysis kernels can assume well-formed parameters.
+//!
+//! # Error policy
+//!
+//! - All fallibility visible from the public API is expressed through
+//!   [`Error`]; library code never panics on user input.
+//! - Internal invariants that construction has already established are
+//!   asserted with `expect` messages naming the invariant (never a bare
+//!   `unwrap`), so a violation reads as the bug it is.
+//! - The enum is `#[non_exhaustive]`: downstream `match`es keep a
+//!   wildcard arm, letting new variants be added without a breaking
+//!   release.
 
 /// Errors returned by the public API.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The claimed field characteristic is not prime.
     #[error("{0} is not prime")]

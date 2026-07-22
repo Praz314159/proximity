@@ -188,7 +188,7 @@ pub fn cut_max_sparse(
         .map(|&s| (0..rows).map(|z| col(s, z)).collect())
         .collect();
     let elast: Vec<u64> = (0..rows)
-        .map(|z| col(*support.last().unwrap(), z))
+        .map(|z| col(*support.last().expect("support length validated at entry"), z))
         .collect();
 
     let eval_slope = |slopes: &[u64]| -> (u64, u64) {

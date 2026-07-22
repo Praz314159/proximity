@@ -162,7 +162,7 @@ fn main() {
                     println!("{p},{mx},{ratio:.6},{occ}");
                 }
             } else {
-                rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                rows.sort_by(|a, b| b.0.total_cmp(&a.0));
                 println!("{} primes; worst 10 conjecture ratios:", rows.len());
                 for (ratio, p, mx, occ) in rows.iter().take(10) {
                     println!("  p={p:>9} ratio={ratio:.3} maxN={mx} occupied={occ}");

@@ -154,7 +154,7 @@ impl EvalDomain {
     /// field element, silently corrupting interpolation.
     pub fn from_points(p: u64, points: Vec<u64>) -> Result<Self> {
         if !is_prime(p) {
-            return Err(Error::OutOfRange(format!("p = {p} is not prime")));
+            return Err(Error::NotPrime(p));
         }
         if points.len() < 2 {
             return Err(Error::OutOfRange(

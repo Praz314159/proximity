@@ -172,8 +172,16 @@ fn parse_bin_weight(
     let mut counts = vec![0u64; wmax + 1];
     let n = nb.len() / 8;
     for i in 0..n {
-        let norm = u64::from_le_bytes(nb[8 * i..8 * i + 8].try_into().unwrap());
-        let c = u64::from_le_bytes(cb[8 * i..8 * i + 8].try_into().unwrap());
+        let norm = u64::from_le_bytes(
+            nb[8 * i..8 * i + 8]
+                .try_into()
+                .expect("slice is exactly 8 bytes"),
+        );
+        let c = u64::from_le_bytes(
+            cb[8 * i..8 * i + 8]
+                .try_into()
+                .expect("slice is exactly 8 bytes"),
+        );
         counts[w] = c;
         sink(norm, &counts);
     }
@@ -325,13 +333,17 @@ fn load_checkpoint(prefix: &str, wmax: usize) -> Option<Checkpoint> {
     }
     let mut acc = HashMap::with_capacity(buf.len() / row);
     for chunk in buf.chunks_exact(row) {
-        let p = u64::from_le_bytes(chunk[..8].try_into().unwrap());
+        let p = u64::from_le_bytes(chunk[..8].try_into().expect("record is at least 8 bytes"));
         let mut counts = [0u64; MAXW];
         for (w, c) in counts.iter_mut().enumerate().take(wmax + 1) {
             let off = 8 + w * 8;
-            *c = u64::from_le_bytes(chunk[off..off + 8].try_into().unwrap());
+            *c = u64::from_le_bytes(
+                chunk[off..off + 8]
+                    .try_into()
+                    .expect("slice is exactly 8 bytes"),
+            );
         }
-        let flag = *chunk.last().unwrap() != 0;
+        let flag = *chunk.last().expect("chunks_exact yields non-empty records") != 0;
         acc.insert(p, (counts, flag));
     }
     Some(Checkpoint {

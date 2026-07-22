@@ -28,18 +28,10 @@ from decode_gpu import gpu_list_count
 
 
 def c5_word(p, dom, r, lam):
-    """w(x) = sum_{i=0}^{q} (-1)^i lam_i x^{r-i}, lam_0 = 1.
-    Mirrors rs::code::c5_word (verified against it at s=16)."""
-    q = len(lam)
-    out = []
-    for x in dom:
-        acc = 0
-        for i in range(q + 1):
-            l = 1 if i == 0 else lam[i - 1] % p
-            term = l * pow(x, r - i, p) % p
-            acc = (acc + term) % p if i % 2 == 0 else (acc - term) % p
-        out.append(acc)
-    return out
+    """w(x) = sum_{i=0}^{q} (-1)^i lam_i x^{r-i} — vanish.c5_word (issue #10);
+    dom must be the subgroup of size s (as everywhere in this driver)."""
+    import vanish
+    return list(vanish.c5_word(p, len(dom), r, list(lam)))
 
 
 def gs_class_size(s, t):

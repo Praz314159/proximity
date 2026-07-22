@@ -36,81 +36,31 @@ def modinv(a, p):
 
 
 def class_counts(n, t):
-    """N_c = #{t-subsets of Z_n : sum == c mod n} exactly (DP)."""
-    dp = np.zeros((t + 1, n), dtype=np.int64)
-    dp[0][0] = 1
-    for a in range(n):
-        for j in range(min(a + 1, t), 0, -1):
-            dp[j] = dp[j] + np.roll(dp[j - 1], a)
-    return dp[t]
+    """N_c = #{t-subsets of Z_n : sum == c mod n} — vanish.gs_class_counts."""
+    import vanish
+    return vanish.gs_class_counts(n, t).astype(np.int64)
 
 
 def dd_row(T, dom, p, n):
-    """Divided-difference functional of the index set T as a length-n row."""
-    row = [0] * n
-    for x in T:
-        d = 1
-        for y in T:
-            if y != x:
-                d = d * ((dom[x] - dom[y]) % p) % p
-        row[x] = modinv(d, p)
-    return row
+    """Divided-difference functional row — vanish.dd_rows (issue #11)."""
+    import vanish
+    return [int(x) for x in vanish.dd_rows(p, list(dom), [list(T)])[0]]
 
 
 def rref_kernel(rows, n, p):
-    """(rank, kernel basis) of the span of `rows` acting on F_p^n."""
-    A = [r[:] for r in rows]
-    pivots, r = [], 0
-    for c in range(n):
-        piv = next((i for i in range(r, len(A)) if A[i][c] % p), None)
-        if piv is None:
-            continue
-        A[r], A[piv] = A[piv], A[r]
-        inv = modinv(A[r][c], p)
-        A[r] = [v * inv % p for v in A[r]]
-        for i in range(len(A)):
-            if i != r and A[i][c]:
-                f = A[i][c]
-                A[i] = [(A[i][j] - f * A[r][j]) % p for j in range(n)]
-        pivots.append(c)
-        r += 1
-    free = [c for c in range(n) if c not in pivots]
-    basis = []
-    for fc in free:
-        v = [0] * n
-        v[fc] = 1
-        for ri, pc in enumerate(pivots):
-            v[pc] = (-A[ri][fc]) % p
-        basis.append(v)
-    return r, basis
+    """(rank, kernel basis) of the span of `rows` — vanish.nullspace_mod."""
+    import vanish
+    basis = [[int(x) for x in v]
+             for v in vanish.nullspace_mod([list(map(int, r)) for r in rows], p)]
+    return n - len(basis), basis
 
 
 def reduce_mod_span(vecs, span_rows, n, p):
-    """Residues of `vecs` after eliminating the pivots of span_rows (RREF)."""
-    A = [r[:] for r in span_rows]
-    pivots, r = [], 0
-    for c in range(n):
-        piv = next((i for i in range(r, len(A)) if A[i][c] % p), None)
-        if piv is None:
-            continue
-        A[r], A[piv] = A[piv], A[r]
-        inv = modinv(A[r][c], p)
-        A[r] = [v * inv % p for v in A[r]]
-        for i in range(len(A)):
-            if i != r and A[i][c]:
-                f = A[i][c]
-                A[i] = [(A[i][j] - f * A[r][j]) % p for j in range(n)]
-        pivots.append(c)
-        r += 1
-    out = []
-    for v in vecs:
-        w = v[:]
-        for ri, pc in enumerate(pivots):
-            if w[pc]:
-                f = w[pc]
-                w = [(w[j] - f * A[ri][j]) % p for j in range(n)]
-        out.append(w)
-    return out
+    """Residues mod the row span — vanish.reduce_mod_span (issue #11)."""
+    import vanish
+    return [[int(x) for x in r] for r in vanish.reduce_mod_span(
+        [list(map(int, v)) for v in vecs],
+        [list(map(int, r)) for r in span_rows], p)]
 
 
 def sample_class(n, t, cstar, rng):

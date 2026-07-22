@@ -300,7 +300,9 @@ if __name__ == "__main__":
     for cell in a.cells.split(","):
         k, t = map(int, cell.split(":"))
         r = run_cell(a.p, a.s, k, t, a.nseed)
+        fmt = lambda v, w: f"{v:>{w}}" if v is not None else " " * (w - 2) + "--"
         print(f"{r['s']:>3}{r['rho']:>6}{r['delta']:>7}{r['q']:>3}{r['maxL']:>8}"
               f"{r['bucket']:>8}{r['list_exp']:>10}{r['bucket_exp']:>11}"
               f"{r['entropy_exp']:>12}{r['e1H_max']:>9}"
-              f"{r['growth_med']:>8}{r['growth_law']:>9}{r['exact_t_fr']:>9}")
+              + fmt(r['growth_med'], 8) + fmt(r['growth_law'], 9)
+              + fmt(r['exact_t_fr'], 9))

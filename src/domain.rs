@@ -144,11 +144,25 @@ pub struct EvalDomain {
 
 impl EvalDomain {
     /// From an explicit list of distinct points in `F_p` (`n >= 2`).
+    ///
+    /// Validates the full construction contract (the kernels downstream
+    /// assume well-formed inputs and never re-check): `p` must be prime,
+    /// and every point must be reduced (`< p`) — otherwise aliases such as
+    /// `1` and `p + 1` would pass integer-distinctness while being the same
+    /// field element, silently corrupting interpolation.
     pub fn from_points(p: u64, points: Vec<u64>) -> Result<Self> {
+        if !is_prime(p) {
+            return Err(Error::OutOfRange(format!("p = {p} is not prime")));
+        }
         if points.len() < 2 {
             return Err(Error::OutOfRange(
                 "need at least 2 evaluation points".into(),
             ));
+        }
+        if let Some(&x) = points.iter().find(|&&x| x >= p) {
+            return Err(Error::OutOfRange(format!(
+                "evaluation point {x} is not reduced mod p = {p}"
+            )));
         }
         let mut sorted = points.clone();
         sorted.sort_unstable();
@@ -184,5 +198,39 @@ impl EvalDomain {
     #[must_use]
     pub fn n(&self) -> usize {
         self.points.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `from_points` validates the full construction contract: prime `p`,
+    /// reduced points, distinctness. Aliases such as `1` and `p + 1` are the
+    /// same field element and must be rejected, not silently decoded wrong.
+    #[test]
+    fn from_points_validates_p_and_range() {
+        assert!(
+            EvalDomain::from_points(15, vec![1, 2, 3]).is_err(),
+            "composite p"
+        );
+        assert!(
+            EvalDomain::from_points(17, vec![1, 18, 2]).is_err(),
+            "unreduced point"
+        );
+        assert!(
+            EvalDomain::from_points(17, vec![1, 18]).is_err(),
+            "alias of 1 mod 17"
+        );
+        assert!(
+            EvalDomain::from_points(17, vec![1, 1, 2]).is_err(),
+            "duplicates"
+        );
+        assert!(
+            EvalDomain::from_points(17, vec![5]).is_err(),
+            "too few points"
+        );
+        let d = EvalDomain::from_points(17, vec![3, 5, 9]).unwrap();
+        assert_eq!((d.p(), d.n()), (17, 3));
     }
 }

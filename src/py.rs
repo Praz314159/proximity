@@ -26,14 +26,14 @@ fn err<T>(r: crate::Result<T>) -> PyResult<T> {
 /// Full exact q=1 bucket distribution: `out[lam]` counts r-subsets S of mu_s with `e_1(S) = lam`. Cost/memory scale with p.
 #[pyfunction]
 fn bucket_dist_q1(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyArray1<u64>>> {
-    let d = err(dp::distribution_q1(&sub(p, s)?, r))?;
+    let d = err(py.allow_threads(|| dp::distribution_q1(&MultiplicativeSubgroup::new(p, s)?, r)))?;
     Ok(d.into_values().into_pyarray_bound(py).into())
 }
 
 /// Full exact q=2 joint distribution over `(e_1, e_2)`, shape (p, p). Intended for p <= ~700.
 #[pyfunction]
 fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyArray2<u64>>> {
-    let v = err(dp::distribution_q2(&sub(p, s)?, r))?;
+    let v = err(py.allow_threads(|| dp::distribution_q2(&MultiplicativeSubgroup::new(p, s)?, r)))?;
     let pp = p as usize;
     let arr = numpy::ndarray::Array2::from_shape_vec((pp, pp), v)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -63,10 +63,22 @@ fn bucket_e(p: u64, s: usize, r: usize, lam: Vec<u64>) -> PyResult<u64> {
 
 /// Exact buckets for many lambdas sharing one table build (any q <= 8, s <= 32).
 #[pyfunction]
-fn buckets_e(p: u64, s: usize, r: usize, q: usize, lams: Vec<Vec<u64>>) -> PyResult<Vec<u64>> {
-    let sg = sub(p, s)?;
-    let t = err(mitm::HalfTables::build(&sg, r, q))?;
-    lams.iter().map(|l| err(t.bucket(l))).collect()
+fn buckets_e(
+    py: Python<'_>,
+    p: u64,
+    s: usize,
+    r: usize,
+    q: usize,
+    lams: Vec<Vec<u64>>,
+) -> PyResult<Vec<u64>> {
+    use rayon::prelude::*;
+    err(py.allow_threads(|| {
+        let sg = MultiplicativeSubgroup::new(p, s)?;
+        let t = mitm::HalfTables::build(&sg, r, q)?;
+        lams.par_iter()
+            .map(|l| t.bucket(l))
+            .collect::<crate::Result<Vec<_>>>()
+    }))
 }
 
 /// The common `(e_1..e_q)` of the Theorem-A rung family (the optimal structural construction).
@@ -109,8 +121,13 @@ fn factor(n: u64) -> Vec<u64> {
 /// second_moment) — the sweep-workload API (avoids marshaling full
 /// distributions). second_moment is exact (u128 internally), returned as u128.
 #[pyfunction]
-fn dist_stats_q1(p: u64, s: usize, r: usize) -> PyResult<(u64, u64, u64, u64, u128)> {
-    let d = err(dp::distribution_q1(&sub(p, s)?, r))?;
+fn dist_stats_q1(
+    py: Python<'_>,
+    p: u64,
+    s: usize,
+    r: usize,
+) -> PyResult<(u64, u64, u64, u64, u128)> {
+    let d = err(py.allow_threads(|| dp::distribution_q1(&MultiplicativeSubgroup::new(p, s)?, r)))?;
     let (mx, arg) = d.max();
     Ok((mx, arg, d.occupied(), d.total(), d.second_moment()))
 }
@@ -367,15 +384,18 @@ fn badset_from_gpu_json(
 /// elements (e.g. `subgroup(p, s)`, or an arbitrary set). Requires `t >= k`.
 #[pyfunction]
 fn list_decode(
+    py: Python<'_>,
     p: u64,
     domain: Vec<u64>,
     k: usize,
     word: Vec<u64>,
     t: usize,
 ) -> PyResult<Vec<Vec<u64>>> {
-    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
-    let oracle = crate::rs::decode::DecodeOracle::new(&rs);
-    err(oracle.list(&word, crate::rs::decode::Radius::agreement(t)))
+    err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let oracle = crate::rs::decode::DecodeOracle::new(&rs);
+        oracle.list(&word, crate::rs::decode::Radius::agreement(t))
+    }))
 }
 
 /// One code-first optimization run on `RS[F_p, domain, k]`: build a random
@@ -386,6 +406,7 @@ fn list_decode(
 #[pyfunction]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn anneal_pencil(
+    py: Python<'_>,
     p: u64,
     domain: Vec<u64>,
     k: usize,
@@ -394,17 +415,17 @@ fn anneal_pencil(
     steps: usize,
     seed: u64,
 ) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
-    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
-    let rad = crate::rs::decode::Radius::agreement(t);
-    let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
-    let (cl, tr) = err(crate::rs::cluster::anneal(
-        &rs, &seedw, rad, steps, 2.0, 0.92, seed,
-    ))?;
-    Ok((
-        cl.center().to_vec(),
-        cl.members().to_vec(),
-        tr.sizes.clone(),
-    ))
+    err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let rad = crate::rs::decode::Radius::agreement(t);
+        let seedw = crate::rs::cluster::random_pencil_seed(&rs, petals, seed)?;
+        let (cl, tr) = crate::rs::cluster::anneal(&rs, &seedw, rad, steps, 2.0, 0.92, seed)?;
+        Ok((
+            cl.center().to_vec(),
+            cl.members().to_vec(),
+            tr.sizes.clone(),
+        ))
+    }))
 }
 
 /// One code-first run to **convergence**: build a random pencil seed and greedily
@@ -416,6 +437,7 @@ fn anneal_pencil(
 #[pyfunction]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn optimize_pencil(
+    py: Python<'_>,
     p: u64,
     domain: Vec<u64>,
     k: usize,
@@ -424,15 +446,17 @@ fn optimize_pencil(
     max_flips: usize,
     seed: u64,
 ) -> PyResult<(Vec<u64>, Vec<Vec<u64>>, Vec<usize>)> {
-    let rs = err(code::ReedSolomon::on_domain(p, domain, k))?;
-    let rad = crate::rs::decode::Radius::agreement(t);
-    let seedw = err(crate::rs::cluster::random_pencil_seed(&rs, petals, seed))?;
-    let (cl, tr) = err(crate::rs::cluster::optimize(&rs, &seedw, rad, 1, max_flips))?;
-    Ok((
-        cl.center().to_vec(),
-        cl.members().to_vec(),
-        tr.sizes.clone(),
-    ))
+    err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let rad = crate::rs::decode::Radius::agreement(t);
+        let seedw = crate::rs::cluster::random_pencil_seed(&rs, petals, seed)?;
+        let (cl, tr) = crate::rs::cluster::optimize(&rs, &seedw, rad, 1, max_flips)?;
+        Ok((
+            cl.center().to_vec(),
+            cl.members().to_vec(),
+            tr.sizes.clone(),
+        ))
+    }))
 }
 
 #[pymodule]

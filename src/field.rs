@@ -306,13 +306,36 @@ pub fn find_generator(p: u64) -> u64 {
 /// Binomial coefficient as exact `u64` (panics on overflow past `u64`).
 #[must_use]
 pub fn binom(n: u64, k: u64) -> u64 {
+    checked_binom(n, k).expect("binomial overflows u64")
+}
+
+/// Binomial coefficient as exact `u64`, `None` on overflow. Use this for
+/// feasibility/cap comparisons reachable from FFI, where an oversized input
+/// must produce a clean `Unsupported` rather than a process abort.
+#[must_use]
+pub fn checked_binom(n: u64, k: u64) -> Option<u64> {
     if k > n {
-        return 0;
+        return Some(0);
     }
     let k = k.min(n - k);
     let mut num: u128 = 1;
     for i in 0..k {
-        num = num * (n - i) as u128 / (i + 1) as u128;
+        num = num.checked_mul((n - i) as u128)? / (i + 1) as u128;
     }
-    u64::try_from(num).expect("binomial overflows u64")
+    u64::try_from(num).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `checked_binom` matches `binom` in range and returns `None` (rather
+    /// than panicking) past u64.
+    #[test]
+    fn checked_binom_range_and_overflow() {
+        assert_eq!(checked_binom(16, 8), Some(12870));
+        assert_eq!(checked_binom(8, 12), Some(0));
+        assert_eq!(checked_binom(64, 32), Some(binom(64, 32)));
+        assert_eq!(checked_binom(128, 64), None);
+    }
 }

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **domain**: `EvalDomain::from_points` now validates the full construction
+  contract — `p` prime and every point reduced `< p` — closing a silent
+  wrong-answer path on the generic-domain decode API (issue #6).
+- **py**: the long-running discovery bindings (`list_decode`,
+  `anneal_pencil`, `optimize_pencil`) and the p-scale DP bindings
+  (`bucket_dist_q1/q2`, `dist_stats_q1`) now release the GIL for the whole
+  computation; `buckets_e` additionally fans out over `lams` with rayon
+  (issue #7).
+- **decode**: the exact list decoder parallelizes over the leading index of
+  the information set (rayon; branch merge reproduces the serial lex order
+  exactly), batches all interpolation inversions with Montgomery's trick
+  (two Fermat exponentiations per combination instead of ~(n-k)(k+1)), and
+  clones codewords only when new instead of once per passing combination
+  (issue #8).
+- **field / decode**: `checked_binom` (`None` on u64 overflow); the exact
+  decoder's cap checks use it, so an oversized instance (e.g. C(128, 64))
+  returns `Unsupported` instead of aborting the process from FFI (issue #9).
+
 ## v0.4.0 (2026-07-05)
 
 - **norms::ingest**: `norms_ingest` moved under its parent domain as

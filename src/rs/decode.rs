@@ -26,7 +26,7 @@
 //! truth the rest is validated against.
 
 use crate::error::{Error, Result};
-use crate::field::{binom, mulmod, powmod};
+use crate::field::{checked_binom, mulmod, powmod};
 use crate::rs::code::ReedSolomon;
 use std::collections::HashSet;
 
@@ -105,24 +105,53 @@ impl<'a> DecodeOracle<'a> {
                 "exact decode needs agreement t >= k (radius within capacity)".into(),
             ));
         }
-        if binom(n as u64, k as u64) > EXACT_SUBSET_CAP {
+        if !checked_binom(n as u64, k as u64).is_some_and(|c| c <= EXACT_SUBSET_CAP) {
             return Err(Error::Unsupported(
                 "C(n, k) exceeds the exact cap; use list_size_atleast".into(),
             ));
         }
         let p = self.rs.p();
         let dom = self.rs.points();
+        // Parallelize over the smallest element of the information set: the
+        // branches partition the combinations, and merging them in `i0` order
+        // reproduces the serial lex enumeration exactly, so the output (set
+        // AND order) is identical to the sequential version.
+        use rayon::prelude::*;
+        let branches: Vec<Vec<Vec<u64>>> = (0..=n - k)
+            .into_par_iter()
+            .map(|i0| {
+                let mut xs = vec![0u64; k];
+                let mut ys = vec![0u64; k];
+                let mut local_seen: HashSet<Vec<u64>> = HashSet::new();
+                let mut local_out: Vec<Vec<u64>> = Vec::new();
+                for_each_combination(n - i0 - 1, k - 1, |rest| {
+                    xs[0] = dom[i0];
+                    ys[0] = word[i0];
+                    for (slot, &r) in rest.iter().enumerate() {
+                        let i = i0 + 1 + r;
+                        xs[slot + 1] = dom[i];
+                        ys[slot + 1] = word[i];
+                    }
+                    let cw = interp_eval_all(&xs, &ys, dom, p);
+                    let agree = cw.iter().zip(word).filter(|(a, b)| a == b).count();
+                    if agree >= t && !local_seen.contains(&cw) {
+                        local_seen.insert(cw.clone());
+                        local_out.push(cw);
+                    }
+                });
+                local_out
+            })
+            .collect();
         let mut seen: HashSet<Vec<u64>> = HashSet::new();
         let mut out: Vec<Vec<u64>> = Vec::new();
-        for_each_combination(n, k, |idx| {
-            let xs: Vec<u64> = idx.iter().map(|&i| dom[i]).collect();
-            let ys: Vec<u64> = idx.iter().map(|&i| word[i]).collect();
-            let cw = interp_eval_all(&xs, &ys, dom, p);
-            let agree = cw.iter().zip(word).filter(|(a, b)| a == b).count();
-            if agree >= t && seen.insert(cw.clone()) {
-                out.push(cw);
+        for branch in branches {
+            for cw in branch {
+                if !seen.contains(&cw) {
+                    seen.insert(cw.clone());
+                    out.push(cw);
+                }
             }
-        });
+        }
         Ok(out)
     }
 
@@ -130,7 +159,7 @@ impl<'a> DecodeOracle<'a> {
     /// the sampling methods are the way in.
     #[must_use]
     pub fn exact_feasible(&self) -> bool {
-        binom(self.rs.n() as u64, self.rs.k() as u64) <= EXACT_SUBSET_CAP
+        checked_binom(self.rs.n() as u64, self.rs.k() as u64).is_some_and(|c| c <= EXACT_SUBSET_CAP)
     }
 
     /// Sample `samples` information sets and return the *distinct* codewords
@@ -228,14 +257,46 @@ fn inv(a: u64, p: u64) -> u64 {
     powmod(a, p - 2, p)
 }
 
+/// Invert every entry of `vals` in place with Montgomery's batch trick:
+/// prefix products, ONE Fermat inversion, unwind. Entries must be nonzero.
+fn batch_inv(vals: &mut [u64], p: u64) {
+    let n = vals.len();
+    if n == 0 {
+        return;
+    }
+    let mut pref = vec![0u64; n];
+    let mut acc = 1u64;
+    for (i, &v) in vals.iter().enumerate() {
+        pref[i] = acc;
+        acc = mulmod(acc, v, p);
+    }
+    let mut inv_acc = inv(acc, p);
+    for i in (0..n).rev() {
+        let orig = vals[i];
+        vals[i] = mulmod(inv_acc, pref[i], p);
+        inv_acc = mulmod(inv_acc, orig, p);
+    }
+}
+
 /// Interpolate the unique degree-`< k` polynomial through the `k` nodes
 /// `(xs, ys)` and evaluate it at every point of `domain`, via the barycentric
 /// form (no monomial-coefficient conversion — the identity
 /// `sum_j w_j prod_{m != j}(X - x_m) = 1` keeps the denominator nonzero off the
-/// nodes). Shared with [`crate::rs::cluster`] for building codewords from a pencil.
+/// nodes). All inversions are batched (two Fermat exponentiations per call, not
+/// `~(n-k)(k+1)`): this is the hot kernel under every decode/search flip.
+/// Shared with [`crate::rs::cluster`] for building codewords from a pencil.
 pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
     let k = xs.len();
-    let mut wts = vec![0u64; k];
+    let n = domain.len();
+    // Node index of each domain point (or usize::MAX), and the flattened
+    // nonzero differences to invert: k weight denominators, then k diffs
+    // `x - x_j` for each non-node point.
+    let node_of: Vec<usize> = domain
+        .iter()
+        .map(|&x| xs.iter().position(|&xj| xj == x).unwrap_or(usize::MAX))
+        .collect();
+    let n_off = node_of.iter().filter(|&&j| j == usize::MAX).count();
+    let mut to_inv = Vec::with_capacity(k + n_off * k);
     for j in 0..k {
         let mut d = 1u64;
         for m in 0..k {
@@ -243,23 +304,48 @@ pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) ->
                 d = mulmod(d, (xs[j] + p - xs[m]) % p, p);
             }
         }
-        wts[j] = inv(d, p);
+        to_inv.push(d);
     }
-    domain
-        .iter()
-        .map(|&x| {
-            if let Some(j) = xs.iter().position(|&xj| xj == x) {
-                return ys[j];
+    for (&x, &nd) in domain.iter().zip(&node_of) {
+        if nd == usize::MAX {
+            for &xj in xs {
+                to_inv.push((x + p - xj) % p);
             }
+        }
+    }
+    batch_inv(&mut to_inv, p);
+    let (wts, diffs) = to_inv.split_at(k);
+    // First pass: numerators and denominators; collect denominators for the
+    // second (tiny) inversion batch.
+    let mut nums = vec![0u64; n];
+    let mut dens = Vec::with_capacity(n_off);
+    let mut off = 0usize;
+    for (i, (&_x, &nd)) in domain.iter().zip(&node_of).enumerate() {
+        if nd != usize::MAX {
+            nums[i] = ys[nd];
+        } else {
+            let row = &diffs[off * k..(off + 1) * k];
             let (mut num, mut den) = (0u64, 0u64);
             for j in 0..k {
-                let term = mulmod(wts[j], inv((x + p - xs[j]) % p, p), p);
+                let term = mulmod(wts[j], row[j], p);
                 num = (num + mulmod(term, ys[j], p)) % p;
                 den = (den + term) % p;
             }
-            mulmod(num, inv(den, p), p)
-        })
-        .collect()
+            nums[i] = num;
+            dens.push(den);
+            off += 1;
+        }
+    }
+    batch_inv(&mut dens, p);
+    let mut out = nums;
+    let mut off = 0usize;
+    for (i, &nd) in node_of.iter().enumerate() {
+        if nd == usize::MAX {
+            out[i] = mulmod(out[i], dens[off], p);
+            off += 1;
+        }
+    }
+    out
 }
 
 /// Call `f` on each `k`-subset of `0..n`, as a sorted index slice.
@@ -358,6 +444,40 @@ mod tests {
         );
         assert_eq!(list[0], cw);
         assert!(ReedSolomon::on_domain(p, vec![1, 1, 2, 3, 4], 3).is_err());
+    }
+
+    /// An oversized instance must produce a clean `Unsupported`, not a
+    /// process-aborting overflow panic in the cap check: C(128, 64) > u64.
+    #[test]
+    fn oversized_cap_check_errs_instead_of_panicking() {
+        let pts: Vec<u64> = (1..=128).collect();
+        let rs = ReedSolomon::on_domain(65537, pts, 64).unwrap();
+        let oracle = DecodeOracle::new(&rs);
+        assert!(!oracle.exact_feasible());
+        let w = vec![0u64; 128];
+        assert!(oracle.list(&w, Radius::agreement(70)).is_err());
+    }
+
+    /// Deduplication and output determinism survive the parallel enumeration:
+    /// a distance-1 word's single codeword (agreement 15) is discovered from
+    /// information sets in many branches, and must appear exactly once.
+    #[test]
+    fn dedup_survives_parallel_enumeration() {
+        use std::collections::HashSet;
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
+        let cw = rs.encode(&[3, 1, 4, 1, 5, 9, 2]).unwrap();
+        let mut w = cw.clone();
+        w[0] = (w[0] + 1) % 65537;
+        let list = DecodeOracle::new(&rs)
+            .list(&w, Radius::agreement(8))
+            .unwrap();
+        assert!(
+            list.contains(&cw),
+            "the agreement-15 codeword is in the list"
+        );
+        let uniq: HashSet<_> = list.iter().cloned().collect();
+        assert_eq!(uniq.len(), list.len(), "no duplicates across branches");
     }
 
     /// The Monte-Carlo lower bound never exceeds the exact list size and, given

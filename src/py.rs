@@ -700,8 +700,122 @@ fn rows_to_array(py: Python<'_>, rows: &[Vec<u64>]) -> PyResult<Py<PyArray2<u64>
     Ok(arr.into_pyarray_bound(py).into())
 }
 
+/// The vanishing-syndrome geometry `VS(s, k)` — stateful handle carrying
+/// `(p, s, k)`; the convention authority for syndromes, moments, cuts,
+/// strata, and the theorem-backed word constructors. See `src/vs.rs`.
+#[pyclass(name = "VsSpace")]
+struct PyVsSpace {
+    inner: crate::vs::VsSpace,
+}
+
+#[pymethods]
+impl PyVsSpace {
+    #[new]
+    fn new(p: u64, s: usize, k: usize) -> PyResult<Self> {
+        let sg = MultiplicativeSubgroup::new(p, s).map_err(to_py)?;
+        Ok(PyVsSpace {
+            inner: crate::vs::VsSpace::new(&sg, k).map_err(to_py)?,
+        })
+    }
+
+    #[getter]
+    fn p(&self) -> u64 {
+        self.inner.p()
+    }
+    #[getter]
+    fn s(&self) -> usize {
+        self.inner.s()
+    }
+    #[getter]
+    fn k(&self) -> usize {
+        self.inner.k()
+    }
+    #[getter]
+    fn r(&self) -> usize {
+        self.inner.r()
+    }
+    #[getter]
+    fn syndrome_dim(&self) -> usize {
+        self.inner.syndrome_dim()
+    }
+    /// The domain, ordered as generator powers.
+    fn domain(&self) -> Vec<u64> {
+        self.inner.subgroup().elements().to_vec()
+    }
+
+    fn syndrome(&self, word: Vec<u64>) -> PyResult<Vec<u64>> {
+        err(self.inner.syndrome(&word))
+    }
+    fn word(&self, b: Vec<u64>) -> PyResult<Vec<u64>> {
+        err(self.inner.word(&b))
+    }
+    fn moment_row(&self, subset: Vec<usize>) -> PyResult<Vec<u64>> {
+        err(self.inner.moment_row(&subset))
+    }
+    fn incident(&self, b: Vec<u64>, subset: Vec<usize>) -> PyResult<bool> {
+        err(self.inner.incident(&b, &subset))
+    }
+    fn divided_difference(&self, word: Vec<u64>, subset: Vec<usize>) -> PyResult<u64> {
+        err(self.inner.divided_difference(&word, &subset))
+    }
+    fn subset_rank(&self, subset: Vec<usize>) -> PyResult<u64> {
+        err(self.inner.subset_rank(&subset))
+    }
+    fn subset_unrank(&self, rank: u64) -> PyResult<Vec<usize>> {
+        err(self.inner.subset_unrank(rank))
+    }
+    fn twist_subset(&self, subset: Vec<usize>) -> Vec<usize> {
+        self.inner.twist_subset(&subset)
+    }
+    fn invert_subset(&self, subset: Vec<usize>) -> Vec<usize> {
+        self.inner.invert_subset(&subset)
+    }
+    fn subset_orbit_canon(&self, subset: Vec<usize>) -> Vec<usize> {
+        self.inner.subset_orbit_canon(&subset)
+    }
+    fn core(&self, subset: Vec<usize>) -> PyResult<(Vec<usize>, usize)> {
+        err(self.inner.core(&subset))
+    }
+    fn strata_counts(&self, py: Python<'_>, b: Vec<u64>) -> PyResult<Vec<u64>> {
+        err(py.allow_threads(|| self.inner.strata_counts(&b)))
+    }
+    fn top_word(&self, c: usize) -> PyResult<Vec<u64>> {
+        err(self.inner.top_word(c))
+    }
+    fn coordinate_word(&self, j: usize) -> PyResult<Vec<u64>> {
+        err(self.inner.coordinate_word(j))
+    }
+    fn fold_ladder_word(&self) -> PyResult<Vec<u64>> {
+        err(self.inner.fold_ladder_word())
+    }
+    fn gs_class_counts(&self) -> PyResult<Vec<u64>> {
+        err(self.inner.gs_class_counts())
+    }
+    fn cut_counts(&self, py: Python<'_>, bs: Vec<Vec<u64>>) -> PyResult<Vec<u64>> {
+        err(py.allow_threads(|| self.inner.cut_counts(&bs)))
+    }
+    fn cut_max_sparse(&self, py: Python<'_>, support: Vec<usize>) -> PyResult<(u64, Vec<u64>)> {
+        err(py.allow_threads(|| self.inner.cut_max_sparse(&support)))
+    }
+    /// The convention certificate as a dict (accelerated views gate on it).
+    fn certificate<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let cert = err(self.inner.certificate())?;
+        let d = pyo3::types::PyDict::new_bound(py);
+        d.set_item("version", cert.version)?;
+        d.set_item("p", cert.p)?;
+        d.set_item("s", cert.s)?;
+        d.set_item("k", cert.k)?;
+        d.set_item("ranking", cert.ranking)?;
+        d.set_item("moment_rows", cert.moment_rows)?;
+        d.set_item("domain_head", cert.domain_head)?;
+        d.set_item("coordinate_cuts", cert.coordinate_cuts)?;
+        Ok(d)
+    }
+}
+
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyVsSpace>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;

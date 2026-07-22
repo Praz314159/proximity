@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **vs**: new module `src/vs.rs` — the vanishing-syndrome geometry
+  `VsSpace(p, s, k)`, the dual (quotient) view of `ReedSolomon` and the
+  crate's convention authority: syndrome coordinates (`b_j = (-1)^j
+  c_{k+j}`, paired with raw complement e-vectors), the lex subset-ranking
+  convention, twist/inversion actions, antipodal cores and cut strata
+  (2-power `s`), theorem-backed word constructors (`top_word`,
+  `coordinate_word`, closed-form `fold_ladder_word`), streaming
+  cut/strata counters, and a convention certificate for accelerated
+  views. Cross-view tests bind the dual view to the decoder permanently:
+  the exact syndrome identity `D_S(w) = <b, e(comp S)>`, the ownership
+  identity `|Z(b)| = sum C(a_f, r)` at the pinned words (810/70/266),
+  the 18-word strata `{48, 164, 180, 12}`, and the fold-ladder
+  aligned-cell law (`L = 7` at `(16, 7, 10)`).
+- **py**: `vanish.VsSpace` class handle exposing the space (GIL released
+  on the streaming counters); `certificate()` returns the pinned
+  convention vectors as a dict.
+- **gpu**: `cloud_engine.py` (issue #16, C1) — the device-materialized
+  moment cloud as a *certified* view: refuses to build until it
+  reproduces the space's certificate (ranking, moment rows, domain
+  order), verifies full-population coordinate cuts, persists shards with
+  a manifest carrying the certificate, and re-gates on reload.
+
 - **error**: `Error` is now `#[non_exhaustive]`; module docs state the
   crate-wide error policy (all public-API fallibility flows through
   `Error`; internal invariants use `expect` with messages naming the

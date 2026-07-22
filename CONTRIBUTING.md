@@ -36,17 +36,30 @@ All three must pass; CI enforces them. For Python-binding changes also run
 
 ## Architecture guide
 
-Layers, bottom-up (each depends only on those below):
+Layers, bottom-up (each depends only on those below); this mirrors the
+`lib.rs` module doc, which is the authoritative map:
 
-- `field` — scalar arithmetic over `F_p`, primality, factorization.
-- `domain` — `Subgroup`: the validated core object every analysis takes.
-- `code` — Reed–Solomon on a subgroup, radii, ladder combinatorics, rung words.
-- `buckets`, `census` — the analyses. Full-distribution engines scale with `p`;
-  meet-in-the-middle engines are `p`-independent.
+- `field` — scalar `F_p` arithmetic, primality, factorization, binomials,
+  batch inversion.
+- `domain` — `MultiplicativeSubgroup` (`mu_s <= F_p^*`: cosets, dilation) and
+  the generic `EvalDomain` an RS code sits on. Construction validates once;
+  kernels assume well-formed inputs.
+- `rs/` — generic Reed-Solomon + the list-decoding **discovery** layer, over
+  any evaluation domain: `code` (the code, C.5 words), `decode` (exact and
+  sampled list decoding), `cluster` (pencil seeds, greedy/anneal search),
+  `classify` (graded structure profiles), `moments` (the moment cloud and
+  syndrome-cut kernels), `linalg` (dense F_p linear algebra). No subgroup
+  structure leaks in here.
+- `smooth/` — the smooth-subgroup program: `buckets` (DP and MitM engines),
+  `rung` (ladder combinatorics, rung/theorem words), `census`, `norms`
+  (+ `norms::ingest`), `certify`.
+- Applications: `toy` (Section-6 soundness), `attack` (threshold calculator),
+  and the `py` bindings.
 
-New analyses should follow the same shape: take `&Subgroup` (validate nothing
-downstream), return `Result`, keep hot loops allocation-free, parallelize with
-rayon at the outermost natural loop.
+New analyses should follow the same shape: validate at construction, return
+`Result`, keep hot loops allocation-free, parallelize with rayon at the
+outermost natural loop, and release the GIL in any binding that computes for
+longer than a bincount.
 
 ## Good first contributions
 

@@ -20,7 +20,10 @@ fn sub(p: u64, s: usize) -> PyResult<MultiplicativeSubgroup> {
 }
 
 fn err<T>(r: crate::Result<T>) -> PyResult<T> {
-    r.map_err(|e| PyValueError::new_err(e.to_string()))
+    r.map_err(|e| match e {
+        crate::Error::Io { .. } => pyo3::exceptions::PyIOError::new_err(e.to_string()),
+        _ => PyValueError::new_err(e.to_string()),
+    })
 }
 
 /// Full exact q=1 bucket distribution: `out[lam]` counts r-subsets S of mu_s with `e_1(S) = lam`. Cost/memory scale with p.
@@ -42,8 +45,7 @@ fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyA
 
 /// Kernel census, weight-capped: `out[w]` counts nonzero vectors with coefficients in `[-cmax, cmax]` and weight w <= wmax such that `sum v_i w^i = 0 (mod p)`.
 #[pyfunction]
-fn census_direct(p: u64, s: usize, cmax: u64, wmax: usize) -> PyResult<Vec<u64>> {
-    let cmax = i64::try_from(cmax).map_err(|_| PyValueError::new_err("cmax too large"))?;
+fn census_direct(p: u64, s: usize, cmax: i64, wmax: usize) -> PyResult<Vec<u64>> {
     err(census::direct(&sub(p, s)?, cmax, wmax))
 }
 
@@ -334,8 +336,6 @@ fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec
 }
 
 /// Ingest GPU-campaign norm-table JSON shards into the s-64-scale bad set.
-/// Returns (rows, mass_by_weight, n_max_by_weight, entries_parsed) where
-/// rows = list of (p, counts_by_weight, unsafe_split).
 /// Writes <out_prefix>.primes.bin (u64 le), .counts.bin (u64 le, row-major
 /// n x (wmax+1)), .flags.bin (u8) and returns
 /// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed).

@@ -20,7 +20,7 @@ required-features = []
 
 [dependencies]
 rayon = "1.10"
-thiserror = "1.0"
+thiserror = "2"
 pyo3 = { version = "0.22", features = ["abi3-py39"], optional = true }
 numpy = { version = "0.22", optional = true }
 

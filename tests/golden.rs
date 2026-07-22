@@ -224,3 +224,70 @@ fn golden_top_word_and_gs_classes() {
         .unwrap();
     assert_eq!(l, 70, "e_1 coordinate cut = the additive bucket");
 }
+
+/// Coverage for the public surface the review found untested: radius floor
+/// semantics, the pencil-growth engine, direct sampling, the second moment,
+/// the MitM sign round-trip, and the prime-sweep iterator.
+#[test]
+fn coverage_review_gaps() {
+    use vanish::field::primes_one_mod;
+    use vanish::rs::cluster::grow_from_pencil;
+    use vanish::rs::code::ReedSolomon;
+    use vanish::rs::decode::{DecodeOracle, Radius};
+
+    // Radius::from_delta floors the disagreement count.
+    assert_eq!(Radius::from_delta(16, 0.5).min_agreement(), 8);
+    assert_eq!(Radius::from_delta(16, 0.49).min_agreement(), 9);
+    assert_eq!(Radius::from_delta(16, 0.0).min_agreement(), 16);
+
+    // primes_one_mod agrees with a direct filter.
+    let got: Vec<u64> = primes_one_mod(16, 1).take(5).collect();
+    let want: Vec<u64> = (17..)
+        .filter(|&n| n % 16 == 1 && vanish::field::is_prime(n))
+        .take(5)
+        .collect();
+    assert_eq!(got, want);
+
+    let s = sg(65537, 16);
+    let rs = ReedSolomon::on_subgroup(&s, 7).unwrap();
+
+    // sample_list is a subset of the exact list and saturates the 70-bucket.
+    let f = rs.c5_word(8, &[0]).unwrap();
+    let exact = DecodeOracle::new(&rs)
+        .list(&f, Radius::agreement(8))
+        .unwrap();
+    let sampled = DecodeOracle::new(&rs)
+        .sample_list(&f, Radius::agreement(8), 200_000, 7)
+        .unwrap();
+    assert!(sampled.iter().all(|cw| exact.contains(cw)));
+    assert_eq!(sampled.len(), 70);
+
+    // grow_from_pencil returns a nonempty cluster from an explicit pencil.
+    let core: Vec<usize> = (0..6).collect();
+    let core_vals = vec![1, 2, 3, 4, 5, 6];
+    let cl = grow_from_pencil(
+        &rs,
+        &core,
+        &core_vals,
+        7,
+        &[11, 22, 33],
+        Radius::agreement(8),
+        20_000,
+        4,
+        1,
+    )
+    .unwrap();
+    assert!(!cl.members().is_empty());
+    assert_eq!(cl.center().len(), 16);
+
+    // MitM signed round-trip is the identity on e-values.
+    use vanish::smooth::buckets::mitm::HalfTables;
+    let lam = vec![5u64, 65530, 0];
+    assert_eq!(HalfTables::signed_roundtrip(&lam, 65537), lam);
+
+    // second moment: sum of squares of the q=1 distribution, exactly.
+    use vanish::smooth::buckets::dp;
+    let d = dp::distribution_q1(&sg(17, 16), 8).unwrap();
+    let manual: u128 = d.values().iter().map(|&v| (v as u128) * (v as u128)).sum();
+    assert_eq!(d.second_moment(), manual);
+}

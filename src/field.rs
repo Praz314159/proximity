@@ -347,6 +347,22 @@ pub fn batch_inv(vals: &mut [u64], p: u64) {
     }
 }
 
+/// The top-`q` elementary symmetric functions `e_1..e_q` of a set of field
+/// elements.
+#[must_use]
+pub fn top_elementary_symmetric(els: &[u64], q: usize, p: u64) -> Vec<u64> {
+    let mut e = vec![0u64; q + 1];
+    e[0] = 1;
+    for (cnt, &a) in els.iter().enumerate() {
+        let top = q.min(cnt + 1);
+        for i in (1..=top).rev() {
+            e[i] = (e[i] + crate::field::mulmod(a, e[i - 1], p)) % p;
+        }
+    }
+    e.remove(0);
+    e
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

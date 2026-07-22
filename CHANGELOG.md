@@ -33,6 +33,14 @@
   (`rref_mod`, `nullspace_mod`, `reduce_mod_span`, batch `inv_mod`,
   `e_syms`, `dd_rows`) with the divided-difference identity pinned against
   the theorem word (issue #11). `batch_inv` promoted to `field`.
+- Docs/tests polish: CONTRIBUTING architecture guide synced to the actual
+  rs/ + smooth/ layout (was pre-split); coverage tests for
+  `Radius::from_delta`, `grow_from_pencil`, `sample_list`,
+  `second_moment`, `signed_roundtrip`, `primes_one_mod`;
+  `top_elementary_symmetric` moved to `field` (re-exported from rs::code);
+  `census_direct` takes `cmax: i64` (matching mitm); `Error::Io` maps to
+  `IOError` in Python; `cosets` guards the `2^t` shift; stale
+  `badset_from_gpu_json` docstring sentence removed; thiserror 2 (issue #12).
 - **rung**: `top_word`, `word_from_syndrome`, `gs_class_counts` in Rust with
   golden pins (810 at 65537 AND the accident prime 97; 715; 17,678,835; the
   e_1-coordinate cut = 70).

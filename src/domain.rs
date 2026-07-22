@@ -107,7 +107,9 @@ impl MultiplicativeSubgroup {
                 "mu_{2^t} cosets require a power-of-two subgroup".into(),
             ));
         }
-        let block = 1usize << t;
+        let Some(block) = 1usize.checked_shl(t as u32) else {
+            return Err(Error::OutOfRange(format!("2^{t} exceeds subgroup order")));
+        };
         if block > self.s {
             return Err(Error::OutOfRange(format!("2^{t} exceeds subgroup order")));
         }

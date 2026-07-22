@@ -30,7 +30,9 @@ Requires: cupy-cuda12x on the pod (numpy fallback for --validate), vanish
 wheel for CPU cross-checks.
 """
 import argparse
+import faulthandler
 import json
+import signal
 import time
 from math import comb
 
@@ -212,6 +214,8 @@ def validate():
     return ok
 
 def main():
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--cloud", action="store_true")

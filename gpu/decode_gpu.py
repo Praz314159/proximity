@@ -386,7 +386,21 @@ extern "C" __global__ void list_count(
 _MOD_COUNT = cp.RawKernel(KERNEL_COUNT, "list_count")
 
 
+_TABLES_CACHE = {}
+
+
 def _tables(p, dom, k):
+    """Cached per (p, dom, k): the optimizer calls the decoder per pool
+    candidate, and the tables depend only on the geometry (issue #14)."""
+    key = (p, tuple(dom), k)
+    if key in _TABLES_CACHE:
+        return _TABLES_CACHE[key]
+    out = _tables_build(p, dom, k)
+    _TABLES_CACHE[key] = out
+    return out
+
+
+def _tables_build(p, dom, k):
     n = len(dom)
     inv = np.zeros((n, n), dtype=np.uint32)
     for i in range(n):

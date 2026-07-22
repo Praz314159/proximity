@@ -98,3 +98,24 @@ Budget: cloud sweep (599 primes) ~8-20 h, zoo+depth ~3-4 h, bulk
 wall on 4x A100 (shard the cloud prime list across CUDA_VISIBLE_DEVICES;
 dedicate one GPU to concentration while shards run). Bring JSONs home into
 experiments/landscape/ (they extend census_zoo_scaling.json).
+
+## Launch discipline (2026-07-22, learned the hard way)
+
+1. **Warm the JIT solo, then shard.** Run one small decode (or
+   `--validate`) in a single process before fanning out; three processes
+   JIT-compiling the same RawKernel simultaneously can stall on the
+   kernel cache. For shard fleets set a per-shard cache:
+   `CUPY_CACHE_DIR=/workspace/.cupy_$i`.
+2. **Always `python -u`, always per-item log lines with timings.** A
+   buffered or silent worker is indistinguishable from a hung one.
+3. **Wrap workers in `timeout` with one retry.** The failure mode is
+   stall, not crash — a time ceiling per decode (e.g. 10x the expected
+   cell time) converts hangs into visible retries.
+4. **Gates must exercise the high-hit path.** The cp.unique(axis=0)
+   stall survived every gate because random words produce zero hits and
+   skip dedup; the composed fold-ladder word at (32,15,17) (~583k hits,
+   ~5 s) is the canonical high-hit regression cell.
+5. **`faulthandler` in every driver** (`import faulthandler;
+   faulthandler.register(signal.SIGUSR1)`): `kill -USR1 <pid>` dumps
+   Python stacks when py-spy is blocked by the container's ptrace
+   policy.

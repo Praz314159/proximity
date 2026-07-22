@@ -5,6 +5,11 @@
 - **domain**: `EvalDomain::from_points` now validates the full construction
   contract — `p` prime and every point reduced `< p` — closing a silent
   wrong-answer path on the generic-domain decode API (issue #6).
+- **py**: the long-running discovery bindings (`list_decode`,
+  `anneal_pencil`, `optimize_pencil`) and the p-scale DP bindings
+  (`bucket_dist_q1/q2`, `dist_stats_q1`) now release the GIL for the whole
+  computation; `buckets_e` additionally fans out over `lams` with rayon
+  (issue #7).
 
 ## v0.4.0 (2026-07-05)
 

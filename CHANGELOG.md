@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **domain**: `EvalDomain::from_points` now validates the full construction
+  contract — `p` prime and every point reduced `< p` — closing a silent
+  wrong-answer path on the generic-domain decode API (issue #6).
+
 ## v0.4.0 (2026-07-05)
 
 - **norms::ingest**: `norms_ingest` moved under its parent domain as

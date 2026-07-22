@@ -26,7 +26,7 @@
 //! truth the rest is validated against.
 
 use crate::error::{Error, Result};
-use crate::field::{checked_binom, mulmod, powmod};
+use crate::field::{batch_inv, checked_binom, mulmod};
 use crate::rs::code::ReedSolomon;
 use std::collections::HashSet;
 
@@ -251,33 +251,6 @@ impl ListOracle for DecodeOracle<'_> {
 
 // ---- interpolation, enumeration, rng ------------------------------------
 
-/// `a^{-1} mod p` via Fermat (`p` prime).
-#[inline]
-fn inv(a: u64, p: u64) -> u64 {
-    powmod(a, p - 2, p)
-}
-
-/// Invert every entry of `vals` in place with Montgomery's batch trick:
-/// prefix products, ONE Fermat inversion, unwind. Entries must be nonzero.
-fn batch_inv(vals: &mut [u64], p: u64) {
-    let n = vals.len();
-    if n == 0 {
-        return;
-    }
-    let mut pref = vec![0u64; n];
-    let mut acc = 1u64;
-    for (i, &v) in vals.iter().enumerate() {
-        pref[i] = acc;
-        acc = mulmod(acc, v, p);
-    }
-    let mut inv_acc = inv(acc, p);
-    for i in (0..n).rev() {
-        let orig = vals[i];
-        vals[i] = mulmod(inv_acc, pref[i], p);
-        inv_acc = mulmod(inv_acc, orig, p);
-    }
-}
-
 /// Interpolate the unique degree-`< k` polynomial through the `k` nodes
 /// `(xs, ys)` and evaluate it at every point of `domain`, via the barycentric
 /// form (no monomial-coefficient conversion — the identity
@@ -349,7 +322,7 @@ pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) ->
 }
 
 /// Call `f` on each `k`-subset of `0..n`, as a sorted index slice.
-fn for_each_combination(n: usize, k: usize, mut f: impl FnMut(&[usize])) {
+pub(crate) fn for_each_combination(n: usize, k: usize, mut f: impl FnMut(&[usize])) {
     if k > n {
         return;
     }

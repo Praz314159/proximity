@@ -152,3 +152,33 @@ def word_from_syndrome(p: int, domain: List[int], r: int, b: List[int]) -> List[
 
 def gs_class_counts(s: int, t: int) -> npt.NDArray[np.uint64]:
     """Graham-Sloane class counts N_c(s, t) for c = 0..s-1 (DP, exact)."""
+
+def moment_cloud(p: int, domain: List[int], r: int) -> npt.NDArray[np.uint64]:
+    """(C(n,r), n-r+1) array: row S (lex over index subsets) = (e_0..e_{n-r})
+    of the COMPLEMENT of S — the fixed point cloud of the syndrome layer."""
+
+def cut_counts(p: int, domain: List[int], r: int, bs: List[List[int]]) -> npt.NDArray[np.uint64]:
+    """|Z(b)| for many syndromes at once (streaming; convention
+    D_S(w) = sum_j b_j e_j(complement))."""
+
+def cut_max_sparse(p: int, domain: List[int], r: int, support: List[int]) -> Tuple[int, List[int]]:
+    """Exhaustive sparse-cut max over all words on a 3- or 4-coordinate moment
+    support (last coeff normalized to -1). The audited certification kernel."""
+
+def rref_mod(rows: List[List[int]], p: int) -> Tuple[int, List[List[int]], List[int]]:
+    """(rank, rref rows, pivot columns) over F_p."""
+
+def nullspace_mod(rows: List[List[int]], p: int) -> List[List[int]]:
+    """Right-nullspace basis of the row span over F_p."""
+
+def reduce_mod_span(vecs: List[List[int]], span: List[List[int]], p: int) -> List[List[int]]:
+    """Canonical residues of vecs modulo the row span (RREF elimination)."""
+
+def inv_mod(vals: List[int], p: int) -> npt.NDArray[np.uint64]:
+    """Batch modular inverses (Montgomery trick; one exponentiation total)."""
+
+def e_syms(p: int, rows: List[List[int]]) -> List[npt.NDArray[np.uint64]]:
+    """Elementary-symmetric vectors (e_0..e_m) per row of values."""
+
+def dd_rows(p: int, domain: List[int], subsets: List[List[int]]) -> List[List[int]]:
+    """Divided-difference functional rows: D_T(w) = row . w."""

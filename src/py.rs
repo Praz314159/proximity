@@ -590,6 +590,97 @@ fn gs_class_counts(py: Python<'_>, s: usize, t: usize) -> PyResult<Py<PyArray1<u
         .into())
 }
 
+/// The moment cloud of `(p, domain, r)`: an `(C(n,r), n-r+1)` uint64 array;
+/// row `S` (lex order over index subsets, matching
+/// `itertools.combinations(range(n), r)`) holds `(e_0..e_{n-r})` of the
+/// complement of `S`. The fixed point set every syndrome-hyperplane
+/// experiment slices.
+#[pyfunction]
+fn moment_cloud(py: Python<'_>, p: u64, domain: Vec<u64>, r: usize) -> PyResult<Py<PyArray2<u64>>> {
+    let (flat, rows, cols) =
+        err(py.allow_threads(|| crate::rs::moments::moment_cloud(p, &domain, r)))?;
+    let arr = numpy::ndarray::Array2::from_shape_vec((rows, cols), flat)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(arr.into_pyarray_bound(py).into())
+}
+
+/// Cut sizes `|Z(b)|` for many syndrome vectors at once (streaming; no cloud
+/// materialization). Each `b` has `n - r + 1` coordinates in the moment
+/// convention `D_S(w) = sum_j b_j e_j(complement)`.
+#[pyfunction]
+fn cut_counts(
+    py: Python<'_>,
+    p: u64,
+    domain: Vec<u64>,
+    r: usize,
+    bs: Vec<Vec<u64>>,
+) -> PyResult<Py<PyArray1<u64>>> {
+    let v = err(py.allow_threads(|| crate::rs::moments::cut_counts(p, &domain, r, &bs)))?;
+    Ok(v.into_pyarray_bound(py).into())
+}
+
+/// Exhaustive sparse-cut maximum over all words on a 3- or 4-coordinate
+/// moment support (last coefficient normalized to -1; zero-last-coefficient
+/// words live on smaller supports). Returns `(max_cut, coeffs_on_support)`.
+/// The audited certification kernel (rayon; p^{|support|-2} slope tuples).
+#[pyfunction]
+fn cut_max_sparse(
+    py: Python<'_>,
+    p: u64,
+    domain: Vec<u64>,
+    r: usize,
+    support: Vec<usize>,
+) -> PyResult<(u64, Vec<u64>)> {
+    err(py.allow_threads(|| crate::rs::moments::cut_max_sparse(p, &domain, r, &support)))
+}
+
+/// Reduced row echelon form mod p: returns `(rank, rref_rows, pivot_cols)`.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn rref_mod(mut rows: Vec<Vec<u64>>, p: u64) -> PyResult<(usize, Vec<Vec<u64>>, Vec<usize>)> {
+    let (rank, pivots) = err(crate::rs::linalg::rref_mod(&mut rows, p))?;
+    Ok((rank, rows, pivots))
+}
+
+/// A basis of the right nullspace of the row span mod p.
+#[pyfunction]
+fn nullspace_mod(rows: Vec<Vec<u64>>, p: u64) -> PyResult<Vec<Vec<u64>>> {
+    err(crate::rs::linalg::nullspace_mod(&rows, p))
+}
+
+/// Residues of `vecs` modulo the row span of `span` (RREF elimination).
+#[pyfunction]
+fn reduce_mod_span(vecs: Vec<Vec<u64>>, span: Vec<Vec<u64>>, p: u64) -> PyResult<Vec<Vec<u64>>> {
+    err(crate::rs::linalg::reduce_mod_span(&vecs, &span, p))
+}
+
+/// Batch modular inverses (Montgomery's trick; one Fermat exponentiation).
+#[pyfunction]
+fn inv_mod(py: Python<'_>, vals: Vec<u64>, p: u64) -> PyResult<Py<PyArray1<u64>>> {
+    let v = err(crate::rs::linalg::inv_mod(&vals, p))?;
+    let _ = py;
+    Ok(v.into_pyarray_bound(py).into())
+}
+
+/// Elementary-symmetric vectors `(e_0..e_m)` for many value rows at once.
+#[pyfunction]
+fn e_syms(py: Python<'_>, p: u64, rows: Vec<Vec<u64>>) -> PyResult<Vec<Py<PyArray1<u64>>>> {
+    rows.iter()
+        .map(|r| {
+            Ok(crate::rs::moments::e_vec(r, p)
+                .into_pyarray_bound(py)
+                .into())
+        })
+        .collect()
+}
+
+/// Divided-difference functional rows for index subsets of the domain:
+/// `row[x] = 1/prod_{y != x}(x - y)` on `T`, so `D_T(w) = row . w`.
+#[pyfunction]
+fn dd_rows(p: u64, domain: Vec<u64>, subsets: Vec<Vec<usize>>) -> PyResult<Vec<Vec<u64>>> {
+    err(crate::rs::linalg::dd_rows(p, &domain, &subsets))
+}
+
 /// Rows -> (L, n) uint64 array (empty -> shape (0, 0)).
 fn rows_to_array(py: Python<'_>, rows: &[Vec<u64>]) -> PyResult<Py<PyArray2<u64>>> {
     let n = rows.first().map_or(0, Vec::len);
@@ -611,6 +702,15 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
+    m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;
+    m.add_function(wrap_pyfunction!(cut_counts, m)?)?;
+    m.add_function(wrap_pyfunction!(cut_max_sparse, m)?)?;
+    m.add_function(wrap_pyfunction!(rref_mod, m)?)?;
+    m.add_function(wrap_pyfunction!(nullspace_mod, m)?)?;
+    m.add_function(wrap_pyfunction!(reduce_mod_span, m)?)?;
+    m.add_function(wrap_pyfunction!(inv_mod, m)?)?;
+    m.add_function(wrap_pyfunction!(e_syms, m)?)?;
+    m.add_function(wrap_pyfunction!(dd_rows, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q1, m)?)?;
     m.add_function(wrap_pyfunction!(bucket_dist_q2, m)?)?;
     m.add_function(wrap_pyfunction!(census_direct, m)?)?;

@@ -25,6 +25,14 @@
   constructors `c5_word`, `top_word` (Theorem B_mult), `word_from_syndrome`,
   and `gs_class_counts`. `list_decode` and `optimize_word` return members as
   `(L, n)` uint64 arrays; `buckets_e` returns a uint64 array (issue #10).
+- **rs::moments / rs::linalg (new)**: the syndrome/moment layer as audited
+  kernels — `moment_cloud` (lex-ordered complement e-vectors), `cut_counts`
+  (streaming bulk cut sizes), `cut_max_sparse` (the exhaustive 3-/4-support
+  certification kernel, rayon; reproduces 698 @ (1,2,6)/p=257 and 3074 @
+  (1,3,5,7)/p=97 as golden pins) — plus dense F_p linear algebra
+  (`rref_mod`, `nullspace_mod`, `reduce_mod_span`, batch `inv_mod`,
+  `e_syms`, `dd_rows`) with the divided-difference identity pinned against
+  the theorem word (issue #11). `batch_inv` promoted to `field`.
 - **rung**: `top_word`, `word_from_syndrome`, `gs_class_counts` in Rust with
   golden pins (810 at 65537 AND the accident prime 97; 715; 17,678,835; the
   e_1-coordinate cut = 70).

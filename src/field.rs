@@ -325,6 +325,28 @@ pub fn checked_binom(n: u64, k: u64) -> Option<u64> {
     u64::try_from(num).ok()
 }
 
+/// Invert every entry of `vals` in place with Montgomery's batch trick:
+/// prefix products, ONE Fermat inversion, unwind. Entries must be nonzero
+/// mod `p` (`p` prime).
+pub fn batch_inv(vals: &mut [u64], p: u64) {
+    let n = vals.len();
+    if n == 0 {
+        return;
+    }
+    let mut pref = vec![0u64; n];
+    let mut acc = 1u64;
+    for (i, &v) in vals.iter().enumerate() {
+        pref[i] = acc;
+        acc = mulmod(acc, v, p);
+    }
+    let mut inv_acc = powmod(acc, p - 2, p);
+    for i in (0..n).rev() {
+        let orig = vals[i];
+        vals[i] = mulmod(inv_acc, pref[i], p);
+        inv_acc = mulmod(inv_acc, orig, p);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

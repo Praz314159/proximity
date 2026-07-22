@@ -8,3 +8,5 @@ pub mod classify;
 pub mod cluster;
 pub mod code;
 pub mod decode;
+pub mod linalg;
+pub mod moments;

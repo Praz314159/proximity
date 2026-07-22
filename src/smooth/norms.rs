@@ -172,7 +172,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
         .iter()
         .map(|&q| {
             let sg = MultiplicativeSubgroup::new(q, s)
-            .expect("schedule primes satisfy q = 1 (mod s) by construction");
+                .expect("schedule primes satisfy q = 1 (mod s) by construction");
             (q, sg.elements().to_vec())
         })
         .collect();
@@ -228,7 +228,8 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                         } else {
                             // CRT for two primes
                             let (q1, q2) = (tables[0].0, tables[1].0);
-                            let inv = crt_inv.expect("crt_inv precomputed whenever the schedule has two primes");
+                            let inv = crt_inv
+                                .expect("crt_inv precomputed whenever the schedule has two primes");
                             let diff = (residues[1] + q2 - residues[0] % q2) % q2;
                             residues[0] as u128 + (q1 as u128) * (mulmod(diff, inv, q2) as u128)
                         };
@@ -283,9 +284,9 @@ pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
             if pp && s <= 32 {
                 // direct census: exact per-embedding counts by construction
                 let sg = MultiplicativeSubgroup::new(p, s)
-            .expect("bad-set primes satisfy p = 1 (mod s) by construction");
+                    .expect("bad-set primes satisfy p = 1 (mod s) by construction");
                 let c = census::mitm(&sg, cmax)
-            .expect("cmax validated at entry; census fallback cannot reject it");
+                    .expect("cmax validated at entry; census fallback cannot reject it");
                 let mut counts = vec![0u64; wmax + 1];
                 for (w, slot) in counts.iter_mut().enumerate() {
                     *slot = *c.get(w).unwrap_or(&0);

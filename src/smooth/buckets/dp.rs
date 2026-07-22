@@ -60,9 +60,7 @@ pub fn distribution_q1(sg: &MultiplicativeSubgroup, r: usize) -> Result<BucketDi
         }
     }
     Ok(BucketDistribution {
-        values: t
-            .pop()
-            .expect("the DP folds t down to exactly one row"),
+        values: t.pop().expect("the DP folds t down to exactly one row"),
     })
 }
 

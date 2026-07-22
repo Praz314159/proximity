@@ -62,21 +62,29 @@ Goal: extend every coordinate-family series to s = 32 (601M subsets) and
 sample the dense bulk — series for formula-hunting, not certificates.
 Driver: `zoo_campaign.py` (numpy fallback lets `--validate` run anywhere).
 
-Primes with mu_32: 2130706433 (KB), 77569, 65537, 97, 193, 257, 449, 577.
+Decode primes with mu_32: 2130706433 (KB), 77569, 65537, 97, 193, 257,
+449, 577. Cloud census additionally sweeps every p = 1 mod 32 below 3000
+(~25 more) — minutes each, and the large-prime accident discovery at
+s = 22/24 says thin large-p coverage cannot identify structural values.
 
 ```bash
 python decode_gpu.py --validate          # decoder gate
 python zoo_campaign.py --validate        # campaign gate (CPU-checkable)
-for P in 2130706433 77569 65537 97 193 257 449 577; do
+for P in 2130706433 77569 65537 97 193 257 353 449 577 641 769 929 1153          1217 1249 1409 1601 1697 2113 2273 2593 2657 2689 2753 3041; do
   python zoo_campaign.py --cloud --s 32 --p $P --out cloud_s32_$P.json
 done                                      # ~minutes each on A100
-python zoo_campaign.py --zoo --s 32 --p 2130706433 --depth 2 --out zoo_s32_kb.json
-python zoo_campaign.py --zoo --s 32 --p 97 --depth 2 --out zoo_s32_97.json
-python zoo_campaign.py --bulk --s 32 --p 2130706433 --n 20000 --out bulk_s32_kb.json
+for P in 2130706433 77569 65537 97 193 257 449 577; do
+  python zoo_campaign.py --zoo --s 32 --p $P --depth 5 --out zoo_s32_$P.json
+done                                      # q <= 5 = the full strip at s=32
+python zoo_campaign.py --bulk --s 32 --p 65537 --n 20000 --out bulk_s32_65537.json
+python zoo_campaign.py --bulk --s 32 --p 577 --n 20000 --out bulk_s32_577.json
+# (bulk at KB is empty: E[cut] = C(32,16)/p < 1; use mid-size primes)
 # native-dense odd-cell search (the SH/purification frontier):
 python concentration.py --p 2130706433 --s 32 --cells "14:17,14:18,14:19,15:17"
 ```
 
-Budget: cloud sweep ~1 h, zoo+depth ~2 h, bulk ~2-4 h, concentration
-~4-8 h => one A100-day covers the full campaign. Bring JSONs home into
+Budget: cloud sweep ~2-3 h, zoo+depth ~3-4 h, bulk ~2-4 h, concentration
+~4-8 h => ~1.5 A100-days single-GPU, or ~6 h wall on 4x A100 (shard the
+cloud/zoo prime loops across CUDA_VISIBLE_DEVICES; dedicate one GPU to
+concentration). Bring JSONs home into
 experiments/landscape/ (they extend census_zoo_scaling.json).

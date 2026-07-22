@@ -25,6 +25,20 @@ produced plausible-but-wrong buckets and was caught *only* because a sampled
 value exceeded an exhaustive cross-check. The suite is the institutional memory
 of that lesson.
 
+## The error policy
+
+All fallibility visible from the public API flows through `Error`
+(`src/error.rs`, `#[non_exhaustive]`): validate inputs once at
+construction, so downstream kernels can assume well-formed parameters.
+On library paths, never `unwrap`; assert internal invariants with
+`expect("message naming the invariant")` so a violation reads as the bug
+it is. Pick the variant that lets callers match — `NotPrime`,
+`OrderDoesNotDivide`, `Io`, `MalformedInput` — before reaching for the
+stringly `OutOfRange`/`Unsupported`. Python bindings map variants to
+builtin exceptions in `py.rs::to_py` (`Io` → `IOError`, `Unsupported` →
+`NotImplementedError`, validation → `ValueError`); keep new variants
+consistent with that mapping.
+
 ## Workflow
 
 ```bash

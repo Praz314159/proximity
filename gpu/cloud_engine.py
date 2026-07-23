@@ -192,6 +192,28 @@ class CloudEngine:
         in selfcheck() against the authority's cloud."""
         xp = cp if GPU else np
         cols = list(range(1, self.cols)) if cols is None else list(cols)
+        out = {}
+        if self.p <= (1 << 24):
+            # incremental bincount: one cloud pass, O(p) memory per
+            # column, no column materialization (601M-row safe)
+            cnts = {j: xp.zeros(self.p, dtype=xp.int64) for j in cols}
+            for lo in range(0, self.total, self.chunk):
+                ranks = np.arange(lo, min(lo + self.chunk, self.total),
+                                  dtype=np.int64)
+                rows, _ = self._device_rows(ranks)
+                for j in cols:
+                    cnts[j] += xp.bincount(rows[:, j].astype(xp.int64),
+                                           minlength=self.p)
+            for j in cols:
+                cnt = cnts[j]
+                distinct = int((cnt > 0).sum())
+                order = xp.argsort(cnt)[::-1][:top]
+                ov = cp.asnumpy(order) if GPU else order
+                tops = [(int(v), int(cnt[int(v)])) for v in ov
+                        if int(cnt[int(v)]) > 0]
+                out[j] = {"distinct": distinct, "max_mult": tops[0][1],
+                          "top": tops}
+            return out
         parts = {j: [] for j in cols}
         for lo in range(0, self.total, self.chunk):
             ranks = np.arange(lo, min(lo + self.chunk, self.total),
@@ -199,28 +221,19 @@ class CloudEngine:
             rows, _ = self._device_rows(ranks)
             for j in cols:
                 parts[j].append(rows[:, j].astype(xp.int64))
-        out = {}
         for j in cols:
             col = xp.concatenate(parts[j])
-            if self.p <= (1 << 27):
-                cnt = xp.bincount(col, minlength=self.p)
-                distinct = int((cnt > 0).sum())
-                order = xp.argsort(cnt)[::-1][:top]
-                ov = cp.asnumpy(order) if GPU else order
-                tops = [(int(v), int(cnt[int(v)])) for v in ov
-                        if int(cnt[int(v)]) > 0]
-            else:
-                srt = xp.sort(col)
-                edge = xp.flatnonzero(srt[1:] != srt[:-1]) + 1
-                z = xp.zeros(1, dtype=edge.dtype)
-                starts = xp.concatenate([z, edge])
-                ends = xp.concatenate([edge, xp.asarray([srt.size])])
-                lens = ends - starts
-                distinct = int(lens.size)
-                order = xp.argsort(lens)[::-1][:top]
-                ov = cp.asnumpy(order) if GPU else order
-                tops = [(int(srt[int(starts[int(i)])]), int(lens[int(i)]))
-                        for i in ov]
+            srt = xp.sort(col)
+            edge = xp.flatnonzero(srt[1:] != srt[:-1]) + 1
+            z = xp.zeros(1, dtype=edge.dtype)
+            starts = xp.concatenate([z, edge])
+            ends = xp.concatenate([edge, xp.asarray([srt.size])])
+            lens = ends - starts
+            distinct = int(lens.size)
+            order = xp.argsort(lens)[::-1][:top]
+            ov = cp.asnumpy(order) if GPU else order
+            tops = [(int(srt[int(starts[int(i)])]), int(lens[int(i)]))
+                    for i in ov]
             out[j] = {"distinct": distinct, "max_mult": tops[0][1],
                       "top": tops}
         return out

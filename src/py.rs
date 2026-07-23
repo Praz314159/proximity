@@ -592,8 +592,6 @@ fn word_from_syndrome(p: u64, domain: Vec<u64>, r: usize, b: Vec<u64>) -> Vec<u6
     rung::word_from_syndrome(p, &domain, r, &b)
 }
 
-/// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.
-#[pyfunction]
 /// Exact `Z[zeta_s]` value census of coordinate `coord` over all
 /// `r`-subsets of the s-th roots of unity: `(distinct, intrinsic_floor,
 /// top5_multiplicities)`. The prime-independent floors of the pointwise
@@ -603,6 +601,8 @@ fn exact_value_census(s: usize, r: usize, coord: usize) -> PyResult<(u64, u64, V
     err(crate::vs::exact_value_census(s, r, coord))
 }
 
+/// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.
+#[pyfunction]
 fn gs_class_counts(py: Python<'_>, s: usize, t: usize) -> PyResult<Py<PyArray1<u64>>> {
     Ok(err(rung::gs_class_counts(s, t))?
         .into_pyarray_bound(py)

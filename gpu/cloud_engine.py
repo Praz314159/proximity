@@ -90,7 +90,12 @@ def complement_rows(idx, dom_x, p, s, r, xp):
 
 
 class CloudEngine:
-    def __init__(self, p, s, k, chunk=1 << 20):
+    def __init__(self, p, s, k, chunk=1 << 20, light=False):
+        """light=True skips the precomputed certificate — at s = 32 the
+        Rust certificate streams full coordinate cuts (10+ min CPU per
+        prime). Light engines must gate through verify_pins() instead:
+        direct authority spot-calls (subset_unrank + moment_row), the
+        same pins verify_certificate checks, without the cut census."""
         self.space = vanish.VsSpace(p, s, k)
         self.p, self.s, self.k = p, s, k
         self.r = self.space.r
@@ -99,7 +104,23 @@ class CloudEngine:
         self.chunk = chunk
         self.T = binom_table(s, self.r)
         self.dom = np.array(self.space.domain(), dtype=np.int64)
-        self.cert = self.space.certificate()
+        self.cert = None if light else self.space.certificate()
+
+    def verify_pins(self, n=8, seed=0):
+        """Authority spot-gate for light engines: n random ranks must
+        unrank and row-build identically to the Rust space."""
+        rng = np.random.RandomState(seed)
+        ranks = np.unique(rng.randint(0, self.total, size=n))
+        rows, idx = self.rows_for_ranks(ranks)
+        for rk, sub, row in zip(ranks, idx, rows):
+            want_sub = list(self.space.subset_unrank(int(rk)))
+            assert list(int(x) for x in sub) == want_sub, \
+                f"unrank pin failed at rank {rk}"
+            want_row = list(self.space.moment_row(want_sub))
+            assert [int(x) for x in row] == want_row, \
+                f"moment-row pin failed at rank {rk}"
+        assert list(self.dom[:8]) == list(self.space.domain()[:8])
+        return True
 
     def rows_for_ranks(self, ranks_np):
         xp = cp if GPU else np
@@ -346,6 +367,9 @@ def selfcheck():
         got = sorted((c for _, c in vh[j]["top"]), reverse=True)
         assert got == want, f"top counts col {j}: {got} vs {want}"
     print("  value histograms (cols 1,2) vs authority: PASS")
+    lite = CloudEngine(eng.p, eng.s, eng.k, light=True)
+    lite.verify_pins(n=8)
+    print("  light-engine pins vs authority: PASS")
     print("SELFCHECK PASS")
 
 

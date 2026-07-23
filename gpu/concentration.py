@@ -134,7 +134,7 @@ def interp_batch(ids, dom, p, k, ctx):
 
 
 # ----- GPU decode returning the codewords (not just size) -----------------
-def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
+def gpu_decode(p, dom, word, k, t, cap=1 << 27, tile=1 << 26):
     """Distinct codewords (as full eval vectors, (L, n) int64) of
     RS[F_p, dom, k] at agreement >= t."""
     c = _ctx(p, dom, k, cap)
@@ -153,7 +153,8 @@ def gpu_decode(p, dom, word, k, t, cap=1 << 26, tile=1 << 26):
               c["out_ids"], c["out_count"], np.int32(cap)))
     cp.cuda.Stream.null.synchronize()
     hits = int(c["out_count"][0])
-    assert hits <= cap, f"OVERFLOW: {hits} > cap {cap}; raise cap"
+    if hits > cap:
+        raise OverflowError(f"decode overflow: {hits} hits > cap {cap}")
     if not hits:
         return np.zeros((0, c["n"]), dtype=np.int64)
     # host dedup: cp.unique(axis=0) stalls at structured-word hit counts
@@ -252,7 +253,12 @@ def run_cell(p, s, k, t, nseed):
     for sd in range(nseed):
         t0 = time.time()
         seed = pencil_seed(p, dom, k, petals, np.random.default_rng(sd))
-        w, m, traj = optimize_gpu(p, dom, k, t, seed, rng)
+        try:
+            w, m, traj = optimize_gpu(p, dom, k, t, seed, rng)
+        except OverflowError as e:
+            print(f"  [k{k}t{t} seed {sd:>2}] ABORTED near-code attractor "
+                  f"({e})", flush=True)
+            continue
         for a, b in zip(traj, traj[1:]):        # L2 growth law, late phase
             if a["L"] >= 20:
                 growths.append(b["L"] / a["L"])

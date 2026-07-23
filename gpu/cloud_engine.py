@@ -183,6 +183,48 @@ class CloudEngine:
                 strata += (cp.asnumpy(h) if GPU else h)[:nf]
         return strata.tolist()
 
+    def value_histograms(self, cols=None, top=5):
+        """C6 — exact value spectra per cloud column: the multiplicity
+        histogram of {e_j(complement)} over all C(s, r) subsets. This is
+        the L^2 instrument: A_j(p) = max_mult of column j. Returns
+        {j: {"distinct", "max_mult", "top": [(value, mult), ...]}}.
+        bincount path for p <= 2^27, sort/run-length path above. Gated
+        in selfcheck() against the authority's cloud."""
+        xp = cp if GPU else np
+        cols = list(range(1, self.cols)) if cols is None else list(cols)
+        parts = {j: [] for j in cols}
+        for lo in range(0, self.total, self.chunk):
+            ranks = np.arange(lo, min(lo + self.chunk, self.total),
+                              dtype=np.int64)
+            rows, _ = self._device_rows(ranks)
+            for j in cols:
+                parts[j].append(rows[:, j].astype(xp.int64))
+        out = {}
+        for j in cols:
+            col = xp.concatenate(parts[j])
+            if self.p <= (1 << 27):
+                cnt = xp.bincount(col, minlength=self.p)
+                distinct = int((cnt > 0).sum())
+                order = xp.argsort(cnt)[::-1][:top]
+                ov = cp.asnumpy(order) if GPU else order
+                tops = [(int(v), int(cnt[int(v)])) for v in ov
+                        if int(cnt[int(v)]) > 0]
+            else:
+                srt = xp.sort(col)
+                edge = xp.flatnonzero(srt[1:] != srt[:-1]) + 1
+                z = xp.zeros(1, dtype=edge.dtype)
+                starts = xp.concatenate([z, edge])
+                ends = xp.concatenate([edge, xp.asarray([srt.size])])
+                lens = ends - starts
+                distinct = int(lens.size)
+                order = xp.argsort(lens)[::-1][:top]
+                ov = cp.asnumpy(order) if GPU else order
+                tops = [(int(srt[int(starts[int(i)])]), int(lens[int(i)]))
+                        for i in ov]
+            out[j] = {"distinct": distinct, "max_mult": tops[0][1],
+                      "top": tops}
+        return out
+
     def _device_rows(self, ranks_np):
         """rows_for_ranks, but keeping arrays on-device when GPU."""
         xp = cp if GPU else np
@@ -278,6 +320,19 @@ def selfcheck():
     st = eng.strata_counts(b18)
     assert st == [0, 48, 164, 180, 12], f"strata gate: {st}"
     print(f"  engine strata (18-word): {st} PASS")
+    # C6 gate: value histograms vs the authority cloud
+    rows_auth = np.array(
+        [eng.space.moment_row(eng.space.subset_unrank(i))
+         for i in range(eng.total)], dtype=np.int64)
+    vh = eng.value_histograms(cols=[1, 2])
+    for j in (1, 2):
+        vals, cnts = np.unique(rows_auth[:, j], return_counts=True)
+        assert vh[j]["distinct"] == int(vals.size), f"distinct col {j}"
+        assert vh[j]["max_mult"] == int(cnts.max()), f"max_mult col {j}"
+        want = sorted(cnts.tolist(), reverse=True)[: len(vh[j]["top"])]
+        got = sorted((c for _, c in vh[j]["top"]), reverse=True)
+        assert got == want, f"top counts col {j}: {got} vs {want}"
+    print("  value histograms (cols 1,2) vs authority: PASS")
     print("SELFCHECK PASS")
 
 

@@ -24,6 +24,13 @@ thiserror = "2"
 pyo3 = { version = "0.22", features = ["abi3-py39"], optional = true }
 numpy = { version = "0.22", optional = true }
 
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "hotpath_baseline"
+harness = false
+
 [features]
 default = []
 python = ["dep:pyo3", "dep:numpy", "pyo3/extension-module"]

@@ -268,6 +268,12 @@ def run_cell(p, s, k, t, nseed):
         print(f"  [k{k}t{t} seed {sd:>2}] L={len(m):<8} steps={len(traj):<3} "
               f"best={best[1]:<8} {time.time() - t0:6.1f}s", flush=True)
     maxL = best[1]
+    # persist the best word: replays should never be needed again
+    import json as _json
+    _json.dump(
+        {"p": p, "s": s, "k": k, "t": t, "L": maxL,
+         "w": [int(x) for x in best[0]]},
+        open(f"best_k{k}t{t}_L{maxL}.json", "w"))
     bucket = int(vanish.m_struct(s, t, t - k))
     rho, delta, q = k / s, 1 - t / s, p
     lx = math.log(max(maxL, 1), q) / s

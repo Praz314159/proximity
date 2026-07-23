@@ -139,6 +139,59 @@ class CloudEngine:
         log(f"  coordinate cuts verified: {got}")
         return True
 
+    def cut_counts(self, bs, log=None):
+        """|Z(b)| for a list of syndromes, streamed over the cloud with
+        overflow-safe arithmetic: per-term reduction BEFORE the row sum
+        (the 2026-07-22 ad-hoc consumer bug — 17 unreduced products of
+        ~2^62 overflow int64 — is structurally excluded here; see the
+        s=32 strata incident). Gated in selfcheck() against the
+        authority's cut_counts."""
+        xp = cp if GPU else np
+        B = [xp.asarray(b, dtype=xp.int64) for b in bs]
+        zeros = np.zeros(len(bs), dtype=np.int64)
+        for lo in range(0, self.total, self.chunk):
+            ranks = np.arange(lo, min(lo + self.chunk, self.total),
+                              dtype=np.int64)
+            rows, _ = self._device_rows(ranks)
+            rows64 = rows.astype(xp.int64)
+            for i, b in enumerate(B):
+                acc = ((rows64 * b[None, :]) % self.p).sum(axis=1) % self.p
+                zeros[i] += int((acc == 0).sum())
+        return zeros.tolist()
+
+    def strata_counts(self, b):
+        """Antipodal strata Z^(F) of one cut (F = pairs inside the rank
+        subset), same safe arithmetic. Gated against the authority at
+        s = 16 and the pinned s = 32 value."""
+        xp = cp if GPU else np
+        bd = xp.asarray(b, dtype=xp.int64)
+        half = self.s // 2
+        nf = self.r // 2 + 1
+        strata = np.zeros(nf, dtype=np.int64)
+        for lo in range(0, self.total, self.chunk):
+            ranks = np.arange(lo, min(lo + self.chunk, self.total),
+                              dtype=np.int64)
+            rows, idx = self._device_rows(ranks)
+            rows64 = rows.astype(xp.int64)
+            acc = ((rows64 * bd[None, :]) % self.p).sum(axis=1) % self.p
+            hit = acc == 0
+            if bool(hit.any()):
+                in_set = xp.zeros((idx.shape[0], self.s), dtype=bool)
+                xp.put_along_axis(in_set, xp.asarray(idx), True, axis=1)
+                pairs = (in_set[:, :half] & in_set[:, half:]).sum(axis=1)
+                h = xp.bincount(pairs[hit], minlength=nf)
+                strata += (cp.asnumpy(h) if GPU else h)[:nf]
+        return strata.tolist()
+
+    def _device_rows(self, ranks_np):
+        """rows_for_ranks, but keeping arrays on-device when GPU."""
+        xp = cp if GPU else np
+        ranks = xp.asarray(ranks_np, dtype=xp.int64)
+        idx = unrank_block(ranks, self.s, self.r, self.T, xp)
+        rows = complement_rows(idx, xp.asarray(self.dom), self.p,
+                               self.s, self.r, xp)
+        return rows, (cp.asnumpy(idx) if GPU else idx)
+
     def build(self, out_dir, log=print):
         os.makedirs(out_dir, exist_ok=True)
         self.verify_certificate()
@@ -212,6 +265,19 @@ def selfcheck():
         assert [int(x) for x in row] == want, f"row mismatch at rank {rk}"
         assert eng.space.subset_rank([int(x) for x in sub]) == rk
     print("  500 random rows vs authority: PASS")
+    # C2 gate: engine cut/strata vs the Rust authority at s = 16
+    top = eng.space.top_word(4)
+    b_top = eng.space.syndrome(top)
+    w18 = [14274, 45571, 60798, 30803, 16774, 53622, 23957, 63873, 57198,
+           44950, 44028, 28126, 25267, 3166, 17634, 55356]
+    b18 = eng.space.syndrome(w18)
+    got = eng.cut_counts([b_top, b18])
+    want = eng.space.cut_counts([b_top, b18])
+    assert got == want == [810, 404], f"cut gate: {got} vs {want}"
+    print(f"  engine cut vs authority: {got} PASS")
+    st = eng.strata_counts(b18)
+    assert st == [0, 48, 164, 180, 12], f"strata gate: {st}"
+    print(f"  engine strata (18-word): {st} PASS")
     print("SELFCHECK PASS")
 
 

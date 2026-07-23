@@ -594,6 +594,15 @@ fn word_from_syndrome(p: u64, domain: Vec<u64>, r: usize, b: Vec<u64>) -> Vec<u6
 
 /// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.
 #[pyfunction]
+/// Exact `Z[zeta_s]` value census of coordinate `coord` over all
+/// `r`-subsets of the s-th roots of unity: `(distinct, intrinsic_floor,
+/// top5_multiplicities)`. The prime-independent floors of the pointwise
+/// L^2 census; integer-exact, no field involved.
+#[pyfunction]
+fn exact_value_census(s: usize, r: usize, coord: usize) -> PyResult<(u64, u64, Vec<u64>)> {
+    err(crate::vs::exact_value_census(s, r, coord))
+}
+
 fn gs_class_counts(py: Python<'_>, s: usize, t: usize) -> PyResult<Py<PyArray1<u64>>> {
     Ok(err(rung::gs_class_counts(s, t))?
         .into_pyarray_bound(py)
@@ -825,6 +834,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(c5_word, m)?)?;
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
+    m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;
     m.add_function(wrap_pyfunction!(cut_counts, m)?)?;

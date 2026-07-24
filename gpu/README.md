@@ -1,0 +1,16 @@
+# gpu/ — accelerated views of the vanish kernels
+
+Library-grade GPU code only; campaign drivers live in the (local)
+`proximity_explorations/experiments/` tree and *call* these modules.
+
+| module | role |
+|---|---|
+| `decode_gpu.py` | the decode kernels: templated register-resident list decoder (Barrett reduction, bitmask membership), pool counters, `validate()` gates. The brute-force oracle. |
+| `cloud_engine.py` | the certified moment-cloud engine (issue #16): C1 builder + certificate verification, C2 cut counters, C3 strata, C6 value histograms; `light` mode with `verify_pins`. Never believe an engine number before its gate. |
+| `norms_gpu.py` | GPU norm/census kernels for the bad-set campaigns. |
+| `decode_ref.py` | slow reference implementations the kernels are A/B-checked against. |
+| `RUNBOOK.md` | pod setup + gate-first run procedures. |
+
+Discipline: every module exposes a gate (`--validate` / `--selfcheck`)
+that must pass on the target machine before campaign output is trusted;
+the gates check against `vanish`'s Rust authority (certificates, pins).

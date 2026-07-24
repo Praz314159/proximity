@@ -592,6 +592,107 @@ fn word_from_syndrome(p: u64, domain: Vec<u64>, r: usize, b: Vec<u64>) -> Vec<u6
     rung::word_from_syndrome(p, &domain, r, &b)
 }
 
+/// The negacyclic fold: `zeta^exp = sign * zeta^index` on the
+/// half-basis. THE primitive — campaigns must call this instead of
+/// re-deriving exponent reduction (see design/negacyclic_ring.md).
+#[pyfunction]
+fn fold(half: usize, exp: usize) -> (usize, i64) {
+    crate::ring::fold(half, exp)
+}
+
+/// An element of `Z[zeta_s]` (s a power of two) on the half-basis.
+/// The characteristic-zero home of exact values: norms, Galois action,
+/// dilation, per-prime cleanliness tests.
+#[pyclass(name = "Cyclo")]
+#[derive(Clone)]
+struct PyCyclo {
+    inner: crate::ring::Cyclo,
+}
+
+#[pymethods]
+impl PyCyclo {
+    #[new]
+    fn new(coeffs: Vec<i64>) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::from_coeffs(coeffs))?,
+        })
+    }
+    #[staticmethod]
+    fn monomial(s: usize, exp: usize) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::monomial(s, exp))?,
+        })
+    }
+    fn coeffs(&self) -> Vec<i64> {
+        self.inner.coeffs().to_vec()
+    }
+    fn s(&self) -> usize {
+        self.inner.s()
+    }
+    fn add(&self, o: &PyCyclo) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(self.inner.add(&o.inner))?,
+        })
+    }
+    fn sub(&self, o: &PyCyclo) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(self.inner.sub(&o.inner))?,
+        })
+    }
+    fn mul(&self, o: &PyCyclo) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(self.inner.mul(&o.inner))?,
+        })
+    }
+    fn neg(&self) -> Self {
+        PyCyclo {
+            inner: self.inner.neg(),
+        }
+    }
+    fn dilate(&self, d: usize) -> Self {
+        PyCyclo {
+            inner: self.inner.dilate(d),
+        }
+    }
+    fn galois(&self, m: usize) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(self.inner.galois(m))?,
+        })
+    }
+    fn conj(&self) -> Self {
+        PyCyclo {
+            inner: self.inner.conj(),
+        }
+    }
+    fn eval_at(&self, x: u64, p: u64) -> u64 {
+        self.inner.eval_at(x, p)
+    }
+    fn norm_mod(&self, p: u64) -> PyResult<u64> {
+        err(self.inner.norm_mod(p))
+    }
+    fn norm_i128(&self) -> PyResult<i128> {
+        err(self.inner.norm_i128())
+    }
+    fn weight(&self) -> usize {
+        self.inner.weight()
+    }
+    fn sq_sum(&self) -> i128 {
+        self.inner.sq_sum()
+    }
+    fn height(&self) -> i64 {
+        self.inner.height()
+    }
+    fn is_zero(&self) -> bool {
+        self.inner.is_zero()
+    }
+    fn __repr__(&self) -> String {
+        format!("Cyclo(s={}, {:?})", self.inner.s(), self.inner.coeffs())
+    }
+    fn __eq__(&self, o: &PyCyclo) -> bool {
+        self.inner == o.inner
+    }
+}
+
 /// Exact `Z[zeta_s]` value census of coordinate `coord` over all
 /// `r`-subsets of the s-th roots of unity: `(distinct, intrinsic_floor,
 /// top5_multiplicities)`. The prime-independent floors of the pointwise
@@ -834,6 +935,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(c5_word, m)?)?;
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
+    m.add_class::<PyCyclo>()?;
+    m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;

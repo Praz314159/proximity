@@ -636,9 +636,8 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
                 if v == 0 {
                     continue;
                 }
-                let t = idx + i;
-                let (m, flip) = (t % half, (t / half) % 2 == 1);
-                let w = if flip { -v } else { v };
+                let (m, sign) = crate::ring::fold(half, idx + i);
+                let w = sign * v;
                 if add {
                     e[c][m] += w;
                 } else {

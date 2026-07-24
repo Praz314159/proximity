@@ -165,30 +165,25 @@ impl Ntt {
 /// `crt_primes_derivation` test reproduces them from [`ntt_prime`].
 pub const CRT_PRIMES: [u64; 2] = [2_305_843_009_224_179_713, 2_305_844_108_756_779_009];
 
-/// Fixed 62-bit CRT primes supporting lengths up to 2^20.
-pub fn crt_primes() -> [u64; 2] {
-    CRT_PRIMES
-}
-
 /// Once-per-`(n, q)` registry of NTT contexts: twiddle tables are built
 /// on first use and shared thereafter — the "precomputed twiddles per
 /// prime" without per-ring static bloat. If a campaign ever freezes a
 /// single ring, emit static tables for it (build.rs / macro) as the
 /// specialization path.
-type NttRegistry = std::sync::Mutex<std::collections::HashMap<(usize, u64), std::sync::Arc<Ntt>>>;
+type NttRegistry = std::sync::RwLock<std::collections::HashMap<(usize, u64), std::sync::Arc<Ntt>>>;
 
 fn context(n: usize, q: u64) -> Result<std::sync::Arc<Ntt>> {
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, OnceLock, RwLock};
     static REG: OnceLock<NttRegistry> = OnceLock::new();
-    let reg = REG.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = reg.lock().expect("ntt registry poisoned");
-    if let Some(ctx) = map.get(&(n, q)) {
-        return Ok(ctx.clone());
+    let reg = REG.get_or_init(|| RwLock::new(HashMap::new()));
+    let poisoned = || Error::Unsupported("an unpoisoned NTT registry".into());
+    if let Some(ctx) = reg.read().map_err(|_| poisoned())?.get(&(n, q)) {
+        return Ok(ctx.clone()); // fast path: shared lock, batch-friendly
     }
     let ctx = Arc::new(Ntt::new(n, q)?);
-    map.insert((n, q), ctx.clone());
-    Ok(ctx)
+    let mut map = reg.write().map_err(|_| poisoned())?;
+    Ok(map.entry((n, q)).or_insert(ctx).clone())
 }
 
 /// Exact negacyclic product of signed coefficient vectors via two-prime

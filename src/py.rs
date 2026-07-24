@@ -696,6 +696,12 @@ impl PyCyclo {
     fn __eq__(&self, o: &PyCyclo) -> bool {
         self.inner == o.inner
     }
+    fn __hash__(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.inner.hash(&mut h);
+        h.finish()
+    }
 }
 
 /// Exact `Z[zeta_s]` value census of coordinate `coord` over all

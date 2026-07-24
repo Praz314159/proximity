@@ -25,10 +25,18 @@ pub use cyclo::Cyclo;
 /// `(index, sign)` with `zeta^exp = sign * zeta^index`, `index < half`.
 #[inline]
 pub fn fold(half: usize, exp: usize) -> (usize, i64) {
-    let e = exp % (2 * half);
-    if e < half {
-        (e, 1)
+    // hot callers (ring mul, census DFS) always have exp < 2*half;
+    // branch first so the division is confined to the cold path.
+    if exp < half {
+        (exp, 1)
+    } else if exp < 2 * half {
+        (exp - half, -1)
     } else {
-        (e - half, -1)
+        let e = exp % (2 * half);
+        if e < half {
+            (e, 1)
+        } else {
+            (e - half, -1)
+        }
     }
 }

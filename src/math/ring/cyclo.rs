@@ -3,7 +3,7 @@
 use super::fold;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
-use crate::field::{mulmod, powmod};
+use crate::field::mulmod;
 
 /// An element of `Z[zeta_s] = Z[x]/(x^{s/2}+1)`, `s = 2 * coeffs.len()`
 /// a power of two; coefficients on the half-basis `1..zeta^{s/2-1}`.
@@ -90,7 +90,7 @@ impl Cyclo {
             .zip(&o.coeffs)
             .map(|(a, b)| a.checked_add(*b).ok_or(()))
             .collect::<std::result::Result<Vec<_>, ()>>()
-            .map_err(|_| Error::Unsupported("coefficient overflow (i64)".into()))?;
+            .map_err(|_| Error::Unsupported("coefficients within i64 range".into()))?;
         Ok(Cyclo { coeffs })
     }
 
@@ -129,7 +129,7 @@ impl Cyclo {
             .into_iter()
             .map(|v| i64::try_from(v).map_err(|_| ()))
             .collect::<std::result::Result<Vec<_>, ()>>()
-            .map_err(|_| Error::Unsupported("coefficient overflow (i64)".into()))?;
+            .map_err(|_| Error::Unsupported("coefficients within i64 range".into()))?;
         Ok(Cyclo { coeffs })
     }
 
@@ -154,7 +154,7 @@ impl Cyclo {
             .into_iter()
             .map(|v| i64::try_from(v).map_err(|_| ()))
             .collect::<std::result::Result<Vec<_>, ()>>()
-            .map_err(|_| Error::Unsupported("coefficient overflow (i64)".into()))?;
+            .map_err(|_| Error::Unsupported("coefficients within i64 range".into()))?;
         Ok(Cyclo { coeffs })
     }
 
@@ -164,6 +164,7 @@ impl Cyclo {
             return Err(Error::OutOfRange("galois requires odd m".into()));
         }
         let half = self.coeffs.len();
+        let m = m % (2 * half); // canonical rep; parity survives (2*half even)
         let mut out = vec![0i64; half];
         for (i, &c) in self.coeffs.iter().enumerate() {
             if c != 0 {
@@ -197,6 +198,9 @@ impl Cyclo {
     /// Evaluate at `x` in `F_p` (Horner; negative coefficients reduced).
     #[must_use]
     pub fn eval_at(&self, x: u64, p: u64) -> u64 {
+        // rem_euclid(p as i64) below requires p < 2^63; every good prime
+        // in the program is < 2^62.
+        assert!(p < (1 << 63), "eval_at requires p < 2^63");
         let mut v = 0u64;
         for &c in self.coeffs.iter().rev() {
             let cu = c.rem_euclid(p as i64) as u64;
@@ -210,13 +214,28 @@ impl Cyclo {
     /// order-`s` element. `p | N(v)` iff this is zero — the accident /
     /// cleanliness test, with no big-integer arithmetic.
     pub fn norm_mod(&self, p: u64) -> Result<u64> {
+        let sg = MultiplicativeSubgroup::new(p, self.s())?;
+        self.norm_mod_in(&sg)
+    }
+
+    /// [`Cyclo::norm_mod`] against a caller-held subgroup — the batch
+    /// entry point: campaigns evaluating many values at one prime pay
+    /// the subgroup construction (primality test, generator search)
+    /// once, not per value.
+    pub fn norm_mod_in(&self, sg: &MultiplicativeSubgroup) -> Result<u64> {
         let s = self.s();
-        let sg = MultiplicativeSubgroup::new(p, s)?;
-        let g = sg.elements()[1];
+        if sg.order() != s {
+            return Err(Error::OutOfRange(format!(
+                "subgroup order {} != ring level s = {s}",
+                sg.order()
+            )));
+        }
+        let p = sg.p();
+        let els = sg.elements();
         let mut n = 1u64;
         let mut m = 1usize;
         while m < s {
-            n = mulmod(n, self.eval_at(powmod(g, m as u64, p), p), p);
+            n = mulmod(n, self.eval_at(els[m], p), p);
             m += 2;
         }
         Ok(n)
@@ -264,6 +283,7 @@ impl Cyclo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field::powmod;
 
     #[test]
     fn fold_is_the_relation() {

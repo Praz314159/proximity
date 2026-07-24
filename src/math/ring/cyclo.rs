@@ -241,6 +241,17 @@ impl Cyclo {
         Ok(n)
     }
 
+    /// Batch [`Cyclo::norm_mod_in`] over many coefficient vectors with a
+    /// shared subgroup, in parallel (rayon) — the campaign entry point
+    /// for extremal-norm sweeps (millions of values, one prime).
+    pub fn norms_mod_batch(coeffs: &[Vec<i64>], sg: &MultiplicativeSubgroup) -> Result<Vec<u64>> {
+        use rayon::prelude::*;
+        coeffs
+            .par_iter()
+            .map(|v| Cyclo::from_coeffs(v.clone())?.norm_mod_in(sg))
+            .collect()
+    }
+
     /// Exact field norm via a fraction-free (Bareiss) determinant of the
     /// multiplication matrix, in i128; errors if any intermediate
     /// overflows. Norms of larger height are reconstructed by the

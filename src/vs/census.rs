@@ -74,8 +74,9 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
         }
     }
 
+    let total = binomial(s, r) as usize;
     let mut fps: Vec<u128> = Vec::new();
-    fps.try_reserve_exact(binomial(s, r) as usize)
+    fps.try_reserve_exact(total)
         .map_err(|_| Error::Unsupported("census allocation (memory)".into()))?;
 
     #[allow(clippy::too_many_arguments)] // recursive hot-loop helper; a
@@ -103,9 +104,40 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
             apply(e, hi, i, half, false);
         }
     }
-    dfs(&mut e, &mut fps, 0, 0, s, r, coord, half, fingerprint);
-
-    fps.sort_unstable();
+    if total < 1 << 20 || r < 2 {
+        dfs(&mut e, &mut fps, 0, 0, s, r, coord, half, fingerprint);
+        fps.sort_unstable();
+    } else {
+        // parallel: split by the first TWO chosen elements (~s^2/2
+        // work-stealing tasks — first-element splits are badly
+        // imbalanced: i0 = 0 alone holds half the subsets), each task
+        // with an exactly-reserved output vector (growth-by-doubling
+        // at GB scale was the measured cost of the first attempt).
+        use rayon::prelude::*;
+        let mut prefixes: Vec<(usize, usize)> = Vec::new();
+        for i0 in 0..=(s - r) {
+            for i1 in (i0 + 1)..=(s - r + 1) {
+                prefixes.push((i0, i1));
+            }
+        }
+        let parts: Vec<Vec<u128>> = prefixes
+            .par_iter()
+            .map(|&(i0, i1)| {
+                let mut e0 = vec![vec![0i64; half]; coord + 1];
+                e0[0][0] = 1;
+                apply(&mut e0, coord.min(1), i0, half, true);
+                apply(&mut e0, coord.min(2), i1, half, true);
+                let cap = binomial(s - 1 - i1, r - 2) as usize;
+                let mut out: Vec<u128> = Vec::with_capacity(cap);
+                dfs(&mut e0, &mut out, i1 + 1, 2, s, r, coord, half, fingerprint);
+                out
+            })
+            .collect();
+        for p_ in parts {
+            fps.extend_from_slice(&p_);
+        }
+        fps.par_sort_unstable();
+    }
     let mut mults: Vec<u64> = Vec::new();
     let mut run = 1u64;
     for w in fps.windows(2) {

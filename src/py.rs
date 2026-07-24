@@ -704,6 +704,17 @@ impl PyCyclo {
     }
 }
 
+/// Batch `N(v) mod p` over many half-basis coefficient vectors (one
+/// shared subgroup construction, rayon-parallel): the extremal-norm
+/// campaign workhorse.
+#[pyfunction]
+fn norms_mod_batch(py: Python<'_>, coeffs: Vec<Vec<i64>>, p: u64, s: usize) -> PyResult<Vec<u64>> {
+    err(py.allow_threads(|| {
+        let sg = MultiplicativeSubgroup::new(p, s)?;
+        crate::ring::Cyclo::norms_mod_batch(&coeffs, &sg)
+    }))
+}
+
 /// Exact `Z[zeta_s]` value census of coordinate `coord` over all
 /// `r`-subsets of the s-th roots of unity: `(distinct, intrinsic_floor,
 /// top5_multiplicities)`. The prime-independent floors of the pointwise
@@ -948,6 +959,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
     m.add_class::<PyCyclo>()?;
     m.add_function(wrap_pyfunction!(fold, m)?)?;
+    m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;

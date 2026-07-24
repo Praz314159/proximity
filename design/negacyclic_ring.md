@@ -1,6 +1,6 @@
 # Design sketch: a `Cyclo` (negacyclic ring) type
 
-**Status:** proposal, not committed. Purpose: check whether one type cleanly
+**Status:** IMPLEMENTED (2026-07-24) as src/ring/{mod,cyclo,ntt}.rs — fold primitive + Cyclo + radix-2 negacyclic NTT with two-prime exact CRT products; census hot loop migrated onto fold with no bench regression; python surface vanish.Cyclo / vanish.fold. Remaining from this doc: norms.rs/certify migration onto Cyclo; HEXL-style preconditioned butterflies as the known perf upgrade. Purpose: check whether one type cleanly
 absorbs the existing fold conventions in `domain` / `census` / `norms` /
 `certify` before we refactor.
 

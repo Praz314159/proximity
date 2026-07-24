@@ -25,18 +25,13 @@ pub use cyclo::Cyclo;
 /// `(index, sign)` with `zeta^exp = sign * zeta^index`, `index < half`.
 #[inline]
 pub fn fold(half: usize, exp: usize) -> (usize, i64) {
-    // hot callers (ring mul, census DFS) always have exp < 2*half;
-    // branch first so the division is confined to the cold path.
-    if exp < half {
-        (exp, 1)
-    } else if exp < 2 * half {
-        (exp - half, -1)
+    // one division + one branch measures fastest on the hot paths
+    // (branch-chain variants mispredict on irregular exponents —
+    // measured 2026-07-24, see hotpath_baseline).
+    let e = exp % (2 * half);
+    if e < half {
+        (e, 1)
     } else {
-        let e = exp % (2 * half);
-        if e < half {
-            (e, 1)
-        } else {
-            (e - half, -1)
-        }
+        (e - half, -1)
     }
 }

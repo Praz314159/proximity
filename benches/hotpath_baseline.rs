@@ -58,6 +58,16 @@ fn benches(c: &mut Criterion) {
         b.iter(|| black_box(&big_a).mul_ntt(black_box(&big_b)).unwrap())
     });
 
+    let small_a =
+        vanish::ring::Cyclo::from_coeffs((0..16).map(|i| (i * 37 + 11) % 2003 - 1000).collect())
+            .unwrap();
+    let small_b =
+        vanish::ring::Cyclo::from_coeffs((0..16).map(|i| (i * 61 + 7) % 2003 - 1000).collect())
+            .unwrap();
+    c.bench_function("cyclo_mul_ntt_16", |b| {
+        b.iter(|| black_box(&small_a).mul_ntt(black_box(&small_b)).unwrap())
+    });
+
     let vs16 = space(65537, 16, 7);
     let b0 = vs16
         .syndrome(&(0..16).map(|i| (7 * i + 3) as u64).collect::<Vec<_>>())

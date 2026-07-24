@@ -103,8 +103,7 @@ impl Ntt {
 
     /// In-place iterative radix-2 cyclic NTT (decimation in time,
     /// bit-reversal first), twiddles from `tw`.
-    fn cyclic(&self, a: &mut [u64], tw: &[u64]) {
-        let n = self.n;
+    fn cyclic_st(n: usize, q: u64, a: &mut [u64], tw: &[u64]) {
         // bit-reversal permutation
         let mut j = 0usize;
         for i in 1..n {
@@ -124,9 +123,9 @@ impl Ntt {
             for start in (0..n).step_by(len) {
                 for k in 0..len / 2 {
                     let u = a[start + k];
-                    let v = mulmod(a[start + k + len / 2], tw[k * stride], self.q);
-                    a[start + k] = (u + v) % self.q;
-                    a[start + k + len / 2] = (u + self.q - v) % self.q;
+                    let v = mulmod(a[start + k + len / 2], tw[k * stride], q);
+                    a[start + k] = (u + v) % q;
+                    a[start + k + len / 2] = (u + q - v) % q;
                 }
             }
             len <<= 1;
@@ -144,15 +143,14 @@ impl Ntt {
         let mut fb: Vec<u64> = (0..self.n)
             .map(|i| mulmod(b[i], self.psi[i], self.q))
             .collect();
-        let (w, w_inv) = (self.w.clone(), self.w_inv.clone());
-        self.cyclic(&mut fa, &w);
-        self.cyclic(&mut fb, &w);
+        Self::cyclic_st(self.n, self.q, &mut fa, &self.w);
+        Self::cyclic_st(self.n, self.q, &mut fb, &self.w);
         for i in 0..self.n {
             fa[i] = mulmod(fa[i], fb[i], self.q);
         }
         // the same routine with inverse twiddles IS the inverse
         // transform up to the factor n (F_{w^-1} F_w = n I).
-        self.cyclic(&mut fa, &w_inv);
+        Self::cyclic_st(self.n, self.q, &mut fa, &self.w_inv);
         let mut out = vec![0u64; self.n];
         for i in 0..self.n {
             let v = mulmod(fa[i], self.n_inv, self.q);
@@ -162,17 +160,33 @@ impl Ntt {
     }
 }
 
-/// Fixed 62-bit CRT primes supporting lengths up to 2^20 (computed
-/// once, cached).
+/// The two fixed CRT primes, pinned as literals (both `= 1 (mod 2^21)`,
+/// so every 2-power length through `2^20` is supported). The
+/// `crt_primes_derivation` test reproduces them from [`ntt_prime`].
+pub const CRT_PRIMES: [u64; 2] = [2_305_843_009_224_179_713, 2_305_844_108_756_779_009];
+
+/// Fixed 62-bit CRT primes supporting lengths up to 2^20.
 pub fn crt_primes() -> [u64; 2] {
-    use std::sync::OnceLock;
-    static PRIMES: OnceLock<[u64; 2]> = OnceLock::new();
-    *PRIMES.get_or_init(|| {
-        [
-            ntt_prime(1 << 20, 1 << 61),
-            ntt_prime(1 << 20, (1 << 61) + (1 << 40)),
-        ]
-    })
+    CRT_PRIMES
+}
+
+/// Once-per-`(n, q)` registry of NTT contexts: twiddle tables are built
+/// on first use and shared thereafter — the "precomputed twiddles per
+/// prime" without per-ring static bloat. If a campaign ever freezes a
+/// single ring, emit static tables for it (build.rs / macro) as the
+/// specialization path.
+fn context(n: usize, q: u64) -> Result<std::sync::Arc<Ntt>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static REG: OnceLock<Mutex<HashMap<(usize, u64), Arc<Ntt>>>> = OnceLock::new();
+    let reg = REG.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = reg.lock().expect("ntt registry poisoned");
+    if let Some(ctx) = map.get(&(n, q)) {
+        return Ok(ctx.clone());
+    }
+    let ctx = Arc::new(Ntt::new(n, q)?);
+    map.insert((n, q), ctx.clone());
+    Ok(ctx)
 }
 
 /// Exact negacyclic product of signed coefficient vectors via two-prime
@@ -180,9 +194,9 @@ pub fn crt_primes() -> [u64; 2] {
 /// (`Q ~ 2^124`); [`super::Cyclo::mul_ntt`] checks and falls back.
 pub fn negacyclic_mul_exact(a: &[i64], b: &[i64]) -> Result<Vec<i128>> {
     let n = a.len();
-    let [q1, q2] = crt_primes();
-    let n1 = Ntt::new(n, q1)?;
-    let n2 = Ntt::new(n, q2)?;
+    let [q1, q2] = CRT_PRIMES;
+    let n1 = context(n, q1)?;
+    let n2 = context(n, q2)?;
     let lift = |v: &[i64], q: u64| -> Vec<u64> {
         v.iter().map(|&x| x.rem_euclid(q as i64) as u64).collect()
     };
@@ -220,6 +234,21 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn crt_primes_derivation() {
+        assert_eq!(
+            CRT_PRIMES,
+            [
+                ntt_prime(1 << 20, 1 << 61),
+                ntt_prime(1 << 20, (1 << 61) + (1 << 40)),
+            ]
+        );
+        for q in CRT_PRIMES {
+            assert!(crate::field::is_prime(q));
+            assert_eq!((q - 1) % (1 << 21), 0);
+        }
     }
 
     #[test]

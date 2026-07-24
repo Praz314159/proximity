@@ -73,7 +73,10 @@ fn benches(c: &mut Criterion) {
         .syndrome(&(0..16).map(|i| (7 * i + 3) as u64).collect::<Vec<_>>())
         .unwrap();
     c.bench_function("cut_counts_s16", |b| {
-        b.iter(|| vs16.cut_counts(black_box(&[b0.clone()])).unwrap())
+        b.iter(|| {
+            vs16.cut_counts(black_box(std::slice::from_ref(&b0)))
+                .unwrap()
+        })
     });
 }
 

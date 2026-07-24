@@ -175,10 +175,12 @@ pub fn crt_primes() -> [u64; 2] {
 /// prime" without per-ring static bloat. If a campaign ever freezes a
 /// single ring, emit static tables for it (build.rs / macro) as the
 /// specialization path.
+type NttRegistry = std::sync::Mutex<std::collections::HashMap<(usize, u64), std::sync::Arc<Ntt>>>;
+
 fn context(n: usize, q: u64) -> Result<std::sync::Arc<Ntt>> {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex, OnceLock};
-    static REG: OnceLock<Mutex<HashMap<(usize, u64), Arc<Ntt>>>> = OnceLock::new();
+    static REG: OnceLock<NttRegistry> = OnceLock::new();
     let reg = REG.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = reg.lock().expect("ntt registry poisoned");
     if let Some(ctx) = map.get(&(n, q)) {
@@ -227,10 +229,10 @@ mod tests {
     fn schoolbook(a: &[i64], b: &[i64]) -> Vec<i128> {
         let n = a.len();
         let mut out = vec![0i128; n];
-        for i in 0..n {
-            for j in 0..n {
+        for (i, &ai) in a.iter().enumerate() {
+            for (j, &bj) in b.iter().enumerate() {
                 let (idx, sg) = super::super::fold(n, i + j);
-                out[idx] += (a[i] as i128) * (b[j] as i128) * (sg as i128);
+                out[idx] += (ai as i128) * (bj as i128) * (sg as i128);
             }
         }
         out

@@ -21,7 +21,7 @@ use crate::error::{Error, Result};
 ///
 /// Returns `(distinct, max_mult, top5_mults)`.
 pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64, Vec<u64>)> {
-    if !s.is_power_of_two() || s < 4 || s > 64 {
+    if !s.is_power_of_two() || !(4..=64).contains(&s) {
         return Err(Error::OutOfRange(
             "census requires s a power of two in [4, 64]".into(),
         ));
@@ -78,6 +78,8 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
     fps.try_reserve_exact(binomial(s, r) as usize)
         .map_err(|_| Error::Unsupported("census allocation (memory)".into()))?;
 
+    #[allow(clippy::too_many_arguments)] // recursive hot-loop helper; a
+                                         // params struct would force per-node indirection for no clarity gain
     fn dfs(
         e: &mut [Vec<i64>],
         fps: &mut Vec<u128>,

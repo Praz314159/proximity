@@ -229,10 +229,9 @@ impl Cyclo {
     pub fn norm_i128(&self) -> Result<i128> {
         let half = self.coeffs.len();
         let mut m = vec![vec![0i128; half]; half];
-        for i in 0..half {
-            let col = self.dilate(i);
-            for r in 0..half {
-                m[r][i] = col.coeffs[r] as i128;
+        for (i, mcol) in (0..half).map(|i| self.dilate(i)).enumerate() {
+            for (row, &cv) in m.iter_mut().zip(mcol.coeffs.iter()) {
+                row[i] = cv as i128;
             }
         }
         let ovf = || Error::Unsupported("norm overflow (i128); use norm_mod + CRT".into());

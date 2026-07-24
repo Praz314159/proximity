@@ -60,11 +60,10 @@
 // Foundation.
 pub mod domain;
 pub mod error;
-pub mod field;
+pub mod math;
 
 // Generic Reed–Solomon codes + list-decoding discovery.
 /// The vanishing-syndrome geometry (dual view of RS on a subgroup).
-pub mod ring;
 pub mod rs;
 pub mod vs;
 
@@ -76,6 +75,7 @@ pub mod attack;
 pub mod toy;
 
 pub use error::{Error, Result};
+pub use math::{field, ring};
 
 #[cfg(feature = "python")]
 mod py;

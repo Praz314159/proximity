@@ -39,6 +39,25 @@ fn benches(c: &mut Criterion) {
         b.iter(|| vs.moment_row(black_box(&subset)).unwrap())
     });
 
+    let big_a = vanish::ring::Cyclo::from_coeffs(
+        (0..1024)
+            .map(|i| ((i * 37 + 11) % 20011) as i64 - 10000)
+            .collect(),
+    )
+    .unwrap();
+    let big_b = vanish::ring::Cyclo::from_coeffs(
+        (0..1024)
+            .map(|i| ((i * 61 + 7) % 20011) as i64 - 10000)
+            .collect(),
+    )
+    .unwrap();
+    c.bench_function("cyclo_mul_schoolbook_1024", |b| {
+        b.iter(|| black_box(&big_a).mul(black_box(&big_b)).unwrap())
+    });
+    c.bench_function("cyclo_mul_ntt_1024", |b| {
+        b.iter(|| black_box(&big_a).mul_ntt(black_box(&big_b)).unwrap())
+    });
+
     let vs16 = space(65537, 16, 7);
     let b0 = vs16
         .syndrome(&(0..16).map(|i| (7 * i + 3) as u64).collect::<Vec<_>>())

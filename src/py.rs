@@ -649,6 +649,11 @@ impl PyCyclo {
             inner: self.inner.neg(),
         }
     }
+    fn mul_ntt(&self, o: &PyCyclo) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(self.inner.mul_ntt(&o.inner))?,
+        })
+    }
     fn dilate(&self, d: usize) -> Self {
         PyCyclo {
             inner: self.inner.dilate(d),

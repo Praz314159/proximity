@@ -1,36 +1,9 @@
-//! The negacyclic ring `Z[zeta_s] = Z[x]/(x^{s/2} + 1)` (`s` a power of
-//! two) — the characteristic-zero home of the program's exact values
-//! (see `design/negacyclic_ring.md`).
-//!
-//! The recurring bug class this module retires is the *negacyclic fold*:
-//! reducing an exponent past `s/2` while dropping the sign from
-//! `zeta^{s/2} = -1`. The [`fold`] primitive defines that operation once;
-//! [`Cyclo`] is the element type for construction, orbit/norm reasoning,
-//! and the Python boundary. Hot enumeration loops keep their flat
-//! representations and call [`fold`] (see `vs::exact_value_census`).
-//!
-//! Norms: [`Cyclo::norm_mod`] computes `N(v) mod p` — the workhorse of
-//! accident manufacturing and per-prime cleanliness certificates
-//! (`p` divides `N(v)` iff `norm_mod(p) == 0`) — with no big-integer
-//! arithmetic. [`Cyclo::norm_i128`] is the exact norm when it fits;
-//! larger norms are reconstructed by the caller via CRT over
-//! `norm_mod` values.
+//! [`Cyclo`] — the element type of `Z[zeta_s]`.
 
+use super::fold;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{mulmod, powmod};
-
-/// THE fold: reduce `zeta^exp` on the half-basis. Returns
-/// `(index, sign)` with `zeta^exp = sign * zeta^index`, `index < half`.
-#[inline]
-pub fn fold(half: usize, exp: usize) -> (usize, i64) {
-    let e = exp % (2 * half);
-    if e < half {
-        (e, 1)
-    } else {
-        (e - half, -1)
-    }
-}
 
 /// An element of `Z[zeta_s] = Z[x]/(x^{s/2}+1)`, `s = 2 * coeffs.len()`
 /// a power of two; coefficients on the half-basis `1..zeta^{s/2-1}`.
@@ -153,6 +126,31 @@ impl Cyclo {
             }
         }
         let coeffs = acc
+            .into_iter()
+            .map(|v| i64::try_from(v).map_err(|_| ()))
+            .collect::<std::result::Result<Vec<_>, ()>>()
+            .map_err(|_| Error::Unsupported("coefficient overflow (i64)".into()))?;
+        Ok(Cyclo { coeffs })
+    }
+
+    /// Negacyclic product via two-prime NTT + signed CRT when the
+    /// height bound permits (`n * h_a * h_b < 2^123`); otherwise the
+    /// schoolbook path. Identical results to [`Cyclo::mul`]; the fast
+    /// path for large `s` and batch campaigns.
+    pub fn mul_ntt(&self, o: &Cyclo) -> Result<Cyclo> {
+        self.check_same(o)?;
+        let n = self.coeffs.len() as u128;
+        let (ha, hb) = (self.height() as u128, o.height() as u128);
+        let bound_ok = ha
+            .checked_mul(hb)
+            .and_then(|x| x.checked_mul(n))
+            .map(|x| x < (1u128 << 123))
+            .unwrap_or(false);
+        if !bound_ok || self.coeffs.len() < 2 {
+            return self.mul(o);
+        }
+        let prod = super::ntt::negacyclic_mul_exact(&self.coeffs, &o.coeffs)?;
+        let coeffs = prod
             .into_iter()
             .map(|v| i64::try_from(v).map_err(|_| ()))
             .collect::<std::result::Result<Vec<_>, ()>>()

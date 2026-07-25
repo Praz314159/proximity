@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 *.whl
 .DS_Store
+
+# local design docs (not published; absorbed into module docs when they graduate)
+/design/

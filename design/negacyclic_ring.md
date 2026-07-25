@@ -1,6 +1,6 @@
 # Design sketch: a `Cyclo` (negacyclic ring) type
 
-**Status:** IMPLEMENTED (2026-07-24) as src/ring/{mod,cyclo,ntt}.rs — fold primitive + Cyclo + radix-2 negacyclic NTT with two-prime exact CRT products; census hot loop migrated onto fold with no bench regression; python surface vanish.Cyclo / vanish.fold. Remaining from this doc: norms.rs/certify migration onto Cyclo; HEXL-style preconditioned butterflies as the known perf upgrade. Purpose: check whether one type cleanly
+**Status:** IMPLEMENTED (2026-07-24) as src/ring/{mod,cyclo,ntt}.rs — fold primitive + Cyclo + radix-2 negacyclic NTT with two-prime exact CRT products; census hot loop migrated onto fold with no bench regression; python surface vanish.Cyclo / vanish.fold. MIGRATION COMPLETE (2026-07-25): norms.rs embedding-exponent reduction now routes through ring::fold (hoisted per-support fold tables, half-basis power tables; enumeration stays flat per caveat 1), and the certify path is glued to the ring by tests — norm_table ≡ Cyclo::norm_i128 entry-for-entry at s=8, census ≡ the Cyclo::eval_at kernel, certificate degradation at an accident prime ≡ Cyclo::norm_mod divisibility. Remaining from this doc: HEXL-style preconditioned butterflies as the known perf upgrade. Purpose: check whether one type cleanly
 absorbs the existing fold conventions in `domain` / `census` / `norms` /
 `certify` before we refactor.
 

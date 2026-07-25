@@ -11,6 +11,12 @@
 //! floating point — at `s = 64` norms exceed the f64 mantissa). The Parseval
 //! law caps `N(v) <= (sum v_i^2)^{s/4}`, which sizes the CRT.
 //!
+//! Ring conventions are owned by [`crate::ring`]: the enumeration stays flat
+//! (no per-vector allocation; design/negacyclic_ring.md), but every
+//! embedding-exponent reduction routes through [`crate::ring::fold`], and the
+//! glue test pins the flat CRT loop against the independent
+//! [`crate::ring::Cyclo::norm_i128`] path entry-for-entry.
+//!
 //! Galois normalization (two historical pitfalls, now built in): "p | N(v)"
 //! means `v` is in the kernel of *some* embedding, so raw divisibility counts
 //! overstate the single-embedding census by the factor `s/2`; the fix divides
@@ -24,6 +30,7 @@ pub mod ingest;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{factor, mulmod, powmod, primes_one_mod};
+use crate::ring::fold;
 use crate::smooth::census;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -167,13 +174,15 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
     let bound_bits =
         ((s as f64 / 4.0) * ((cmax * cmax) as f64 * wmax as f64).log2()).ceil() as u32 + 2;
     let qs = crt_primes(s, bound_bits)?;
-    // per CRT prime: order-s root and its power table
+    // per CRT prime: order-s root and its half-basis power table (the
+    // images of `{1 .. zeta^{s/2-1}}`; exponents outside the half-basis
+    // are placed by [`crate::ring::fold`] below)
     let tables: Vec<(u64, Vec<u64>)> = qs
         .iter()
         .map(|&q| {
             let sg = MultiplicativeSubgroup::new(q, s)
                 .expect("schedule primes satisfy q = 1 (mod s) by construction");
-            (q, sg.elements().to_vec())
+            (q, sg.pow_table(half))
         })
         .collect();
     let coefs: Vec<i64> = (-cmax..=cmax).filter(|&c| c != 0).collect();
@@ -191,6 +200,15 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
             .map(|chunk| {
                 let mut local: HashMap<u128, u64> = HashMap::new();
                 for sup in chunk {
+                    // Embedding-exponent fold, hoisted out of the pattern
+                    // loop: folds[j][i] = (index, sign) of `zeta^{sup_i k_j}`
+                    // on the half-basis, `k_j` the j-th odd exponent —
+                    // [`crate::ring::fold`] is the one authority for this
+                    // reduction (design/negacyclic_ring.md).
+                    let folds: Vec<Vec<(usize, i64)>> = (1..s)
+                        .step_by(2)
+                        .map(|k| sup.iter().map(|&si| fold(half, si as usize * k)).collect())
+                        .collect();
                     for pat in 0..npat {
                         // decode coefficient pattern
                         let mut cvec = [0i64; 32];
@@ -203,20 +221,17 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                         let mut residues = [0u64; 2];
                         for (ti, (q, pw)) in tables.iter().enumerate() {
                             let mut prod: u64 = 1;
-                            for k in (1..s).step_by(2) {
-                                // Lazy accumulation: terms |c|*pw < 2^64 and at
-                                // most 32 of them fit a u128 sum, so the mod
-                                // drops from per-term to per-embedding. The
-                                // exponent mask is valid because s is a power
-                                // of two (validated at entry).
+                            for fk in &folds {
+                                // Lazy accumulation: terms |c|*pw < 2^64 and
+                                // at most 32 of them fit a u128 sum, so the
+                                // mod drops from per-term to per-embedding.
                                 let mut acc: u128 = 0;
-                                for i in 0..w {
-                                    let e = (sup[i] as usize * k) & (s - 1);
-                                    let c = cvec[i];
+                                for (&(idx, sgn), &cv) in fk.iter().zip(cvec.iter()) {
+                                    let c = cv * sgn;
                                     acc += if c >= 0 {
-                                        (c as u128) * (pw[e] as u128)
+                                        (c as u128) * (pw[idx] as u128)
                                     } else {
-                                        ((-c) as u128) * ((q - pw[e]) as u128)
+                                        ((-c) as u128) * ((q - pw[idx]) as u128)
                                     };
                                 }
                                 prod = mulmod(prod, (acc % (*q as u128)) as u64, *q);
@@ -314,4 +329,41 @@ pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
         .collect();
     out.sort_by_key(|e| e.p);
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ring::Cyclo;
+    use std::collections::HashMap;
+
+    /// Glue (design/negacyclic_ring.md): the flat CRT hot loop of
+    /// [`norm_table`] equals the ring's exact Bareiss-determinant norm
+    /// [`Cyclo::norm_i128`] entry-for-entry on the full `s = 8`
+    /// enumeration — two independent `Z[zeta_s]` norm paths, one answer.
+    #[test]
+    fn norm_table_matches_cyclo_exact_norms() {
+        let (s, wmax, cmax) = (8usize, 4usize, 2i64);
+        let table = norm_table(s, wmax, cmax).unwrap();
+        let mut expected: HashMap<u128, Vec<u64>> = HashMap::new();
+        let ncoef = (2 * cmax + 1) as u64;
+        for pat in 0..ncoef.pow(4) {
+            let mut v = vec![0i64; 4];
+            let mut t = pat;
+            for slot in v.iter_mut() {
+                *slot = (t % ncoef) as i64 - cmax;
+                t /= ncoef;
+            }
+            let w = v.iter().filter(|&&c| c != 0).count();
+            if w == 0 {
+                continue;
+            }
+            let n = Cyclo::from_coeffs(v).unwrap().norm_i128().unwrap();
+            assert!(n >= 0, "field norm is nonnegative for s >= 8");
+            expected
+                .entry(n as u128)
+                .or_insert_with(|| vec![0; wmax + 1])[w] += 1;
+        }
+        assert_eq!(table.entries, expected);
+    }
 }

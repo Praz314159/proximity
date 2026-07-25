@@ -173,3 +173,37 @@ pub fn mitm(sg: &MultiplicativeSubgroup, cmax: i64) -> Result<Vec<u64>> {
     counts[0] = counts[0].saturating_sub(1); // remove the zero vector
     Ok(counts)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ring::Cyclo;
+
+    /// Glue (design/negacyclic_ring.md): the census counts exactly the
+    /// bounded-height [`Cyclo`] elements in the kernel of
+    /// [`Cyclo::eval_at`] at the subgroup generator — both engines, one
+    /// ring definition.
+    #[test]
+    fn census_is_the_cyclo_eval_kernel() {
+        let sg = MultiplicativeSubgroup::new(17, 8).unwrap();
+        let g = sg.elements()[1];
+        let mut expected = vec![0u64; 5];
+        for pat in 0..5u64.pow(4) {
+            let mut v = vec![0i64; 4];
+            let mut t = pat;
+            for slot in v.iter_mut() {
+                *slot = (t % 5) as i64 - 2;
+                t /= 5;
+            }
+            let w = v.iter().filter(|&&c| c != 0).count();
+            if w == 0 {
+                continue;
+            }
+            if Cyclo::from_coeffs(v).unwrap().eval_at(g, 17) == 0 {
+                expected[w] += 1;
+            }
+        }
+        assert_eq!(mitm(&sg, 2).unwrap(), expected);
+        assert_eq!(direct(&sg, 2, 4).unwrap(), expected);
+    }
+}

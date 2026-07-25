@@ -12,7 +12,7 @@
 //! law caps `N(v) <= (sum v_i^2)^{s/4}`, which sizes the CRT.
 //!
 //! Ring conventions are owned by [`crate::ring`]: the enumeration stays flat
-//! (no per-vector allocation; design/negacyclic_ring.md), but every
+//! (no per-vector allocation; see the [`crate::ring`] docs), but every
 //! embedding-exponent reduction routes through [`crate::ring::fold`], and the
 //! glue test pins the flat CRT loop against the independent
 //! [`crate::ring::Cyclo::norm_i128`] path entry-for-entry.
@@ -204,7 +204,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                     // loop: folds[j][i] = (index, sign) of `zeta^{sup_i k_j}`
                     // on the half-basis, `k_j` the j-th odd exponent —
                     // [`crate::ring::fold`] is the one authority for this
-                    // reduction (design/negacyclic_ring.md).
+                    // reduction (conventions: [`crate::ring`]).
                     let folds: Vec<Vec<(usize, i64)>> = (1..s)
                         .step_by(2)
                         .map(|k| sup.iter().map(|&si| fold(half, si as usize * k)).collect())
@@ -337,7 +337,7 @@ mod tests {
     use crate::ring::Cyclo;
     use std::collections::HashMap;
 
-    /// Glue (design/negacyclic_ring.md): the flat CRT hot loop of
+    /// Glue (the [`crate::ring`] division of labor): the flat CRT hot loop of
     /// [`norm_table`] equals the ring's exact Bareiss-determinant norm
     /// [`Cyclo::norm_i128`] entry-for-entry on the full `s = 8`
     /// enumeration — two independent `Z[zeta_s]` norm paths, one answer.

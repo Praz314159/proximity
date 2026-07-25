@@ -179,7 +179,7 @@ mod tests {
     use super::*;
     use crate::ring::Cyclo;
 
-    /// Glue (design/negacyclic_ring.md): the census counts exactly the
+    /// Glue (the [`crate::ring`] division of labor): the census counts exactly the
     /// bounded-height [`Cyclo`] elements in the kernel of
     /// [`Cyclo::eval_at`] at the subgroup generator — both engines, one
     /// ring definition.

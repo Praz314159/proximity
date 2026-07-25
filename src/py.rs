@@ -594,7 +594,7 @@ fn word_from_syndrome(p: u64, domain: Vec<u64>, r: usize, b: Vec<u64>) -> Vec<u6
 
 /// The negacyclic fold: `zeta^exp = sign * zeta^index` on the
 /// half-basis. THE primitive — campaigns must call this instead of
-/// re-deriving exponent reduction (see design/negacyclic_ring.md).
+/// re-deriving exponent reduction (conventions: `crate::ring`).
 #[pyfunction]
 fn fold(half: usize, exp: usize) -> (usize, i64) {
     crate::ring::fold(half, exp)

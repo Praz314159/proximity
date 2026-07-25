@@ -16,6 +16,13 @@
 //! When a census is nonzero, the certificate reports the accident orbits and
 //! the *exact* inflated zero-bucket via the decomposition engine instead —
 //! the output is exact either way; only its classification differs.
+//!
+//! The ring `Z[zeta_s]` here is [`crate::ring`]: an `eps`-difference is a
+//! bounded-height [`crate::ring::Cyclo`], "in the kernel" means its
+//! [`eval_at`](crate::ring::Cyclo::eval_at) vanishes at the subgroup
+//! generator, and `p` admits such a vector iff `p` divides a
+//! [`norm`](crate::ring::Cyclo::norm_mod) — the glue tests below pin the
+//! census verdicts to the ring's own arithmetic.
 
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
@@ -101,4 +108,40 @@ pub fn certify_q1(sg: &MultiplicativeSubgroup, r: usize) -> Result<Certificate> 
         });
     }
     Ok(cert)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ring::Cyclo;
+
+    /// The s=16 die-out witness (`N = 9986 = 2 * 4993`, pinned in the ring
+    /// tests): at its accident prime the certificate must degrade exactly
+    /// one notch — the `{-1,0,1}` census stays empty (Parseval:
+    /// `N <= 8^4 < 4993`), the `[-2,2]` census fires — and the ring
+    /// explains the accident: `p | N(v)`.
+    #[test]
+    fn accident_prime_degrades_certificate_and_ring_explains_it() {
+        let v = Cyclo::from_coeffs(vec![2, 2, 0, 2, -1, 0, 0, -1]).unwrap();
+        assert_eq!(v.norm_mod(4993).unwrap(), 0);
+        let sg = MultiplicativeSubgroup::new(4993, 16).unwrap();
+        let cert = certify_q1(&sg, 8).unwrap();
+        match cert.verdict {
+            Verdict::ZeroBucketStructural { census2_by_weight } => {
+                assert!(census2_by_weight.iter().sum::<u64>() > 0);
+            }
+            other => panic!("expected ZeroBucketStructural, got {other:?}"),
+        }
+    }
+
+    /// Above the realized accident range (`P_max(16) = 4993`) the full
+    /// certificate holds: every bucket structural, max = ladder value.
+    #[test]
+    fn clean_prime_certifies_all_buckets_structural() {
+        let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
+        let cert = certify_q1(&sg, 8).unwrap();
+        assert_eq!(cert.verdict, Verdict::AllBucketsStructural);
+        assert_eq!(cert.m_struct, m_struct(16, 8, 1));
+        assert_eq!(cert.zero_class, class_size(16, 8, 0));
+    }
 }

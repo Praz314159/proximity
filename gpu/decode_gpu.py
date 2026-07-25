@@ -776,6 +776,9 @@ if __name__ == "__main__":
     if a.bench:
         bench()
         raise SystemExit(0)
+    if a.p >= 1 << 31:
+        raise SystemExit(f"p = {a.p} >= 2^31: the Barrett kernels "
+                         "require p < 2^31 (silent overflow otherwise)")
     dom = list(vanish.subgroup(a.p, a.s))
     word = list(np.load(a.word_file).astype(np.uint32))
     if a.count:

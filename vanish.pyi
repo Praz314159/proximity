@@ -183,6 +183,79 @@ def e_syms(p: int, rows: List[List[int]]) -> List[npt.NDArray[np.uint64]]:
 def dd_rows(p: int, domain: List[int], subsets: List[List[int]]) -> List[List[int]]:
     """Divided-difference functional rows: D_T(w) = row . w."""
 
+class Cyclo:
+    """An element of Z[zeta_s] (negacyclic half-basis coefficients)."""
+    def __init__(self, coeffs: list[int]) -> None: ...
+    @staticmethod
+    def monomial(s: int, exp: int) -> "Cyclo": ...
+    @staticmethod
+    def one_minus(s: int, exp: int) -> "Cyclo": ...
+    @staticmethod
+    def prod_one_minus(s: int, exps: list[int]) -> "Cyclo": ...
+    @staticmethod
+    def e_vector(s: int, exps: list[int], m: int) -> list["Cyclo"]: ...
+    def coeffs(self) -> list[int]: ...
+    def s(self) -> int: ...
+    def add(self, o: "Cyclo") -> "Cyclo": ...
+    def sub(self, o: "Cyclo") -> "Cyclo": ...
+    def mul(self, o: "Cyclo") -> "Cyclo": ...
+    def mul_ntt(self, o: "Cyclo") -> "Cyclo": ...
+    def neg(self) -> "Cyclo": ...
+    def dilate(self, d: int) -> "Cyclo": ...
+    def galois(self, m: int) -> "Cyclo": ...
+    def conj(self) -> "Cyclo": ...
+    def eval_at(self, x: int, p: int) -> int: ...
+    def norm_mod(self, p: int) -> int: ...
+    def norm_i128(self) -> int: ...
+    def weight(self) -> int: ...
+    def sq_sum(self) -> int: ...
+    def height(self) -> int: ...
+    def is_zero(self) -> bool: ...
+    def as_int(self) -> int | None: ...
+    def eq_int(self, v: int) -> bool: ...
+
+def fold_unit(s: int, e: int) -> Cyclo:
+    """The fold unit u_e = (1 + zeta^e)/(1 - zeta^e), exact closed form."""
+
+def foldunit_rank_certificate(s: int) -> Tuple[float, float, bool]:
+    """(det_lo, det_hi, independent): certified fold-unit independence."""
+
+def valuemap_census(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int,
+) -> Tuple[int, int, int, int, int]:
+    """(total, distinct, max_fiber, argmax, second_moment) of the MITM census."""
+
+def valuemap_histogram(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int,
+) -> npt.NDArray[np.uint64]:
+    """Fiber-size histogram: out[k] = number of values with fiber size k."""
+
+def valuemap_distribution(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int,
+) -> Tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint64]]:
+    """(values, multiplicities), sorted by value."""
+
+def valuemap_sweep(
+    level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int, primes: List[int],
+) -> List[Tuple[int, int, int, int, int, int]]:
+    """Parallel prime sweep: rows (p, total, distinct, max, argmax, second_moment)."""
+
+def valuemap_fiber(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int, value: int,
+) -> int:
+    """Fiber size of one target value."""
+
+def valuemap_fiber_members(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int, value: int, cap: int,
+) -> List[List[int]]:
+    """Members of one fiber as sorted exponent lists (up to cap)."""
+
 class VsSpace:
     """The vanishing-syndrome geometry VS(s, k) on mu_s in F_p — the dual
     (quotient) view of RS[F_p, mu_s, k]. Convention authority: domain =

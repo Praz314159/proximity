@@ -84,6 +84,17 @@ vanish attack    --n 2097152 --k 1048576 --list-bits 57.93 --base-bits 31
 **Python** (`pip install maturin && maturin build --release --features python
 && pip install target/wheels/*.whl`):
 
+**Pods / remote campaigns.** Two routes to `vanish` on a bare Linux pod:
+build on the pod (fewest assumptions: `curl https://sh.rustup.rs -sSf |
+sh -s -- -y && pip install maturin --break-system-packages`, copy the
+repo, `pip install . --break-system-packages`), or cross-build a
+manylinux wheel locally (`pip install maturin[zig] && rustup target add
+x86_64-unknown-linux-gnu && maturin build --release --zig --target
+x86_64-unknown-linux-gnu`) and `scp` the wheel. The python mirror of the
+exact kernels (`experiments/analysis/toolkit.py`, numpy-only) doubles as
+the zero-toolchain fallback. Campaign checklist: the local
+`experiments/campaigns/POD.md`.
+
 ```python
 import vanish as bl, numpy as np
 d = np.asarray(bl.bucket_dist_q1(89633, 32, 16))   # full exact distribution

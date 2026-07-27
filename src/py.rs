@@ -623,6 +623,28 @@ impl PyCyclo {
             inner: err(crate::ring::Cyclo::monomial(s, exp))?,
         })
     }
+    /// `1 - zeta^exp` — the content map.
+    #[staticmethod]
+    fn one_minus(s: usize, exp: usize) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::one_minus(s, exp))?,
+        })
+    }
+    /// Exact `prod(1 - zeta^e)` over `exps` — the A-map value.
+    #[staticmethod]
+    fn prod_one_minus(s: usize, exps: Vec<usize>) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::prod_one_minus(s, &exps))?,
+        })
+    }
+    /// Exact elementary symmetric functions `e_0..e_m` of `{zeta^e}`.
+    #[staticmethod]
+    fn e_vector(s: usize, exps: Vec<usize>, m: usize) -> PyResult<Vec<PyCyclo>> {
+        Ok(err(crate::ring::Cyclo::e_vector(s, &exps, m))?
+            .into_iter()
+            .map(|inner| PyCyclo { inner })
+            .collect())
+    }
     fn coeffs(&self) -> Vec<i64> {
         self.inner.coeffs().to_vec()
     }
@@ -690,6 +712,14 @@ impl PyCyclo {
     fn is_zero(&self) -> bool {
         self.inner.is_zero()
     }
+    /// The integer value of this element, or None if it is not rational.
+    fn as_int(&self) -> Option<i64> {
+        self.inner.as_int()
+    }
+    /// Equality against a rational integer.
+    fn eq_int(&self, v: i64) -> bool {
+        self.inner.eq_int(v)
+    }
     fn __repr__(&self) -> String {
         format!("Cyclo(s={}, {:?})", self.inner.s(), self.inner.coeffs())
     }
@@ -702,6 +732,187 @@ impl PyCyclo {
         self.inner.hash(&mut h);
         h.finish()
     }
+}
+
+/// MITM value-map census: `(total, distinct, max_fiber, argmax,
+/// second_moment)` of `prod(point - dom[e])` over `size`-subsets of
+/// `h1 + h2` with exponent sum = `class` (mod level). The collision
+/// count is `second_moment`.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_census(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+) -> PyResult<(u64, u64, u64, u64, u128)> {
+    let c = err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::join_census(&a, &b, size, class, p)
+    }))?;
+    Ok((c.total, c.distinct, c.max_fiber, c.argmax, c.second_moment))
+}
+
+/// The fiber size of one target value in the MITM value-map census.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_fiber(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+    value: u64,
+) -> PyResult<u64> {
+    err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::fiber_count(&a, &b, size, class, p, value)
+    }))
+}
+
+/// Members of one fiber as sorted exponent lists (up to `cap`).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_fiber_members(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+    value: u64,
+    cap: usize,
+) -> PyResult<Vec<Vec<usize>>> {
+    err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::fiber_members(&a, &b, size, class, p, value, cap)
+    }))
+}
+
+/// Fiber-size histogram of the MITM census: `out[k]` = number of
+/// values with fiber size `k`. The lightest full-shape output.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_histogram(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+) -> PyResult<Py<PyArray1<u64>>> {
+    let h = err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::join_histogram(&a, &b, size, class, p)
+    }))?;
+    Ok(h.into_pyarray_bound(py).into())
+}
+
+/// A pair of u64 arrays (values, multiplicities).
+type U64ArrayPair = (Py<PyArray1<u64>>, Py<PyArray1<u64>>);
+
+/// Value-resolved MITM census: `(values, multiplicities)` sorted by
+/// value — the input of the spectrum pipeline and per-value figures.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_distribution(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+) -> PyResult<U64ArrayPair> {
+    let (v, c) = err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::join_distribution(&a, &b, size, class, p)
+    }))?;
+    Ok((
+        v.into_pyarray_bound(py).into(),
+        c.into_pyarray_bound(py).into(),
+    ))
+}
+
+/// A valuemap sweep row: (p, total, distinct, max_fiber, argmax,
+/// second_moment).
+type ValuemapRow = (u64, u64, u64, u64, u64, u128);
+
+/// Parallel prime sweep of the MITM census summary — the
+/// floors-vs-accidents campaign driver.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_sweep(
+    py: Python<'_>,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+    primes: Vec<u64>,
+) -> PyResult<Vec<ValuemapRow>> {
+    use rayon::prelude::*;
+    py.allow_threads(|| {
+        primes
+            .par_iter()
+            .map(|&p| {
+                let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+                let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+                let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+                let c = crate::vs::valuemap::join_census(&a, &b, size, class, p)?;
+                Ok((
+                    p,
+                    c.total,
+                    c.distinct,
+                    c.max_fiber,
+                    c.argmax,
+                    c.second_moment,
+                ))
+            })
+            .collect::<crate::Result<Vec<_>>>()
+    })
+    .map_err(to_py)
+}
+
+/// The fold unit `u_e = (1 + zeta^e)/(1 - zeta^e)` as an exact ring
+/// element (closed form; the descent calculus's bookkeeping currency).
+#[pyfunction]
+fn fold_unit(s: usize, e: usize) -> PyResult<PyCyclo> {
+    Ok(PyCyclo {
+        inner: err(crate::ring::fold_unit(s, e))?,
+    })
+}
+
+/// Certified multiplicative independence (mod torsion) of the free
+/// fold units at level `s`: `(det_lo, det_hi, independent)` from the
+/// interval-arithmetic determinant of the log-embedding matrix.
+#[pyfunction]
+fn foldunit_rank_certificate(s: usize) -> PyResult<(f64, f64, bool)> {
+    let c = err(crate::ring::rank_certificate(s))?;
+    Ok((c.det_lo, c.det_hi, c.independent))
 }
 
 /// Batch `N(v) mod p` over many half-basis coefficient vectors (one
@@ -958,6 +1169,14 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
     m.add_class::<PyCyclo>()?;
+    m.add_function(wrap_pyfunction!(valuemap_census, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_histogram, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_distribution, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_sweep, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_fiber, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_fiber_members, m)?)?;
+    m.add_function(wrap_pyfunction!(fold_unit, m)?)?;
+    m.add_function(wrap_pyfunction!(foldunit_rank_certificate, m)?)?;
     m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;

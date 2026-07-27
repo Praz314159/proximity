@@ -195,6 +195,62 @@ impl Cyclo {
             .expect("s-1 is odd for s a power of two >= 4")
     }
 
+    // ------- content-map conveniences -------
+    //
+    // `1 - zeta^e` is the content map: every difference of roots of
+    // unity is a unit times one of these, and every census value is a
+    // product of them. These constructors are the single exact home
+    // for the quantities the landscape verifiers previously hand-rolled
+    // (experiments/analysis/toolkit.py mirrors them in Python).
+
+    /// `1 - zeta^exp`.
+    pub fn one_minus(s: usize, exp: usize) -> Result<Self> {
+        Self::monomial(s, 0)?.sub(&Self::monomial(s, exp)?)
+    }
+
+    /// Exact `prod_{e in exps} (1 - zeta^e)` — the A-map value of a
+    /// subset; the quantity the censuses count. NTT-accelerated where
+    /// the height bound permits.
+    pub fn prod_one_minus(s: usize, exps: &[usize]) -> Result<Self> {
+        let mut acc = Self::monomial(s, 0)?;
+        for &e in exps {
+            acc = acc.mul_ntt(&Self::one_minus(s, e)?)?;
+        }
+        Ok(acc)
+    }
+
+    /// Exact elementary symmetric functions `e_0..e_m` of
+    /// `{zeta^e : e in exps}` — the subset's embedding coordinates
+    /// (the characteristic-zero side of the syndrome alphabet).
+    pub fn e_vector(s: usize, exps: &[usize], m: usize) -> Result<Vec<Self>> {
+        let mut es = vec![Self::zero(s)?; m + 1];
+        es[0] = Self::monomial(s, 0)?;
+        for (t, &e) in exps.iter().enumerate() {
+            let top = m.min(t + 1);
+            for j in (1..=top).rev() {
+                let shifted = es[j - 1].dilate(e);
+                es[j] = es[j].add(&shifted)?;
+            }
+        }
+        Ok(es)
+    }
+
+    /// `Some(c)` iff this element is the rational integer `c`.
+    #[must_use]
+    pub fn as_int(&self) -> Option<i64> {
+        if self.coeffs[1..].iter().all(|&c| c == 0) {
+            Some(self.coeffs[0])
+        } else {
+            None
+        }
+    }
+
+    /// Equality against a rational integer, without constructing it.
+    #[must_use]
+    pub fn eq_int(&self, v: i64) -> bool {
+        self.as_int() == Some(v)
+    }
+
     /// Evaluate at `x` in `F_p` (Horner; negative coefficients reduced).
     #[must_use]
     pub fn eval_at(&self, x: u64, p: u64) -> u64 {
@@ -323,6 +379,74 @@ mod tests {
                 assert_eq!(x.mul(&y).unwrap(), Cyclo::monomial(32, a + b).unwrap());
             }
         }
+    }
+
+    #[test]
+    fn content_map_identities() {
+        // prod over the primitive exponents = Phi_s(1) = 2
+        let odds: Vec<usize> = (1..16).step_by(2).collect();
+        assert!(Cyclo::prod_one_minus(16, &odds).unwrap().eq_int(2));
+        // prod over ALL nonzero exponents = s
+        let all: Vec<usize> = (1..16).collect();
+        assert!(Cyclo::prod_one_minus(16, &all).unwrap().eq_int(16));
+        // the fold identity (1-z^e)(1-z^{e+s/2}) = 1-z^{2e} at s = 32
+        for e in [1usize, 3, 8, 11, 15] {
+            let lhs = Cyclo::one_minus(32, e)
+                .unwrap()
+                .mul(&Cyclo::one_minus(32, e + 16).unwrap())
+                .unwrap();
+            assert_eq!(lhs, Cyclo::one_minus(32, 2 * e).unwrap(), "e={e}");
+        }
+    }
+
+    #[test]
+    fn hand_census_at_s8() {
+        // the three-subset shell census of the counting chapter's
+        // sec:cc-census: values 2, 4 + 2*sqrt2, 4 - 2*sqrt2
+        // (sqrt2 = zeta - zeta^3 on the half-basis)
+        assert!(Cyclo::prod_one_minus(8, &[1, 3, 5, 7]).unwrap().eq_int(2));
+        assert_eq!(
+            Cyclo::prod_one_minus(8, &[2, 3, 5, 6]).unwrap(),
+            Cyclo::from_coeffs(vec![4, 2, 0, -2]).unwrap()
+        );
+        assert_eq!(
+            Cyclo::prod_one_minus(8, &[1, 2, 6, 7]).unwrap(),
+            Cyclo::from_coeffs(vec![4, -2, 0, 2]).unwrap()
+        );
+    }
+
+    #[test]
+    fn e_vector_identities() {
+        // all nonzero exponents: prod(x - z^e) = 1 + x + ... + x^{s-1},
+        // so e_j = (-1)^j
+        let all: Vec<usize> = (1..16).collect();
+        let es = Cyclo::e_vector(16, &all, 5).unwrap();
+        for (j, ej) in es.iter().enumerate() {
+            let want = if j % 2 == 0 { 1 } else { -1 };
+            assert!(ej.eq_int(want), "j={j}");
+        }
+        // Vieta: the top symmetric function is zeta^{sum of exponents}
+        let exps = [1usize, 3, 5, 7];
+        let es = Cyclo::e_vector(16, &exps, 4).unwrap();
+        assert_eq!(es[4], Cyclo::monomial(16, 16).unwrap());
+        // the alternating sum of the e-vector IS the content product
+        let mut alt = Cyclo::zero(16).unwrap();
+        for (j, ej) in es.iter().enumerate() {
+            alt = if j % 2 == 0 {
+                alt.add(ej).unwrap()
+            } else {
+                alt.sub(ej).unwrap()
+            };
+        }
+        assert_eq!(alt, Cyclo::prod_one_minus(16, &exps).unwrap());
+    }
+
+    #[test]
+    fn as_int_discriminates() {
+        assert_eq!(Cyclo::monomial(8, 0).unwrap().as_int(), Some(1));
+        assert_eq!(Cyclo::one_minus(8, 2).unwrap().as_int(), None);
+        // 1 - zeta^{s/2} = 2: the ramified generator's norm-2 witness
+        assert_eq!(Cyclo::one_minus(8, 4).unwrap().as_int(), Some(2));
     }
 
     #[test]

@@ -92,3 +92,78 @@ def test_round3_parallel_bindings():
     assert rows[89633][0] == 29382
     certs = {p: (t, m, z) for p, t, m, z in vanish.certify_many(32, 16, [89633, 65537])}
     assert certs[89633] == (3, 12870, 29382) and certs[65537][0] == 2
+
+
+def test_cyclo_content_map():
+    # the hand census at s = 8 (counting chapter, sec:cc-census):
+    # three shell sets, values 2, 4 + 2*sqrt2, 4 - 2*sqrt2
+    assert vanish.Cyclo.prod_one_minus(8, [1, 3, 5, 7]).eq_int(2)
+    assert vanish.Cyclo.prod_one_minus(8, [2, 3, 5, 6]).coeffs() == [4, 2, 0, -2]
+    assert vanish.Cyclo.prod_one_minus(8, [1, 2, 6, 7]).coeffs() == [4, -2, 0, 2]
+    # fold identity at s = 32
+    for e in (1, 3, 8, 11):
+        lhs = vanish.Cyclo.one_minus(32, e).mul(vanish.Cyclo.one_minus(32, e + 16))
+        assert lhs == vanish.Cyclo.one_minus(32, 2 * e)
+    # integer discrimination
+    assert vanish.Cyclo.one_minus(8, 4).as_int() == 2
+    assert vanish.Cyclo.one_minus(8, 2).as_int() is None
+
+
+def test_cyclo_e_vector():
+    # e_j of all nonzero exponents = (-1)^j
+    es = vanish.Cyclo.e_vector(16, list(range(1, 16)), 5)
+    for j, ej in enumerate(es):
+        assert ej.eq_int(1 if j % 2 == 0 else -1)
+    # alternating sum of the e-vector = the content product (Vieta)
+    exps = [1, 3, 5, 7]
+    es = vanish.Cyclo.e_vector(16, exps, 4)
+    alt = vanish.Cyclo([0] * 8)
+    for j, ej in enumerate(es):
+        alt = alt.add(ej) if j % 2 == 0 else alt.sub(ej)
+    assert alt == vanish.Cyclo.prod_one_minus(16, exps)
+
+
+def test_fold_units():
+    # closed form vs quotient: u_e * (1 - z^e) = 1 + z^e
+    for e in (1, 5, 8, 12):
+        u = vanish.fold_unit(32, e)
+        lhs = u.mul(vanish.Cyclo.one_minus(32, e))
+        rhs = vanish.Cyclo.monomial(32, 0).add(vanish.Cyclo.monomial(32, e))
+        assert lhs == rhs
+    # the two exact identities
+    assert vanish.fold_unit(32, 3).mul(vanish.fold_unit(32, 13)).eq_int(-1)
+    assert vanish.fold_unit(32, 8) == vanish.Cyclo.monomial(32, 8)
+    # the rank certificate at the working levels
+    for s in (16, 32, 64):
+        lo, hi, independent = vanish.foldunit_rank_certificate(s)
+        assert independent and not (lo <= 0.0 <= hi)
+
+
+def test_valuemap_census():
+    # the shell census pins (stages 49/50/54), standard prime
+    P = 2130706433
+    h1, h2 = list(range(1, 16)), list(range(17, 32))
+    total, distinct, mx, arg, sm = vanish.valuemap_census(P, 32, h1, h2, 16, 0, 1)
+    assert (total, distinct, mx, arg) == (4544445, 275247, 1250, 4)
+    assert sm == 448183873
+    assert vanish.valuemap_fiber(P, 32, h1, h2, 16, 0, 1, 4) == 1250
+    members = vanish.valuemap_fiber_members(P, 32, h1, h2, 16, 0, 1, 4, 2)
+    for m in members:
+        assert vanish.Cyclo.prod_one_minus(32, m).eq_int(4)
+
+
+def test_valuemap_distribution_and_sweep():
+    P = 2130706433
+    h1, h2 = list(range(1, 16)), list(range(17, 32))
+    hist = np.asarray(vanish.valuemap_histogram(P, 32, h1, h2, 16, 0, 1))
+    assert hist[1250] == 1 and hist.sum() == 275247
+    values, counts = vanish.valuemap_distribution(P, 32, h1, h2, 16, 0, 1)
+    values, counts = np.asarray(values), np.asarray(counts)
+    assert counts.sum() == 4544445 and counts.max() == 1250
+    assert values[counts.argmax()] == 4
+    # histogram consistent with distribution
+    assert np.array_equal(np.bincount(counts.astype(int)), hist)
+    # sweep: max fiber and argmax are p-independent (floors)
+    rows = vanish.valuemap_sweep(32, h1, h2, 16, 0, 1, [2130706433, 2113929217])
+    for p, total, distinct, mx, arg, sm in rows:
+        assert (total, mx, arg) == (4544445, 1250, 4)

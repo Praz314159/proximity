@@ -30,9 +30,11 @@
 //! a bottleneck: HEXL-style preconditioned butterflies in [`ntt`].
 
 mod cyclo;
+pub mod foldunits;
 pub mod ntt;
 
 pub use cyclo::Cyclo;
+pub use foldunits::{fold_unit, rank_certificate, RankCertificate};
 
 /// THE fold: reduce `zeta^exp` on the half-basis. Returns
 /// `(index, sign)` with `zeta^exp = sign * zeta^index`, `index < half`.

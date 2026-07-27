@@ -11,6 +11,7 @@
 
 mod census;
 mod space;
+pub mod valuemap;
 
 pub use census::exact_value_census;
 pub use space::{VsCertificate, VsSpace};

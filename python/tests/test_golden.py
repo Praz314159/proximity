@@ -92,3 +92,32 @@ def test_round3_parallel_bindings():
     assert rows[89633][0] == 29382
     certs = {p: (t, m, z) for p, t, m, z in vanish.certify_many(32, 16, [89633, 65537])}
     assert certs[89633] == (3, 12870, 29382) and certs[65537][0] == 2
+
+
+def test_cyclo_content_map():
+    # the hand census at s = 8 (counting chapter, sec:cc-census):
+    # three shell sets, values 2, 4 + 2*sqrt2, 4 - 2*sqrt2
+    assert vanish.Cyclo.prod_one_minus(8, [1, 3, 5, 7]).eq_int(2)
+    assert vanish.Cyclo.prod_one_minus(8, [2, 3, 5, 6]).coeffs() == [4, 2, 0, -2]
+    assert vanish.Cyclo.prod_one_minus(8, [1, 2, 6, 7]).coeffs() == [4, -2, 0, 2]
+    # fold identity at s = 32
+    for e in (1, 3, 8, 11):
+        lhs = vanish.Cyclo.one_minus(32, e).mul(vanish.Cyclo.one_minus(32, e + 16))
+        assert lhs == vanish.Cyclo.one_minus(32, 2 * e)
+    # integer discrimination
+    assert vanish.Cyclo.one_minus(8, 4).as_int() == 2
+    assert vanish.Cyclo.one_minus(8, 2).as_int() is None
+
+
+def test_cyclo_e_vector():
+    # e_j of all nonzero exponents = (-1)^j
+    es = vanish.Cyclo.e_vector(16, list(range(1, 16)), 5)
+    for j, ej in enumerate(es):
+        assert ej.eq_int(1 if j % 2 == 0 else -1)
+    # alternating sum of the e-vector = the content product (Vieta)
+    exps = [1, 3, 5, 7]
+    es = vanish.Cyclo.e_vector(16, exps, 4)
+    alt = vanish.Cyclo([0] * 8)
+    for j, ej in enumerate(es):
+        alt = alt.add(ej) if j % 2 == 0 else alt.sub(ej)
+    assert alt == vanish.Cyclo.prod_one_minus(16, exps)

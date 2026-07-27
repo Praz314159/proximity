@@ -623,6 +623,28 @@ impl PyCyclo {
             inner: err(crate::ring::Cyclo::monomial(s, exp))?,
         })
     }
+    /// `1 - zeta^exp` — the content map.
+    #[staticmethod]
+    fn one_minus(s: usize, exp: usize) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::one_minus(s, exp))?,
+        })
+    }
+    /// Exact `prod(1 - zeta^e)` over `exps` — the A-map value.
+    #[staticmethod]
+    fn prod_one_minus(s: usize, exps: Vec<usize>) -> PyResult<Self> {
+        Ok(PyCyclo {
+            inner: err(crate::ring::Cyclo::prod_one_minus(s, &exps))?,
+        })
+    }
+    /// Exact elementary symmetric functions `e_0..e_m` of `{zeta^e}`.
+    #[staticmethod]
+    fn e_vector(s: usize, exps: Vec<usize>, m: usize) -> PyResult<Vec<PyCyclo>> {
+        Ok(err(crate::ring::Cyclo::e_vector(s, &exps, m))?
+            .into_iter()
+            .map(|inner| PyCyclo { inner })
+            .collect())
+    }
     fn coeffs(&self) -> Vec<i64> {
         self.inner.coeffs().to_vec()
     }
@@ -689,6 +711,14 @@ impl PyCyclo {
     }
     fn is_zero(&self) -> bool {
         self.inner.is_zero()
+    }
+    /// The integer value of this element, or None if it is not rational.
+    fn as_int(&self) -> Option<i64> {
+        self.inner.as_int()
+    }
+    /// Equality against a rational integer.
+    fn eq_int(&self, v: i64) -> bool {
+        self.inner.eq_int(v)
     }
     fn __repr__(&self) -> String {
         format!("Cyclo(s={}, {:?})", self.inner.s(), self.inner.coeffs())

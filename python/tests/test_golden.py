@@ -137,3 +137,16 @@ def test_fold_units():
     for s in (16, 32, 64):
         lo, hi, independent = vanish.foldunit_rank_certificate(s)
         assert independent and not (lo <= 0.0 <= hi)
+
+
+def test_valuemap_census():
+    # the shell census pins (stages 49/50/54), standard prime
+    P = 2130706433
+    h1, h2 = list(range(1, 16)), list(range(17, 32))
+    total, distinct, mx, arg, sm = vanish.valuemap_census(P, 32, h1, h2, 16, 0, 1)
+    assert (total, distinct, mx, arg) == (4544445, 275247, 1250, 4)
+    assert sm == 448183873
+    assert vanish.valuemap_fiber(P, 32, h1, h2, 16, 0, 1, 4) == 1250
+    members = vanish.valuemap_fiber_members(P, 32, h1, h2, 16, 0, 1, 4, 2)
+    for m in members:
+        assert vanish.Cyclo.prod_one_minus(32, m).eq_int(4)

@@ -734,6 +734,76 @@ impl PyCyclo {
     }
 }
 
+/// MITM value-map census: `(total, distinct, max_fiber, argmax,
+/// second_moment)` of `prod(point - dom[e])` over `size`-subsets of
+/// `h1 + h2` with exponent sum = `class` (mod level). The collision
+/// count is `second_moment`.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_census(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+) -> PyResult<(u64, u64, u64, u64, u128)> {
+    let c = err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::join_census(&a, &b, size, class, p)
+    }))?;
+    Ok((c.total, c.distinct, c.max_fiber, c.argmax, c.second_moment))
+}
+
+/// The fiber size of one target value in the MITM value-map census.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_fiber(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+    value: u64,
+) -> PyResult<u64> {
+    err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::fiber_count(&a, &b, size, class, p, value)
+    }))
+}
+
+/// Members of one fiber as sorted exponent lists (up to `cap`).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn valuemap_fiber_members(
+    py: Python<'_>,
+    p: u64,
+    level: usize,
+    h1: Vec<usize>,
+    h2: Vec<usize>,
+    size: usize,
+    class: usize,
+    point: u64,
+    value: u64,
+    cap: usize,
+) -> PyResult<Vec<Vec<usize>>> {
+    err(py.allow_threads(|| {
+        let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
+        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::vs::valuemap::fiber_members(&a, &b, size, class, p, value, cap)
+    }))
+}
+
 /// The fold unit `u_e = (1 + zeta^e)/(1 - zeta^e)` as an exact ring
 /// element (closed form; the descent calculus's bookkeeping currency).
 #[pyfunction]
@@ -1006,6 +1076,9 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
     m.add_class::<PyCyclo>()?;
+    m.add_function(wrap_pyfunction!(valuemap_census, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_fiber, m)?)?;
+    m.add_function(wrap_pyfunction!(valuemap_fiber_members, m)?)?;
     m.add_function(wrap_pyfunction!(fold_unit, m)?)?;
     m.add_function(wrap_pyfunction!(foldunit_rank_certificate, m)?)?;
     m.add_function(wrap_pyfunction!(fold, m)?)?;

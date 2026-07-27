@@ -95,12 +95,15 @@ pub struct CensusSummary {
     pub second_moment: u128,
 }
 
+/// One `(size, sigma)` group of a half table: products and masks.
+type Group = (Vec<u64>, Vec<u32>);
+
 fn matched_pairs<'t>(
     a: &'t HalfTable,
     b: &'t HalfTable,
     size: usize,
     class: usize,
-) -> Result<Vec<(&'t (Vec<u64>, Vec<u32>), &'t (Vec<u64>, Vec<u32>))>> {
+) -> Result<Vec<(&'t Group, &'t Group)>> {
     if a.level != b.level {
         return Err(Error::OutOfRange("mismatched levels".into()));
     }

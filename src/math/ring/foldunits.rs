@@ -100,12 +100,6 @@ impl Iv {
             hi: next_up(x + slack),
         }
     }
-    fn add(self, o: Iv) -> Iv {
-        Iv {
-            lo: next_down(self.lo + o.lo),
-            hi: next_up(self.hi + o.hi),
-        }
-    }
     fn sub(self, o: Iv) -> Iv {
         Iv {
             lo: next_down(self.lo - o.hi),
@@ -212,14 +206,14 @@ pub fn rank_certificate(s: usize) -> Result<RankCertificate> {
             });
         }
         det = det.mul(p);
-        for row in (col + 1)..k {
-            let factor = match m[row][col].div(p) {
+        let pivot_row = m[col].clone();
+        for row_vec in m.iter_mut().skip(col + 1) {
+            let factor = match row_vec[col].div(p) {
                 Some(f) => f,
                 None => unreachable!("pivot excludes zero"),
             };
-            for c2 in col..k {
-                let sub = factor.mul(m[col][c2]);
-                m[row][c2] = m[row][c2].sub(sub);
+            for (dst, &src) in row_vec[col..].iter_mut().zip(&pivot_row[col..]) {
+                *dst = dst.sub(factor.mul(src));
             }
         }
     }
@@ -265,10 +259,7 @@ mod tests {
             assert!(prod.eq_int(-1), "e={e}");
         }
         // u_{s/4} = zeta^{s/4} (pure torsion)
-        assert_eq!(
-            fold_unit(32, 8).unwrap(),
-            Cyclo::monomial(32, 8).unwrap()
-        );
+        assert_eq!(fold_unit(32, 8).unwrap(), Cyclo::monomial(32, 8).unwrap());
     }
 
     #[test]
@@ -294,10 +285,7 @@ mod tests {
             assert!(cert.independent, "s={s}: {cert:?}");
             let width = cert.det_hi - cert.det_lo;
             let scale = cert.det_lo.abs().max(cert.det_hi.abs());
-            assert!(
-                width < 1e-3 * scale,
-                "s={s}: interval too wide: {cert:?}"
-            );
+            assert!(width < 1e-3 * scale, "s={s}: interval too wide: {cert:?}");
         }
     }
 }

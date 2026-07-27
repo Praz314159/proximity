@@ -827,6 +827,9 @@ fn valuemap_histogram(
     Ok(h.into_pyarray_bound(py).into())
 }
 
+/// A pair of u64 arrays (values, multiplicities).
+type U64ArrayPair = (Py<PyArray1<u64>>, Py<PyArray1<u64>>);
+
 /// Value-resolved MITM census: `(values, multiplicities)` sorted by
 /// value — the input of the spectrum pipeline and per-value figures.
 #[pyfunction]
@@ -840,7 +843,7 @@ fn valuemap_distribution(
     size: usize,
     class: usize,
     point: u64,
-) -> PyResult<(Py<PyArray1<u64>>, Py<PyArray1<u64>>)> {
+) -> PyResult<U64ArrayPair> {
     let (v, c) = err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
         let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
@@ -880,7 +883,14 @@ fn valuemap_sweep(
                 let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
                 let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
                 let c = crate::vs::valuemap::join_census(&a, &b, size, class, p)?;
-                Ok((p, c.total, c.distinct, c.max_fiber, c.argmax, c.second_moment))
+                Ok((
+                    p,
+                    c.total,
+                    c.distinct,
+                    c.max_fiber,
+                    c.argmax,
+                    c.second_moment,
+                ))
             })
             .collect::<crate::Result<Vec<_>>>()
     })

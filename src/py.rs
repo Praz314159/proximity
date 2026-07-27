@@ -734,6 +734,24 @@ impl PyCyclo {
     }
 }
 
+/// The fold unit `u_e = (1 + zeta^e)/(1 - zeta^e)` as an exact ring
+/// element (closed form; the descent calculus's bookkeeping currency).
+#[pyfunction]
+fn fold_unit(s: usize, e: usize) -> PyResult<PyCyclo> {
+    Ok(PyCyclo {
+        inner: err(crate::ring::fold_unit(s, e))?,
+    })
+}
+
+/// Certified multiplicative independence (mod torsion) of the free
+/// fold units at level `s`: `(det_lo, det_hi, independent)` from the
+/// interval-arithmetic determinant of the log-embedding matrix.
+#[pyfunction]
+fn foldunit_rank_certificate(s: usize) -> PyResult<(f64, f64, bool)> {
+    let c = err(crate::ring::rank_certificate(s))?;
+    Ok((c.det_lo, c.det_hi, c.independent))
+}
+
 /// Batch `N(v) mod p` over many half-basis coefficient vectors (one
 /// shared subgroup construction, rayon-parallel): the extremal-norm
 /// campaign workhorse.
@@ -988,6 +1006,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(top_word, m)?)?;
     m.add_function(wrap_pyfunction!(word_from_syndrome, m)?)?;
     m.add_class::<PyCyclo>()?;
+    m.add_function(wrap_pyfunction!(fold_unit, m)?)?;
+    m.add_function(wrap_pyfunction!(foldunit_rank_certificate, m)?)?;
     m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;

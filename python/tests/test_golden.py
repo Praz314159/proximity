@@ -121,3 +121,19 @@ def test_cyclo_e_vector():
     for j, ej in enumerate(es):
         alt = alt.add(ej) if j % 2 == 0 else alt.sub(ej)
     assert alt == vanish.Cyclo.prod_one_minus(16, exps)
+
+
+def test_fold_units():
+    # closed form vs quotient: u_e * (1 - z^e) = 1 + z^e
+    for e in (1, 5, 8, 12):
+        u = vanish.fold_unit(32, e)
+        lhs = u.mul(vanish.Cyclo.one_minus(32, e))
+        rhs = vanish.Cyclo.monomial(32, 0).add(vanish.Cyclo.monomial(32, e))
+        assert lhs == rhs
+    # the two exact identities
+    assert vanish.fold_unit(32, 3).mul(vanish.fold_unit(32, 13)).eq_int(-1)
+    assert vanish.fold_unit(32, 8) == vanish.Cyclo.monomial(32, 8)
+    # the rank certificate at the working levels
+    for s in (16, 32, 64):
+        lo, hi, independent = vanish.foldunit_rank_certificate(s)
+        assert independent and not (lo <= 0.0 <= hi)

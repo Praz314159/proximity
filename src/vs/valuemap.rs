@@ -124,16 +124,17 @@ fn matched_pairs<'t>(
     Ok(out)
 }
 
-/// Join two half tables under `(size, sum class)` and reduce to fiber
-/// statistics. Rayon-parallel; memory is one `u64` per ensemble
-/// member.
-pub fn join_census(
+/// The full value-resolved census: `(distinct values sorted,
+/// multiplicities)` — the data every distribution figure and the
+/// character-spectrum pipeline consume. Rayon-parallel; memory is
+/// one `u64` per ensemble member plus the output.
+pub fn join_distribution(
     a: &HalfTable,
     b: &HalfTable,
     size: usize,
     class: usize,
     p: u64,
-) -> Result<CensusSummary> {
+) -> Result<(Vec<u64>, Vec<u64>)> {
     let pairs = matched_pairs(a, b, size, class)?;
     let mut vals: Vec<u64> = pairs
         .par_iter()
@@ -144,9 +145,8 @@ pub fn join_census(
         })
         .collect();
     vals.par_sort_unstable();
-    let total = vals.len() as u64;
-    let (mut distinct, mut max_fiber, mut argmax) = (0u64, 0u64, 0u64);
-    let mut second_moment = 0u128;
+    let mut values = Vec::new();
+    let mut counts = Vec::new();
     let mut i = 0usize;
     while i < vals.len() {
         let v = vals[i];
@@ -154,18 +154,56 @@ pub fn join_census(
         while j < vals.len() && vals[j] == v {
             j += 1;
         }
-        let f = (j - i) as u64;
-        distinct += 1;
+        values.push(v);
+        counts.push((j - i) as u64);
+        i = j;
+    }
+    Ok((values, counts))
+}
+
+/// The fiber-size histogram: `out[k]` = number of values with fiber
+/// size exactly `k` (index 0 unused). The lightest full-shape output
+/// for sweeps and CCDF figures.
+pub fn join_histogram(
+    a: &HalfTable,
+    b: &HalfTable,
+    size: usize,
+    class: usize,
+    p: u64,
+) -> Result<Vec<u64>> {
+    let (_, counts) = join_distribution(a, b, size, class, p)?;
+    let max = counts.iter().copied().max().unwrap_or(0) as usize;
+    let mut hist = vec![0u64; max + 1];
+    for &c in &counts {
+        hist[c as usize] += 1;
+    }
+    Ok(hist)
+}
+
+/// Join two half tables under `(size, sum class)` and reduce to fiber
+/// statistics.
+pub fn join_census(
+    a: &HalfTable,
+    b: &HalfTable,
+    size: usize,
+    class: usize,
+    p: u64,
+) -> Result<CensusSummary> {
+    let (values, counts) = join_distribution(a, b, size, class, p)?;
+    let mut total = 0u64;
+    let (mut max_fiber, mut argmax) = (0u64, 0u64);
+    let mut second_moment = 0u128;
+    for (&v, &f) in values.iter().zip(&counts) {
+        total += f;
         second_moment += (f as u128) * (f as u128);
         if f > max_fiber {
             max_fiber = f;
             argmax = v;
         }
-        i = j;
     }
     Ok(CensusSummary {
         total,
-        distinct,
+        distinct: values.len() as u64,
         max_fiber,
         argmax,
         second_moment,
@@ -270,6 +308,22 @@ mod tests {
         assert_eq!(c.argmax, 4);
         assert_eq!(c.second_moment, 448_183_873);
         assert_eq!(fiber_count(&a, &b, 16, 0, P, 4).unwrap(), 1_250);
+
+        // distribution and histogram agree with the summary exactly
+        let (values, counts) = join_distribution(&a, &b, 16, 0, P).unwrap();
+        assert_eq!(values.len() as u64, c.distinct);
+        assert_eq!(counts.iter().sum::<u64>(), c.total);
+        let hist = join_histogram(&a, &b, 16, 0, P).unwrap();
+        assert_eq!(hist.len(), 1_251);
+        assert_eq!(hist[1_250], 1);
+        assert_eq!(hist.iter().sum::<u64>(), c.distinct);
+        assert_eq!(
+            hist.iter()
+                .enumerate()
+                .map(|(k, &n)| (k as u128) * (k as u128) * (n as u128))
+                .sum::<u128>(),
+            c.second_moment
+        );
 
         // glue: a fiber member verifies exactly in Z[zeta_32]
         let members = fiber_members(&a, &b, 16, 0, P, 4, 3).unwrap();

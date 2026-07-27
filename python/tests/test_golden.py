@@ -150,3 +150,20 @@ def test_valuemap_census():
     members = vanish.valuemap_fiber_members(P, 32, h1, h2, 16, 0, 1, 4, 2)
     for m in members:
         assert vanish.Cyclo.prod_one_minus(32, m).eq_int(4)
+
+
+def test_valuemap_distribution_and_sweep():
+    P = 2130706433
+    h1, h2 = list(range(1, 16)), list(range(17, 32))
+    hist = np.asarray(vanish.valuemap_histogram(P, 32, h1, h2, 16, 0, 1))
+    assert hist[1250] == 1 and hist.sum() == 275247
+    values, counts = vanish.valuemap_distribution(P, 32, h1, h2, 16, 0, 1)
+    values, counts = np.asarray(values), np.asarray(counts)
+    assert counts.sum() == 4544445 and counts.max() == 1250
+    assert values[counts.argmax()] == 4
+    # histogram consistent with distribution
+    assert np.array_equal(np.bincount(counts.astype(int)), hist)
+    # sweep: max fiber and argmax are p-independent (floors)
+    rows = vanish.valuemap_sweep(32, h1, h2, 16, 0, 1, [2130706433, 2113929217])
+    for p, total, distinct, mx, arg, sm in rows:
+        assert (total, mx, arg) == (4544445, 1250, 4)

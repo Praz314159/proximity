@@ -226,6 +226,24 @@ def valuemap_census(
 ) -> Tuple[int, int, int, int, int]:
     """(total, distinct, max_fiber, argmax, second_moment) of the MITM census."""
 
+def valuemap_histogram(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int,
+) -> npt.NDArray[np.uint64]:
+    """Fiber-size histogram: out[k] = number of values with fiber size k."""
+
+def valuemap_distribution(
+    p: int, level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int,
+) -> Tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint64]]:
+    """(values, multiplicities), sorted by value."""
+
+def valuemap_sweep(
+    level: int, h1: List[int], h2: List[int],
+    size: int, class_: int, point: int, primes: List[int],
+) -> List[Tuple[int, int, int, int, int, int]]:
+    """Parallel prime sweep: rows (p, total, distinct, max, argmax, second_moment)."""
+
 def valuemap_fiber(
     p: int, level: int, h1: List[int], h2: List[int],
     size: int, class_: int, point: int, value: int,

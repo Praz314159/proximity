@@ -897,6 +897,22 @@ fn valuemap_sweep(
     .map_err(to_py)
 }
 
+/// Exact skeleton-DP totals of the G1 census at `level` (32 or 64):
+/// `(window, budget_pairs, budget_skeletons)`.
+#[pyfunction]
+fn skeleton_totals(py: Python<'_>, level: usize) -> PyResult<(u128, u128, u128)> {
+    err(py.allow_threads(|| crate::vs::skeleton::skeleton_totals(level)))
+}
+
+/// The exact G1-criterion census at `level` (32 or 64) via the MITM
+/// join: `(m1_pairs, m2_pairs, solvable_pairs, solutions)`. Level 64
+/// is a minutes-scale many-core computation (S4: 262s on 252 threads).
+#[pyfunction]
+fn skeleton_census(py: Python<'_>, level: usize) -> PyResult<(u64, u64, u64, u64)> {
+    let c = err(py.allow_threads(|| crate::vs::skeleton::skeleton_census(level)))?;
+    Ok((c.m1_pairs, c.m2_pairs, c.solvable_pairs, c.solutions))
+}
+
 /// The fold unit `u_e = (1 + zeta^e)/(1 - zeta^e)` as an exact ring
 /// element (closed form; the descent calculus's bookkeeping currency).
 #[pyfunction]
@@ -1173,6 +1189,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(valuemap_histogram, m)?)?;
     m.add_function(wrap_pyfunction!(valuemap_distribution, m)?)?;
     m.add_function(wrap_pyfunction!(valuemap_sweep, m)?)?;
+    m.add_function(wrap_pyfunction!(skeleton_totals, m)?)?;
+    m.add_function(wrap_pyfunction!(skeleton_census, m)?)?;
     m.add_function(wrap_pyfunction!(valuemap_fiber, m)?)?;
     m.add_function(wrap_pyfunction!(valuemap_fiber_members, m)?)?;
     m.add_function(wrap_pyfunction!(fold_unit, m)?)?;

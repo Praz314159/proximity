@@ -256,6 +256,15 @@ def valuemap_fiber_members(
 ) -> List[List[int]]:
     """Members of one fiber as sorted exponent lists (up to cap)."""
 
+def skeleton_totals(level: int) -> Tuple[int, int, int]:
+    """Exact G1 skeleton-DP totals at level 32 or 64:
+    (window, budget_pairs, budget_skeletons)."""
+
+def skeleton_census(level: int) -> Tuple[int, int, int, int]:
+    """Exact G1-criterion census at level 32 or 64 via the MITM join:
+    (m1_pairs, m2_pairs, solvable_pairs, solutions). Level 64 is a
+    minutes-scale many-core run (S4: 262s on 252 threads)."""
+
 class VsSpace:
     """The vanishing-syndrome geometry VS(s, k) on mu_s in F_p — the dual
     (quotient) view of RS[F_p, mu_s, k]. Convention authority: domain =

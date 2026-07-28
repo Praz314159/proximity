@@ -17,9 +17,9 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::process::exit;
+use vanish::census::buckets::{dp, mitm};
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::binom;
-use vanish::smooth::buckets::{dp, mitm};
 use vanish::smooth::rung::{m_struct, rung_lambda};
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
@@ -115,9 +115,9 @@ fn main() {
             let sg = MultiplicativeSubgroup::new(p, s).unwrap_or_else(|e| die(e));
             let counts = if let Some(w) = m.get("wmax") {
                 let wmax: usize = w.parse().unwrap_or_else(|_| die("bad --wmax"));
-                vanish::smooth::census::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
+                vanish::census::kernel::direct(&sg, cmax, wmax).unwrap_or_else(|e| die(e))
             } else {
-                vanish::smooth::census::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
+                vanish::census::kernel::mitm(&sg, cmax).unwrap_or_else(|e| die(e))
             };
             for (w, c) in counts.iter().enumerate() {
                 if *c > 0 {

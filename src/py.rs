@@ -6,11 +6,11 @@
 // false positive at this expansion site.
 #![allow(clippy::useless_conversion)]
 
+use crate::census::buckets::{dp, mitm};
 use crate::domain::MultiplicativeSubgroup;
 use crate::rs::code;
-use crate::smooth::buckets::{dp, mitm};
 use crate::smooth::rung;
-use crate::{field, smooth::census};
+use crate::{census::kernel, field};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::exceptions::{PyIOError, PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
@@ -752,9 +752,9 @@ fn valuemap_census(
 ) -> PyResult<(u64, u64, u64, u64, u128)> {
     let c = err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-        crate::vs::valuemap::join_census(&a, &b, size, class, p)
+        let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::census::valuemap::join_census(&a, &b, size, class, p)
     }))?;
     Ok((c.total, c.distinct, c.max_fiber, c.argmax, c.second_moment))
 }
@@ -775,9 +775,9 @@ fn valuemap_fiber(
 ) -> PyResult<u64> {
     err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-        crate::vs::valuemap::fiber_count(&a, &b, size, class, p, value)
+        let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::census::valuemap::fiber_count(&a, &b, size, class, p, value)
     }))
 }
 
@@ -798,9 +798,9 @@ fn valuemap_fiber_members(
 ) -> PyResult<Vec<Vec<usize>>> {
     err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-        crate::vs::valuemap::fiber_members(&a, &b, size, class, p, value, cap)
+        let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::census::valuemap::fiber_members(&a, &b, size, class, p, value, cap)
     }))
 }
 
@@ -820,9 +820,9 @@ fn valuemap_histogram(
 ) -> PyResult<Py<PyArray1<u64>>> {
     let h = err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-        crate::vs::valuemap::join_histogram(&a, &b, size, class, p)
+        let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::census::valuemap::join_histogram(&a, &b, size, class, p)
     }))?;
     Ok(h.into_pyarray_bound(py).into())
 }
@@ -846,9 +846,9 @@ fn valuemap_distribution(
 ) -> PyResult<U64ArrayPair> {
     let (v, c) = err(py.allow_threads(|| {
         let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-        let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-        let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-        crate::vs::valuemap::join_distribution(&a, &b, size, class, p)
+        let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+        let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+        crate::census::valuemap::join_distribution(&a, &b, size, class, p)
     }))?;
     Ok((
         v.into_pyarray_bound(py).into(),
@@ -880,9 +880,9 @@ fn valuemap_sweep(
             .par_iter()
             .map(|&p| {
                 let dom = MultiplicativeSubgroup::new(p, level)?.elements().to_vec();
-                let a = crate::vs::valuemap::half_table(&dom, &h1, level, point, p)?;
-                let b = crate::vs::valuemap::half_table(&dom, &h2, level, point, p)?;
-                let c = crate::vs::valuemap::join_census(&a, &b, size, class, p)?;
+                let a = crate::census::valuemap::half_table(&dom, &h1, level, point, p)?;
+                let b = crate::census::valuemap::half_table(&dom, &h2, level, point, p)?;
+                let c = crate::census::valuemap::join_census(&a, &b, size, class, p)?;
                 Ok((
                     p,
                     c.total,
@@ -901,7 +901,7 @@ fn valuemap_sweep(
 /// `(window, budget_pairs, budget_skeletons)`.
 #[pyfunction]
 fn skeleton_totals(py: Python<'_>, level: usize) -> PyResult<(u128, u128, u128)> {
-    err(py.allow_threads(|| crate::vs::skeleton::skeleton_totals(level)))
+    err(py.allow_threads(|| crate::census::skeleton::skeleton_totals(level)))
 }
 
 /// The exact G1-criterion census at `level` (32 or 64) via the MITM
@@ -909,7 +909,7 @@ fn skeleton_totals(py: Python<'_>, level: usize) -> PyResult<(u128, u128, u128)>
 /// is a minutes-scale many-core computation (S4: 262s on 252 threads).
 #[pyfunction]
 fn skeleton_census(py: Python<'_>, level: usize) -> PyResult<(u64, u64, u64, u64)> {
-    let c = err(py.allow_threads(|| crate::vs::skeleton::skeleton_census(level)))?;
+    let c = err(py.allow_threads(|| crate::census::skeleton::skeleton_census(level)))?;
     Ok((c.m1_pairs, c.m2_pairs, c.solvable_pairs, c.solutions))
 }
 
@@ -948,7 +948,7 @@ fn norms_mod_batch(py: Python<'_>, coeffs: Vec<Vec<i64>>, p: u64, s: usize) -> P
 /// L^2 census; integer-exact, no field involved.
 #[pyfunction]
 fn exact_value_census(s: usize, r: usize, coord: usize) -> PyResult<(u64, u64, Vec<u64>)> {
-    err(crate::vs::exact_value_census(s, r, coord))
+    err(crate::census::exact_value_census(s, r, coord))
 }
 
 /// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.

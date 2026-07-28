@@ -10,7 +10,7 @@
 //!
 //! Generic over the evaluation domain — nothing here depends on the
 //! multiplicative-subgroup structure; it decodes `RS[F_p, D, k]` for any domain
-//! `D`. The exactness bridge to [`crate::smooth::buckets`] (decode a C.5 word, check its
+//! `D`. The exactness bridge to [`crate::census::buckets`] (decode a C.5 word, check its
 //! size equals the counted bucket) is validated in the tests, on a subgroup
 //! domain where buckets are defined.
 //!
@@ -386,7 +386,7 @@ mod tests {
     /// the count axis must agree on it.
     #[test]
     fn exactness_bridge_s16() {
-        use crate::smooth::buckets::mitm::HalfTables;
+        use crate::census::buckets::mitm::HalfTables;
         let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
         let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap(); // k = r - q = 7
         let f = rs.c5_word(8, &[0]).unwrap();

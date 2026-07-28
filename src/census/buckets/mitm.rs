@@ -163,8 +163,8 @@ pub fn decompose_bucket_q1(
     let half = s / 2;
     let pows = sg.pow_table(half);
     let hh = half / 2;
-    let a = crate::smooth::census::kernel_side(&pows, p, 1, 0, hh);
-    let b = crate::smooth::census::kernel_side(&pows, p, 1, hh, half);
+    let a = crate::census::kernel::kernel_side(&pows, p, 1, 0, hh);
+    let b = crate::census::kernel::kernel_side(&pows, p, 1, hh, half);
     let mut per_weight = vec![0u64; half + 1];
     let mut total = 0u64;
     for (val, wsb) in &b {

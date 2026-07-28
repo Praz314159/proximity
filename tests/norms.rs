@@ -2,8 +2,8 @@
 //! s = 32 landscape (exp22b/exp24/exp27 reference data) and cross-checked
 //! against the independent decomposition engine.
 
+use vanish::census::buckets::mitm::decompose_bucket_q1;
 use vanish::domain::MultiplicativeSubgroup;
-use vanish::smooth::buckets::mitm::decompose_bucket_q1;
 use vanish::smooth::norms::{bad_set, norm_table};
 use vanish::smooth::rung::class_size;
 

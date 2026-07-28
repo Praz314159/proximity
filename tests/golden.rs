@@ -4,17 +4,17 @@
 //! Optimization passes and refactors must keep this suite green; new kernels
 //! must add their own pins. See CONTRIBUTING.md.
 
+use vanish::census::buckets::{dp, mitm};
+use vanish::census::kernel as census;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, factor, is_prime};
-use vanish::smooth::buckets::{dp, mitm};
-use vanish::smooth::census;
 use vanish::smooth::rung::{class_size, m_struct, rung_lambda};
 
 fn sg(p: u64, s: usize) -> MultiplicativeSubgroup {
     MultiplicativeSubgroup::new(p, s).unwrap()
 }
 
-fn mass_check(dist: &vanish::smooth::buckets::BucketDistribution, s: u64, r: u64) {
+fn mass_check(dist: &vanish::census::buckets::BucketDistribution, s: u64, r: u64) {
     assert_eq!(dist.total(), binom(s, r), "total mass must be C(s, r)");
 }
 
@@ -281,12 +281,12 @@ fn coverage_review_gaps() {
     assert_eq!(cl.center().len(), 16);
 
     // MitM signed round-trip is the identity on e-values.
-    use vanish::smooth::buckets::mitm::HalfTables;
+    use vanish::census::buckets::mitm::HalfTables;
     let lam = vec![5u64, 65530, 0];
     assert_eq!(HalfTables::signed_roundtrip(&lam, 65537), lam);
 
     // second moment: sum of squares of the q=1 distribution, exactly.
-    use vanish::smooth::buckets::dp;
+    use vanish::census::buckets::dp;
     let d = dp::distribution_q1(&sg(17, 16), 8).unwrap();
     let manual: u128 = d.values().iter().map(|&v| (v as u128) * (v as u128)).sum();
     assert_eq!(d.second_moment(), manual);

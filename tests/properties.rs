@@ -2,11 +2,11 @@
 //! These complement the golden pins: invariants that must hold at *every*
 //! parameter point, checked across a pseudo-random sample of valid ones.
 
+use vanish::census::buckets::{dp, mitm};
+use vanish::census::kernel as census;
 use vanish::domain::MultiplicativeSubgroup;
 use vanish::field::{binom, is_prime};
 use vanish::rs::code::ReedSolomon;
-use vanish::smooth::buckets::{dp, mitm};
-use vanish::smooth::census;
 use vanish::Error;
 
 /// Tiny deterministic LCG so the sample is reproducible without dependencies.

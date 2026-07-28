@@ -1,4 +1,4 @@
-//! `vs::valuemap` — the meet-in-the-middle value-map census kernel.
+//! `census::valuemap` — the meet-in-the-middle value-map census kernel.
 //!
 //! The workhorse behind the shell and rung censuses (stages 49/50/54,
 //! the four rung computations, the collision instruments): subset

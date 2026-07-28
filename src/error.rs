@@ -49,6 +49,11 @@ pub enum Error {
     /// message locates the defect (byte offset for JSON).
     #[error("malformed ingest input: {0}")]
     MalformedInput(String),
+    /// An internal cross-verification failed (e.g. a multi-prime
+    /// unanimity check): a kernel defect or a vanishing-probability
+    /// collision, never bad input.
+    #[error("verification failed: {0}")]
+    Verification(String),
 }
 
 /// Convenience alias used across the crate.

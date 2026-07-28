@@ -167,3 +167,14 @@ def test_valuemap_distribution_and_sweep():
     rows = vanish.valuemap_sweep(32, h1, h2, 16, 0, 1, [2130706433, 2113929217])
     for p, total, distinct, mx, arg, sm in rows:
         assert (total, mx, arg) == (4544445, 1250, 4)
+
+
+def test_skeleton_census():
+    # G1 skeleton kernel: S3/S4-certified golden pins (2026-07-28).
+    assert vanish.skeleton_totals(32) == (3492117, 356588, 178304)
+    assert vanish.skeleton_totals(64) == (
+        106495542464222, 3049510275016, 1524755137544)
+    m1, m2, solvable, sols = vanish.skeleton_census(32)
+    assert (m1, m2, solvable) == (31788, 20288, 15564)
+    # the stage-67-certified counting instrument: |solutions(32)| exactly
+    assert sols == 26084

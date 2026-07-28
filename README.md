@@ -114,7 +114,9 @@ the MitM engines answer single-bucket questions in milliseconds at any `p`.
 
 `cargo test --release` runs the golden + property suite: pinned
 exhaustively-verified values (bucket maxima at 12 primes, joint-grid extrema,
-censuses, rung buckets through q=8, a to-the-unit bucket decomposition) plus
+censuses, rung buckets through q=8, a to-the-unit bucket decomposition, the
+G1 skeleton-census pins at levels 32/64 — `vs::skeleton`, whose level-64
+census reproduced the pod-measured `N(128) = 3,758,482,820` exactly) plus
 invariants (mass = `C(s,r)`, dilation symmetry, DP↔MitM agreement). CI enforces
 fmt, clippy `-D warnings`, the suite, CLI smoke tests, and Python-binding
 parity on every push. The contract for new kernels is in

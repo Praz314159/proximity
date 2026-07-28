@@ -62,10 +62,12 @@ Layers, bottom-up (each depends only on those below); this mirrors the
   any evaluation domain: `code` (the code, C.5 words), `decode` (exact and
   sampled list decoding), `cluster` (pencil seeds, greedy/anneal search),
   `classify` (graded structure profiles), `moments` (the moment cloud and
-  syndrome-cut kernels), `linalg` (dense F_p linear algebra). No subgroup
-  structure leaks in here.
-- `smooth/` — the smooth-subgroup program: `buckets` (DP and MitM engines),
-  `rung` (ladder combinatorics, rung/theorem words), `census`, `norms`
+  syndrome-cut kernels), `linalg` (dense F_p linear algebra). `vs` (the dual/quotient view:
+  VsSpace, the convention authority). No subgroup structure leaks in here.
+- `census/` — every counting kernel: `buckets` (DP and MitM engines),
+  `kernel`, `value`, `valuemap`, `skeleton`, and the shared `join` layer
+- `smooth/` — the smooth-subgroup program:
+  `rung` (ladder combinatorics, rung/theorem words), `norms`
   (+ `norms::ingest`), `certify`.
 - Applications: `toy` (Section-6 soundness), `attack` (threshold calculator),
   and the `py` bindings.

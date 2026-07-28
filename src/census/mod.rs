@@ -21,9 +21,11 @@
 //! configuration space) incrementally, bucket it by a *key*, and join
 //! each side entry against the *complementary* key of the target. The
 //! sides and complement laws are algebra-specific (subsets with
-//! products, coefficient vectors with sums, slot codes with addresses).
+//! products, coefficient vectors with sums, slot codes with addresses);
+//! the keyed-table layer they share is [`join`].
 
 pub mod buckets;
+pub mod join;
 pub mod kernel;
 pub mod skeleton;
 pub mod value;

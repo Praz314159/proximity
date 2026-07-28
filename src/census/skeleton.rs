@@ -39,6 +39,7 @@
 //! The Python mirror is `experiments/landscape/probes/`
 //! (`probe_membership.py` / `probe_n128_sample.py`).
 
+use crate::census::join::SortedMultiMap;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::mulmod;
@@ -382,8 +383,8 @@ fn pack_key(t: usize, pbar: u32, vs: i64, used: i64, m8mod: &[u8]) -> u128 {
     key
 }
 
-struct AEntry {
-    key: u128,
+/// Payload of one A-side entry in the join table.
+struct ASide {
     m8: [i16; MAXK],
     hmask: u64,
     pmask: u64,
@@ -441,24 +442,25 @@ fn eval_side(par: &Par, slots: &[usize], code: usize) -> SideState {
     s
 }
 
-fn build_a_table(par: &Par, slots: &[usize]) -> Vec<AEntry> {
+fn build_a_table(par: &Par, slots: &[usize]) -> SortedMultiMap<u128, ASide> {
     let n: usize = 3usize.pow(slots.len() as u32);
-    let mut tab = Vec::with_capacity(n);
+    let mut rows = Vec::with_capacity(n);
     for code in 0..n {
         let s = eval_side(par, slots, code);
         let mut m8mod = [0u8; MAXK];
         for (i, mm) in m8mod.iter_mut().enumerate().take(par.k) {
             *mm = s.m8[i].rem_euclid(8) as u8;
         }
-        tab.push(AEntry {
-            key: pack_key(s.t, s.pbar, s.vs, s.used, &m8mod[..par.k]),
-            m8: s.m8,
-            hmask: s.hmask,
-            pmask: s.pmask,
-        });
+        rows.push((
+            pack_key(s.t, s.pbar, s.vs, s.used, &m8mod[..par.k]),
+            ASide {
+                m8: s.m8,
+                hmask: s.hmask,
+                pmask: s.pmask,
+            },
+        ));
     }
-    tab.sort_unstable_by_key(|e| e.key);
-    tab
+    SortedMultiMap::new(rows)
 }
 
 // -------------------------------------------------------- realizations
@@ -670,10 +672,7 @@ pub fn skeleton_census(level: usize) -> Result<SkeletonCensus> {
                         *rq = (-(b.m8[i] as i32 + c.leaf[i] as i32)).rem_euclid(8) as u8;
                     }
                     let key = pack_key(t_a, pbar_a, vs_a, used_a, &req[..par.k]);
-                    let mut ix = atab.partition_point(|e| e.key < key);
-                    while ix < atab.len() && atab[ix].key == key {
-                        let a = &atab[ix];
-                        ix += 1;
+                    for a in atab.get(&key) {
                         m1 += 1;
                         let mut m = [0i32; MAXK];
                         for (i, mv) in m.iter_mut().enumerate().take(par.k) {

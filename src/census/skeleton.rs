@@ -14,8 +14,9 @@
 //!    with a *linear* fold-lattice address `m = sum n_j alpha_j`; the
 //!    `alpha_j` are exactly rational with denominator dividing 8
 //!    (the `max(1, ord/8)` law), so `8 alpha` is an integer table
-//!    (embedded below) and M1 is a congruence mod 8, carried
-//!    additively.
+//!    and M1 is a congruence mod 8, carried additively; the tables
+//!    are derived and certified at construction by
+//!    [`crate::ring::foldunits::alpha_certificate`].
 //! 3. **M2** (box): integral addresses must land in the sign box
 //!    determined by the half-slot pattern.
 //! 4. **M3** (realization): the surviving side vectors are checked
@@ -33,9 +34,10 @@
 //! the level-32 census (26,084) exactly and predicted the level-64
 //! census `N(128) = 3,758,482,820` in exact agreement with the
 //! pod-measured ground truth (S4 campaign, 2026-07-28, dataset
-//! `s4-n128-census`). The embedded `8 alpha` tables were exported
-//! from the certified-rank log-embedding solve (snap error
-//! `< 1.5e-13`) and are validated end-to-end by those golden counts.
+//! `s4-n128-census`). The `8 alpha` tables are certified exact
+//! multiplicative identities (interval residual + height gap +
+//! two-camera torsion pin; see `ring::foldunits`), additionally
+//! pinned there against the S4-campaign tables.
 //! The Python mirror is `experiments/landscape/probes/`
 //! (`probe_membership.py` / `probe_n128_sample.py`).
 
@@ -50,110 +52,6 @@ const MAXK: usize = 15;
 /// The three verification primes (`p = 1 mod 64`); the order-`L`
 /// roots come from [`MultiplicativeSubgroup`].
 const PRIMES: [u64; 3] = [2_130_706_433, 2_013_265_921, 2_281_701_377];
-
-/// `8 alpha_j` at level 32 (row `j - 1`), padded to MAXK
-/// columns; exported from the certified log-embedding solve.
-const A8_32_PAD: [[i16; MAXK]; 31] = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, -4, 2, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, -4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 4, 0, 4, 0, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, -4, 0, 0, 0, 0, 0, 0, 0, 0],
-    [32, 16, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 4, 0, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [16, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 4, 2, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [64, 32, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 4, 2, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [16, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 4, 0, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0],
-    [32, 16, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, -4, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 4, 0, 4, 0, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, -4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, -4, 2, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-];
-
-/// `8 alpha_j` at level 64 (row `j - 1`), padded to MAXK
-/// columns; exported from the certified log-embedding solve.
-const A8_64_PAD: [[i16; MAXK]; 63] = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, -4, 1, 0, -2, 0, 1, 0, 0, 0, -1, 0, 0, 0],
-    [16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 1, -4, 0, 0, 1, 0, -2, 0, 1, 0, 0, 0],
-    [8, 4, 0, 2, 0, -4, 0, 2, 0, 0, 0, -2, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, -4, 0, 0, 0, 0, 0, 0, -2, 0],
-    [32, 16, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 0, 0, -4, 0, 0, 0, 0, 2, 0],
-    [8, 4, 0, 2, 0, 0, 0, 2, 0, -4, 0, 2, 0, 0, 0],
-    [4, 2, 0, 1, 0, 0, 0, 1, 0, 2, -4, 1, 0, 0, 0],
-    [16, 8, 0, 4, 0, 0, 0, 4, 0, 0, 0, -4, 0, 0, 0],
-    [4, 2, 0, 1, 0, 2, 0, 1, 0, 0, 0, -1, -4, 0, 0],
-    [8, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4, 0],
-    [4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4],
-    [64, 32, 0, 16, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4],
-    [8, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0],
-    [4, 2, 0, 1, 0, 2, 0, 1, 0, 0, 0, -1, 4, 0, 0],
-    [16, 8, 0, 4, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0],
-    [4, 2, 0, 1, 0, 0, 0, 1, 0, 2, 4, 1, 0, 0, 0],
-    [8, 4, 0, 2, 0, 0, 0, 2, 0, 4, 0, 2, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 2, 0],
-    [32, 16, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 4, 0, 0, 0, 0, 0, 0, -2, 0],
-    [8, 4, 0, 2, 0, 4, 0, 2, 0, 0, 0, -2, 0, 0, 0],
-    [4, 2, 0, 1, 4, 0, 0, 1, 0, -2, 0, 1, 0, 0, 0],
-    [16, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 4, 1, 0, -2, 0, 1, 0, 0, 0, -1, 0, 0, 0],
-    [8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [128, 64, 0, 32, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 4, 1, 0, -2, 0, 1, 0, 0, 0, -1, 0, 0, 0],
-    [16, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 1, 4, 0, 0, 1, 0, -2, 0, 1, 0, 0, 0],
-    [8, 4, 0, 2, 0, 4, 0, 2, 0, 0, 0, -2, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 4, 0, 0, 0, 0, 0, 0, -2, 0],
-    [32, 16, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 2, 0],
-    [8, 4, 0, 2, 0, 0, 0, 2, 0, 4, 0, 2, 0, 0, 0],
-    [4, 2, 0, 1, 0, 0, 0, 1, 0, 2, 4, 1, 0, 0, 0],
-    [16, 8, 0, 4, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0],
-    [4, 2, 0, 1, 0, 2, 0, 1, 0, 0, 0, -1, 4, 0, 0],
-    [8, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0],
-    [4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4],
-    [64, 32, 0, 16, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
-    [4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4],
-    [8, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4, 0],
-    [4, 2, 0, 1, 0, 2, 0, 1, 0, 0, 0, -1, -4, 0, 0],
-    [16, 8, 0, 4, 0, 0, 0, 4, 0, 0, 0, -4, 0, 0, 0],
-    [4, 2, 0, 1, 0, 0, 0, 1, 0, 2, -4, 1, 0, 0, 0],
-    [8, 4, 0, 2, 0, 0, 0, 2, 0, -4, 0, 2, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, 0, 0, -4, 0, 0, 0, 0, 2, 0],
-    [32, 16, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, 0, 2, 0, 0, -4, 0, 0, 0, 0, 0, 0, -2, 0],
-    [8, 4, 0, 2, 0, -4, 0, 2, 0, 0, 0, -2, 0, 0, 0],
-    [4, 2, 0, 1, -4, 0, 0, 1, 0, -2, 0, 1, 0, 0, 0],
-    [16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [4, 2, -4, 1, 0, -2, 0, 1, 0, 0, 0, -1, 0, 0, 0],
-    [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-];
 
 /// Exact join statistics of the criterion census at one level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +74,7 @@ struct Par {
     quarter: usize,
     lg: i32,
     k: usize,
-    a8: &'static [[i16; MAXK]],
+    a8: Vec<[i16; MAXK]>,
     /// `gcd(e, l)` per exponent — the `(1 - zeta)`-adic valuation of
     /// `(1 - zeta^e)`; precomputed once, hot in the join loop.
     vgcd: Vec<usize>,
@@ -192,15 +90,26 @@ struct PrimeTable {
 }
 
 fn params(l: usize) -> Result<Par> {
-    let (k, a8) = match l {
-        32 => (7, &A8_32_PAD[..]),
-        64 => (15, &A8_64_PAD[..]),
+    let k = match l {
+        32 => 7,
+        64 => 15,
         _ => {
             return Err(Error::Unsupported(
-                "skeleton census: level must be 32 or 64 (embedded alpha tables)".into(),
+                "skeleton census: level must be 32 or 64 (the MAXK join layout)".into(),
             ))
         }
     };
+    // the certified atom-address tables (ring::foldunits): exact
+    // identities A_j^8 = torsion * prod u^8alpha, proven at
+    // construction — D = 8 exactly at these levels
+    let cert = crate::ring::foldunits::alpha_certificate(l)?;
+    debug_assert_eq!(cert.denom, 8);
+    let mut a8 = vec![[0i16; MAXK]; l - 1];
+    for (row, src) in a8.iter_mut().zip(&cert.alpha) {
+        for (dst, &v) in row.iter_mut().zip(src) {
+            *dst = v as i16;
+        }
+    }
     let lg = l.trailing_zeros() as i32;
     let vgcd = (0..l)
         .map(|e| crate::field::gcd(e as u64, l as u64) as usize)

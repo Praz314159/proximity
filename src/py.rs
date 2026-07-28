@@ -931,6 +931,10 @@ fn foldunit_rank_certificate(s: usize) -> PyResult<(f64, f64, bool)> {
     Ok((c.det_lo, c.det_hi, c.independent))
 }
 
+/// A certified alpha table:
+/// `(denom, alpha rows, torsion2s, residual_bound, height_gap)`.
+type AlphaCertRow = (i64, Vec<Vec<i64>>, Vec<usize>, f64, f64);
+
 /// The certified atom-address table at `level` (a power of two,
 /// 16..=8192): `(denom, alpha, torsion2s, residual_bound, height_gap)`
 /// with `alpha[j-1]` = the integer vector `denom * alpha_j` of
@@ -938,10 +942,7 @@ fn foldunit_rank_certificate(s: usize) -> PyResult<(f64, f64, bool)> {
 /// basis, certified exact (interval residual below the height gap +
 /// two-camera torsion pin).
 #[pyfunction]
-fn foldunit_alpha_certificate(
-    py: Python<'_>,
-    level: usize,
-) -> PyResult<(i64, Vec<Vec<i64>>, Vec<usize>, f64, f64)> {
+fn foldunit_alpha_certificate(py: Python<'_>, level: usize) -> PyResult<AlphaCertRow> {
     let c = err(py.allow_threads(|| crate::ring::foldunits::alpha_certificate(level)))?;
     Ok((
         c.denom,

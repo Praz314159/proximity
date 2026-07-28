@@ -31,6 +31,7 @@
 
 use super::Cyclo;
 use crate::error::{Error, Result};
+use crate::field::{find_generator, mulmod, powmod};
 
 /// The fold unit `u_e` as an exact ring element (closed form).
 /// Errors for `e = 0` or `e = s/2` (no slot there).
@@ -304,7 +305,6 @@ fn height_gap(s: usize) -> f64 {
 /// so once the unit is known to be torsion, one evaluation determines
 /// it exactly.
 fn torsion_pin(s: usize, j: usize, vj: usize, d: u64, a: &[i64], p: u64) -> Result<usize> {
-    use crate::field::{find_generator, mulmod, powmod};
     let two_s = 2 * s as u64;
     if (p - 1) % two_s != 0 {
         return Err(Error::OutOfRange("camera prime lacks 2s-th roots".into()));

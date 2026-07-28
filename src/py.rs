@@ -56,13 +56,13 @@ fn bucket_dist_q2(py: Python<'_>, p: u64, s: usize, r: usize) -> PyResult<Py<PyA
 /// Kernel census, weight-capped: `out[w]` counts nonzero vectors with coefficients in `[-cmax, cmax]` and weight w <= wmax such that `sum v_i w^i = 0 (mod p)`.
 #[pyfunction]
 fn census_direct(p: u64, s: usize, cmax: i64, wmax: usize) -> PyResult<Vec<u64>> {
-    err(census::direct(&sub(p, s)?, cmax, wmax))
+    err(kernel::direct(&sub(p, s)?, cmax, wmax))
 }
 
 /// Full kernel census by weight (meet-in-the-middle; s <= 32 at cmax = 2).
 #[pyfunction]
 fn census_mitm(p: u64, s: usize, cmax: i64) -> PyResult<Vec<u64>> {
-    err(census::mitm(&sub(p, s)?, cmax))
+    err(kernel::mitm(&sub(p, s)?, cmax))
 }
 
 /// Exact single bucket at e-values `lam` (any q = len(lam) <= 8, s <= 32). Cost is p-independent.

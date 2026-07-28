@@ -6,7 +6,7 @@
 //!   [`ring::fold`] primitive, [`ring::Cyclo`], and the NTTs
 //!   ([`ring::ntt`]).
 //!
-//! The coding-theory layers (`crate::rs`, `crate::vs`, `crate::smooth`)
+//! The coding-theory layers (`crate::rs`, `crate::smooth`)
 //! consume these; both are re-exported at the crate root, so
 //! `crate::field` and `crate::ring` remain valid paths.
 

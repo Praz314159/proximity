@@ -1,5 +1,7 @@
 //! The vanishing-syndrome geometry `VS(s, k)` — the dual (quotient) view of
 //! Reed–Solomon on a multiplicative subgroup.
+//! (The census kernels that count over this geometry live in
+//! [`crate::census`].)
 //!
 //! [`crate::rs::code::ReedSolomon`] is the primal view: words as functions,
 //! codewords, agreement, decoding. [`VsSpace`] is the same information seen

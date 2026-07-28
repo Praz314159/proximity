@@ -1064,7 +1064,7 @@ fn rows_to_array(py: Python<'_>, rows: &[Vec<u64>]) -> PyResult<Py<PyArray2<u64>
 /// strata, and the theorem-backed word constructors. See `src/vs.rs`.
 #[pyclass(name = "VsSpace")]
 struct PyVsSpace {
-    inner: crate::vs::VsSpace,
+    inner: crate::rs::vs::VsSpace,
 }
 
 #[pymethods]
@@ -1073,7 +1073,7 @@ impl PyVsSpace {
     fn new(p: u64, s: usize, k: usize) -> PyResult<Self> {
         let sg = MultiplicativeSubgroup::new(p, s).map_err(to_py)?;
         Ok(PyVsSpace {
-            inner: crate::vs::VsSpace::new(&sg, k).map_err(to_py)?,
+            inner: crate::rs::vs::VsSpace::new(&sg, k).map_err(to_py)?,
         })
     }
 

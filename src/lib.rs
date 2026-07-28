@@ -66,7 +66,6 @@ pub mod math;
 // Generic Reed–Solomon codes + list-decoding discovery.
 /// The vanishing-syndrome geometry (dual view of RS on a subgroup).
 pub mod rs;
-pub mod vs;
 
 // Smooth multiplicative subgroup: bucket & accident program.
 pub mod smooth;

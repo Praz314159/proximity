@@ -50,11 +50,6 @@ const MAXK: usize = 15;
 /// roots come from [`MultiplicativeSubgroup`].
 const PRIMES: [u64; 3] = [2_130_706_433, 2_013_265_921, 2_281_701_377];
 
-/// `usize` shim over [`crate::field::gcd`] for slot arithmetic.
-fn gcd(a: usize, b: usize) -> usize {
-    crate::field::gcd(a as u64, b as u64) as usize
-}
-
 /// `8 alpha_j` at level 32 (row `j - 1`), padded to MAXK
 /// columns; exported from the certified log-embedding solve.
 const A8_32_PAD: [[i16; MAXK]; 31] = [
@@ -181,8 +176,18 @@ struct Par {
     lg: i32,
     k: usize,
     a8: &'static [[i16; MAXK]],
-    pow_w: [Vec<u64>; 3],
-    one_minus: [Vec<u64>; 3],
+    /// `gcd(e, l)` per exponent — the `(1 - zeta)`-adic valuation of
+    /// `(1 - zeta^e)`; precomputed once, hot in the join loop.
+    vgcd: Vec<usize>,
+    tables: [PrimeTable; 3],
+}
+
+/// Per-prime verification tables: `pow_w[e] = w^e` for an
+/// exact-order-`l` root `w`, and `one_minus[e] = (1 - w^e) mod p`.
+struct PrimeTable {
+    p: u64,
+    pow_w: Vec<u64>,
+    one_minus: Vec<u64>,
 }
 
 fn params(l: usize) -> Result<Par> {
@@ -196,14 +201,23 @@ fn params(l: usize) -> Result<Par> {
         }
     };
     let lg = l.trailing_zeros() as i32;
-    let mut pow_w: [Vec<u64>; 3] = Default::default();
-    let mut one_minus: [Vec<u64>; 3] = Default::default();
-    for (i, &p) in PRIMES.iter().enumerate() {
+    let vgcd = (0..l)
+        .map(|e| crate::field::gcd(e as u64, l as u64) as usize)
+        .collect();
+    let mut tables = Vec::with_capacity(3);
+    for &p in PRIMES.iter() {
         // consecutive powers w^0..w^{l-1} of an exact-order-l root
-        let pw = MultiplicativeSubgroup::new(p, l)?.elements().to_vec();
-        one_minus[i] = pw.iter().map(|&x| (1 + p - x) % p).collect();
-        pow_w[i] = pw;
+        let pow_w = MultiplicativeSubgroup::new(p, l)?.elements().to_vec();
+        let one_minus = pow_w.iter().map(|&x| (1 + p - x) % p).collect();
+        tables.push(PrimeTable {
+            p,
+            pow_w,
+            one_minus,
+        });
     }
+    let tables = tables
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("three primes"));
     Ok(Par {
         l,
         half: l / 2,
@@ -211,8 +225,8 @@ fn params(l: usize) -> Result<Par> {
         lg,
         k,
         a8,
-        pow_w,
-        one_minus,
+        vgcd,
+        tables,
     })
 }
 
@@ -225,13 +239,13 @@ fn params(l: usize) -> Result<Par> {
 pub fn skeleton_totals(level: usize) -> Result<(u128, u128, u128)> {
     let par = params(level)?;
     let (l, half) = (par.l, par.half);
-    let vmax: usize = (1..half).map(|e| 2 * gcd(e, l)).sum();
+    let vmax: usize = (1..half).map(|e| 2 * par.vgcd[e]).sum();
     let nu = half + 1;
     let idx = |t: usize, pb: usize, vs: usize, u: usize| ((t * 2 + pb) * (vmax + 1) + vs) * nu + u;
     let mut f = vec![0u64; l * 2 * (vmax + 1) * nu];
     f[idx(0, 0, 0, 0)] = 1;
     for e in 1..half {
-        let v = gcd(e, l);
+        let v = par.vgcd[e];
         let mut g = f.clone();
         for t in 0..l {
             for pb in 0..2 {
@@ -280,36 +294,24 @@ pub fn skeleton_totals(level: usize) -> Result<(u128, u128, u128)> {
     Ok((window, pairs, skels))
 }
 
+/// The target exponent `t2` of `(L/4)(1 - zeta^{t2})` for one
+/// `(sigma, pi, T, |P| mod 2)` state — the eps-sign rule of the
+/// budget test. `None` when the target degenerates (`t2 = 0`).
+fn t2_of(par: &Par, sp: u32, pi: u32, t: usize, pbar: u32) -> Option<usize> {
+    let eps_neg = (pbar + sp + pi) % 2 == 1;
+    let t2 = if eps_neg { t } else { (t + par.half) % par.l };
+    (t2 != 0).then_some(t2)
+}
+
 /// Whether the state addressed by `c` also passes with the opposite
-/// parity (same `vs` requirement).
+/// parity (same `vs` requirement, i.e. equal `t2` valuations).
 fn both_parities_pass(par: &Par, c: &Combo) -> bool {
-    let other_t2 = other_parity_t2(par, c);
-    match other_t2 {
-        None => false,
-        Some(t2) => gcd(t2, par.l) == gcd(current_t2(par, c), par.l),
-    }
-}
-
-fn current_t2(par: &Par, c: &Combo) -> usize {
-    let eps_neg = (c.pbar + c.sp + c.pi) % 2 == 1;
-    if eps_neg {
-        c.t
-    } else {
-        (c.t + par.half) % par.l
-    }
-}
-
-fn other_parity_t2(par: &Par, c: &Combo) -> Option<usize> {
-    let eps_neg = (c.pbar + c.sp + (1 - c.pi)) % 2 == 1;
-    let t2 = if eps_neg {
-        c.t
-    } else {
-        (c.t + par.half) % par.l
-    };
-    if t2 == 0 {
-        None
-    } else {
-        Some(t2)
+    match (
+        t2_of(par, c.sp, c.pi, c.t, c.pbar),
+        t2_of(par, c.sp, 1 - c.pi, c.t, c.pbar),
+    ) {
+        (Some(a), Some(b)) => par.vgcd[a] == par.vgcd[b],
+        _ => false,
     }
 }
 
@@ -333,12 +335,10 @@ fn build_combos(par: &Par) -> Vec<Combo> {
         for pi in 0..2u32 {
             for t in 0..l {
                 for pbar in 0..2u32 {
-                    let eps_neg = (pbar + sp + pi) % 2 == 1;
-                    let t2 = if eps_neg { t } else { (t + half) % l };
-                    if t2 == 0 {
+                    let Some(t2) = t2_of(par, sp, pi, t, pbar) else {
                         continue;
-                    }
-                    let vs = (half as i64) * (par.lg as i64 - 2) + gcd(t2, l) as i64
+                    };
+                    let vs = (half as i64) * (par.lg as i64 - 2) + par.vgcd[t2] as i64
                         - (half as i64) * sp as i64;
                     if vs < 0 {
                         continue;
@@ -365,11 +365,15 @@ fn build_combos(par: &Par) -> Vec<Combo> {
 }
 
 // ------------------------------------------------------- side machinery
+
+/// Join key, low to high: `t` (6 bits) | `pbar` (1) | `vs` (9) |
+/// `used` (6) | `k` 3-bit residues of `8m mod 8` — 67 bits at
+/// `k = 15`. Equal keys = equal side state and complementary M1
+/// congruence class.
 fn pack_key(t: usize, pbar: u32, vs: i64, used: i64, m8mod: &[u8]) -> u128 {
-    let mut key = (t as u128)
-        | ((pbar as u128) << 6)
-        | (((vs as u128) & 0x1ff) << 7)
-        | (((used as u128) & 0x3f) << 16);
+    debug_assert!(t < 64 && (0..512).contains(&vs) && (0..64).contains(&used));
+    let mut key =
+        (t as u128) | ((pbar as u128) << 6) | ((vs as u128) << 7) | ((used as u128) << 16);
     let mut sh = 22;
     for &m in m8mod {
         key |= (m as u128) << sh;
@@ -414,7 +418,7 @@ fn eval_side(par: &Par, slots: &[usize], code: usize) -> SideState {
             1 => {
                 s.t = (s.t + 2 * e) % l;
                 s.pbar ^= 1;
-                s.vs += 2 * gcd(e, l) as i64;
+                s.vs += 2 * par.vgcd[e] as i64;
                 s.used += 2;
                 s.pmask |= 1 << e;
                 let j = (2 * e) % l;
@@ -424,7 +428,7 @@ fn eval_side(par: &Par, slots: &[usize], code: usize) -> SideState {
             }
             2 => {
                 s.t = (s.t + e) % l;
-                s.vs += gcd(e, l) as i64;
+                s.vs += par.vgcd[e] as i64;
                 s.used += 1;
                 s.hmask |= 1 << e;
                 for i in 0..par.k {
@@ -458,10 +462,42 @@ fn build_a_table(par: &Par, slots: &[usize]) -> Vec<AEntry> {
 }
 
 // -------------------------------------------------------- realizations
+
+/// One side-assignment option of a half-slot group: its factor per
+/// verification prime, its exponent contribution, and its top-side
+/// parity contribution.
+#[derive(Clone, Copy)]
 struct Opt {
     f: [u64; 3],
     sum: usize,
-    par: u32,
+    parity: u32,
+}
+
+const OPT_ONE: Opt = Opt {
+    f: [1; 3],
+    sum: 0,
+    parity: 0,
+};
+
+impl Opt {
+    /// Fold the factor `(1 - w^e)` into every prime and record the
+    /// exponent `e` with top-side parity `x`.
+    fn push_exp(&mut self, par: &Par, e: usize, x: u32) {
+        for (f, tb) in self.f.iter_mut().zip(&par.tables) {
+            *f = mulmod(*f, tb.one_minus[e], tb.p);
+        }
+        self.sum += e;
+        self.parity ^= x & 1;
+    }
+}
+
+/// The option groups of one budget+M1+M2 pair: at most one group per
+/// canonical index (plus the torsion slot), at most two options each
+/// — fixed-size, no heap. Group count is bounded by `quarter <= 16`.
+struct Groups {
+    opts: [[Opt; 2]; MAXK + 1],
+    len: [u8; MAXK + 1],
+    n: usize,
 }
 
 /// Count realized solutions of one budget+M1+M2 pair; `mismatch` is
@@ -475,24 +511,21 @@ fn count_real(
     mismatch: &mut u64,
 ) -> u64 {
     let (l, half, quarter) = (par.l, par.half, par.quarter);
-    let mut base_prod = [1u64; 3];
-    let mut base_sum = 0usize;
+    let mut base = OPT_ONE;
     for e in 1..half {
         if pmask >> e & 1 == 1 {
-            for (i, &p) in PRIMES.iter().enumerate() {
-                base_prod[i] = mulmod(base_prod[i], par.one_minus[i][e], p);
-                base_prod[i] = mulmod(base_prod[i], par.one_minus[i][e + half], p);
-            }
-            base_sum += 2 * e + half;
+            base.push_exp(par, e, 0);
+            base.push_exp(par, e + half, 0);
         }
     }
     if combo.sp == 1 {
-        for (i, &p) in PRIMES.iter().enumerate() {
-            base_prod[i] = mulmod(base_prod[i], par.one_minus[i][half], p);
-        }
-        base_sum += half;
+        base.push_exp(par, half, 0);
     }
-    let mut groups: Vec<Vec<Opt>> = Vec::new();
+    let mut groups = Groups {
+        opts: [[OPT_ONE; 2]; MAXK + 1],
+        len: [0; MAXK + 1],
+        n: 0,
+    };
     for c in 1..quarter {
         let inc = hmask >> c & 1 == 1;
         let incc = hmask >> (half - c) & 1 == 1;
@@ -500,7 +533,7 @@ fn count_real(
             continue;
         }
         let mv = m[c - 1];
-        let mut opts = Vec::new();
+        let mut len = 0usize;
         let xcs: &[i32] = if inc { &[0, 1] } else { &[-1] };
         let xccs: &[i32] = if incc { &[0, 1] } else { &[-1] };
         for &xc in xcs {
@@ -508,108 +541,82 @@ fn count_real(
                 if xc.max(0) - xcc.max(0) != mv {
                     continue;
                 }
-                let mut o = Opt {
-                    f: [1; 3],
-                    sum: 0,
-                    par: 0,
-                };
+                let mut o = OPT_ONE;
                 if inc {
-                    let e = c + half * xc as usize;
-                    for (i, &p) in PRIMES.iter().enumerate() {
-                        o.f[i] = mulmod(o.f[i], par.one_minus[i][e], p);
-                    }
-                    o.sum += e;
-                    o.par ^= xc as u32 & 1;
+                    o.push_exp(par, c + half * xc as usize, xc as u32);
                 }
                 if incc {
-                    let e = (half - c) + half * xcc as usize;
-                    for (i, &p) in PRIMES.iter().enumerate() {
-                        o.f[i] = mulmod(o.f[i], par.one_minus[i][e], p);
-                    }
-                    o.sum += e;
-                    o.par ^= xcc as u32 & 1;
+                    o.push_exp(par, (half - c) + half * xcc as usize, xcc as u32);
                 }
-                opts.push(o);
+                groups.opts[groups.n][len] = o;
+                len += 1;
             }
         }
-        if opts.is_empty() {
+        if len == 0 {
             return 0;
         }
-        groups.push(opts);
+        groups.len[groups.n] = len as u8;
+        groups.n += 1;
     }
     if hmask >> quarter & 1 == 1 {
-        let mut opts = Vec::new();
-        for x in 0..2usize {
-            let e = quarter + half * x;
-            let mut o = Opt {
-                f: [1; 3],
-                sum: e,
-                par: x as u32,
-            };
-            for (i, &p) in PRIMES.iter().enumerate() {
-                o.f[i] = mulmod(o.f[i], par.one_minus[i][e], p);
-            }
-            opts.push(o);
+        for x in 0..2u32 {
+            let mut o = OPT_ONE;
+            o.push_exp(par, quarter + half * x as usize, x);
+            groups.opts[groups.n][x as usize] = o;
         }
-        groups.push(opts);
+        groups.len[groups.n] = 2;
+        groups.n += 1;
     }
-    let lq = (l / 4) as u64;
-    let mut count = 0u64;
-    dfs(
-        par, combo, &groups, 0, base_prod, base_sum, 0, &mut count, mismatch, lq,
-    );
-    count
+    let mut cx = RealCtx {
+        par,
+        pi: combo.pi,
+        lq: (l / 4) as u64,
+        groups: &groups,
+        count: 0,
+        mismatch: 0,
+    };
+    dfs(&mut cx, 0, base.f, base.sum, base.parity);
+    *mismatch += cx.mismatch;
+    cx.count
 }
 
-#[allow(clippy::too_many_arguments)]
-fn dfs(
-    par: &Par,
-    combo: &Combo,
-    groups: &[Vec<Opt>],
-    depth: usize,
-    prod: [u64; 3],
-    sum: usize,
-    parity: u32,
-    count: &mut u64,
-    mismatch: &mut u64,
+/// Shared state of one realization enumeration.
+struct RealCtx<'a> {
+    par: &'a Par,
+    pi: u32,
     lq: u64,
-) {
-    if depth == groups.len() {
-        if parity != combo.pi {
+    groups: &'a Groups,
+    count: u64,
+    mismatch: u64,
+}
+
+fn dfs(cx: &mut RealCtx, depth: usize, prod: [u64; 3], sum: usize, parity: u32) {
+    if depth == cx.groups.n {
+        if parity != cx.pi {
             return;
         }
-        let s = sum % par.l;
+        let s = sum % cx.par.l;
         let mut eq = 0;
-        for (i, &p) in PRIMES.iter().enumerate() {
-            let rhs = mulmod(lq % p, (1 + par.pow_w[i][s]) % p, p);
-            if prod[i] == rhs {
+        for (&f, tb) in prod.iter().zip(&cx.par.tables) {
+            let rhs = mulmod(cx.lq % tb.p, (1 + tb.pow_w[s]) % tb.p, tb.p);
+            if f == rhs {
                 eq += 1;
             }
         }
         if eq == 3 {
-            *count += 1;
+            cx.count += 1;
         } else if eq > 0 {
-            *mismatch += 1;
+            cx.mismatch += 1;
         }
         return;
     }
-    for o in &groups[depth] {
+    for oi in 0..cx.groups.len[depth] as usize {
+        let o = cx.groups.opts[depth][oi];
         let mut np = prod;
-        for (i, &p) in PRIMES.iter().enumerate() {
-            np[i] = mulmod(np[i], o.f[i], p);
+        for ((f, &of), tb) in np.iter_mut().zip(&o.f).zip(&cx.par.tables) {
+            *f = mulmod(*f, of, tb.p);
         }
-        dfs(
-            par,
-            combo,
-            groups,
-            depth + 1,
-            np,
-            sum + o.sum,
-            parity ^ o.par,
-            count,
-            mismatch,
-            lq,
-        );
+        dfs(cx, depth + 1, np, sum + o.sum, parity ^ o.parity);
     }
 }
 
@@ -629,7 +636,7 @@ pub fn skeleton_census(level: usize) -> Result<SkeletonCensus> {
     let a_slots: Vec<usize> = (1..=na).collect();
     let b_slots: Vec<usize> = (na + 1..par.half).collect();
     let atab = build_a_table(&par, &a_slots);
-    let max_vs_a: i64 = a_slots.iter().map(|&e| 2 * gcd(e, par.l) as i64).sum();
+    let max_vs_a: i64 = a_slots.iter().map(|&e| 2 * par.vgcd[e] as i64).sum();
     let max_used_a: i64 = 2 * na as i64;
     let nb_codes: usize = 3usize.pow(b_slots.len() as u32);
     let chunk = 8192usize;
@@ -700,7 +707,7 @@ pub fn skeleton_census(level: usize) -> Result<SkeletonCensus> {
 
     let (m1_pairs, m2_pairs, solvable_pairs, solutions, mismatch) = reduced;
     if mismatch > 0 {
-        return Err(Error::MalformedInput(format!(
+        return Err(Error::Verification(format!(
             "skeleton census: {mismatch} non-unanimous three-prime verdicts"
         )));
     }

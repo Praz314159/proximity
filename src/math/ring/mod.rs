@@ -34,7 +34,9 @@ pub mod foldunits;
 pub mod ntt;
 
 pub use cyclo::Cyclo;
-pub use foldunits::{fold_unit, rank_certificate, RankCertificate};
+pub use foldunits::{
+    alpha_certificate, fold_unit, rank_certificate, AlphaCertificate, RankCertificate,
+};
 
 /// THE fold: reduce `zeta^exp` on the half-basis. Returns
 /// `(index, sign)` with `zeta^exp = sign * zeta^index`, `index < half`.

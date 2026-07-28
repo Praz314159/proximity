@@ -15,8 +15,9 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
+use vanish::census::exact_value_census;
 use vanish::domain::MultiplicativeSubgroup;
-use vanish::vs::{exact_value_census, VsSpace};
+use vanish::rs::vs::VsSpace;
 
 fn space(p: u64, s: usize, k: usize) -> VsSpace {
     let sg = MultiplicativeSubgroup::new(p, s).unwrap();

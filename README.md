@@ -41,8 +41,7 @@ Bottom-up, each layer depending only on those below:
 | `field` | `F_p` scalars | mulmod/powmod, Montgomery Miller–Rabin, generators, Brent–Pollard-rho factorization |
 | `domain` | `Subgroup` | the validated core object: `mu_s`, cosets, dilation structure |
 | `code` | `ReedSolomon` | radii (capacity/Johnson), C.5 window, rung words, ladder values |
-| `buckets` | distributions & queries | `dp`: full distributions (cost ~ `p`); `mitm`: single buckets at any `q` and decompositions (**`p`-independent** — interrogate primes of any size) |
-| `census` | kernel vectors | direct (weight-capped, any `s`) and MitM (full, `s <= 32`) engines |
+| `census` | every counting kernel | one home, by what is counted: `buckets` (distributions & queries: `dp` full distributions, `mitm` single buckets at any `q`, **`p`-independent**), `kernel` (kernel vectors, direct + MitM), `value` (exact `Z[zeta_s]` values / floors), `valuemap` (value-map fibers mod `p`), `skeleton` (G1 criterion census), `join` (shared MITM keyed-table layer) |
 | `norms` | bad sets | cyclotomic norms → complete per-prime accident inventories; `norms::ingest` streams GPU-computed norm tables (billions of entries) |
 | `certify` | certificates | tiered `p`-independent proofs that buckets are exactly structural (or their exact inflated anatomy) |
 | `toy` | protocol soundness | exact Section-6 toy-protocol soundness via the winning-set identity |
@@ -57,7 +56,7 @@ questions at primes of any magnitude.
 **Rust:**
 
 ```rust
-use vanish::{domain::Subgroup, buckets};
+use vanish::{census::buckets, domain::Subgroup};
 
 let sg = Subgroup::new(3457, 32)?;
 let dist = buckets::dp::distribution_q1(&sg, 16)?;      // all buckets, exact
@@ -115,7 +114,7 @@ the MitM engines answer single-bucket questions in milliseconds at any `p`.
 `cargo test --release` runs the golden + property suite: pinned
 exhaustively-verified values (bucket maxima at 12 primes, joint-grid extrema,
 censuses, rung buckets through q=8, a to-the-unit bucket decomposition, the
-G1 skeleton-census pins at levels 32/64 — `vs::skeleton`, whose level-64
+G1 skeleton-census pins at levels 32/64 — `census::skeleton`, whose level-64
 census reproduced the pod-measured `N(128) = 3,758,482,820` exactly) plus
 invariants (mass = `C(s,r)`, dilation symmetry, DP↔MitM agreement). CI enforces
 fmt, clippy `-D warnings`, the suite, CLI smoke tests, and Python-binding

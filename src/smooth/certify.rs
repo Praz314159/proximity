@@ -24,10 +24,10 @@
 //! [`norm`](crate::ring::Cyclo::norm_mod) — the glue tests below pin the
 //! census verdicts to the ring's own arithmetic.
 
+use crate::census::buckets::mitm::decompose_bucket_q1;
+use crate::census::kernel as census;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
-use crate::smooth::buckets::mitm::decompose_bucket_q1;
-use crate::smooth::census;
 use crate::smooth::rung::{class_size, m_struct};
 
 /// Certification verdict for `(p, s, r)`, `q = 1`.

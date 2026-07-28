@@ -2,8 +2,8 @@
 //! verified landscape at s = 32 (and cross-checked against the DP engine,
 //! which is independent of the census machinery).
 
+use vanish::census::buckets::dp;
 use vanish::domain::MultiplicativeSubgroup;
-use vanish::smooth::buckets::dp;
 use vanish::smooth::certify::{certify_q1, Verdict};
 
 #[test]

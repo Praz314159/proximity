@@ -19,10 +19,10 @@
 //! ([`rs::classify`]). Decoupled from the subgroup structure.
 //!
 //! **[`smooth`] — the smooth multiplicative-subgroup program.** *Bucket* sizes
-//! `#{ |S| = r : e_i(S) = lambda_i }` ([`smooth::buckets`]), which by the
+//! `#{ |S| = r : e_i(S) = lambda_i }` ([`census::buckets`]), which by the
 //! exactness theorem are exact list sizes beyond the Johnson radius; the
 //! rung/ladder combinatorics ([`smooth::rung`]); the arithmetic accidents that
-//! inflate buckets ([`smooth::census`], [`smooth::norms`], with
+//! inflate buckets ([`census::kernel`], [`smooth::norms`], with
 //! [`smooth::norms::ingest`] streaming GPU norm tables); and the structural
 //! certificates ([`smooth::certify`]).
 //!
@@ -39,7 +39,7 @@
 //! ## Example
 //!
 //! ```
-//! use vanish::{domain::MultiplicativeSubgroup, smooth::buckets};
+//! use vanish::{census::buckets, domain::MultiplicativeSubgroup};
 //!
 //! let sg = MultiplicativeSubgroup::new(3457, 32).unwrap();
 //! let dist = buckets::dp::distribution_q1(&sg, 16).unwrap();
@@ -58,6 +58,7 @@
 #![warn(missing_docs)]
 
 // Foundation.
+pub mod census;
 pub mod domain;
 pub mod error;
 pub mod math;
@@ -65,7 +66,6 @@ pub mod math;
 // Generic Reed–Solomon codes + list-decoding discovery.
 /// The vanishing-syndrome geometry (dual view of RS on a subgroup).
 pub mod rs;
-pub mod vs;
 
 // Smooth multiplicative subgroup: bucket & accident program.
 pub mod smooth;

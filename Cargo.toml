@@ -1,6 +1,6 @@
 [package]
 name = "vanish"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Exact computational toolkit for exploring proximity gaps, correlated agreement, and list decoding near capacity for smooth-domain Reed-Solomon codes"
 repository = "https://github.com/Praz314159/proximity"

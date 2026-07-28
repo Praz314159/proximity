@@ -6,7 +6,7 @@
 //! "C.5-form" words `f = x^r - lambda_1 x^{r-1} + ... +- lambda_q x^{r-q}`
 //! with `(r - q - 1) < k <= r`, the list of `f` at radius `1 - r/n` is
 //! *exactly* the bucket `{S : e_i(S) = lambda_i}` — so bucket sizes computed
-//! by [`crate::smooth::buckets`] are exact list sizes beyond the Johnson radius.
+//! by [`crate::census::buckets`] are exact list sizes beyond the Johnson radius.
 
 use crate::domain::{EvalDomain, MultiplicativeSubgroup};
 use crate::error::{Error, Result};
@@ -121,14 +121,14 @@ impl ReedSolomon {
     ///
     /// This is the *received word* whose list at radius `1 - r/n` is, by the
     /// exactness theorem, exactly the bucket `{S : e_i(S) = lambda_i}` (see the
-    /// module intro and [`crate::smooth::buckets`]). It is the bridge between the
-    /// count axis ([`crate::smooth::buckets`]) and the decode axis
+    /// module intro and [`crate::census::buckets`]). It is the bridge between the
+    /// count axis ([`crate::census::buckets`]) and the decode axis
     /// ([`crate::rs::decode`]): decoding this word and counting its bucket must
     /// return the same list size.
     ///
     /// `lambda` holds the `e`-values `(e_1, ..., e_q)`; the alternating signs
     /// are the `c_i = (-1)^i e_i` sign convention institutionalized in
-    /// [`crate::smooth::buckets::mitm`]. Requires `q <= r < n`.
+    /// [`crate::census::buckets::mitm`]. Requires `q <= r < n`.
     pub fn c5_word(&self, r: usize, lambda: &[u64]) -> Result<Vec<u64>> {
         let q = lambda.len();
         if r >= self.n() || q > r {

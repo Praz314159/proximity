@@ -27,11 +27,11 @@
 
 pub mod ingest;
 
+use crate::census::kernel as census;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{factor, mulmod, powmod, primes_one_mod};
 use crate::ring::fold;
-use crate::smooth::census;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -71,7 +71,7 @@ pub enum Provenance {
     /// from the norm table alone.
     ValuationSplit,
     /// The split was unsafe and the counts were replaced by a direct census
-    /// ([`crate::smooth::census::mitm`]): exact, by construction.
+    /// ([`crate::census::kernel::mitm`]): exact, by construction.
     CensusCorrected,
     /// The split was unsafe and no census was feasible: counts are
     /// approximate and must be treated as such downstream.

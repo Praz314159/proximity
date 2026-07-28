@@ -1,4 +1,4 @@
-//! `vs::valuemap` — the meet-in-the-middle value-map census kernel.
+//! `census::valuemap` — the meet-in-the-middle value-map census kernel.
 //!
 //! The workhorse behind the shell and rung censuses (stages 49/50/54,
 //! the four rung computations, the collision instruments): subset
@@ -16,6 +16,7 @@
 //! here were generated from it at the standard prime and are
 //! cross-checked exactly in `Z[zeta_s]` via [`Cyclo`] glue tests.
 
+use crate::census::join::SortedMultiMap;
 use crate::error::{Error, Result};
 use crate::field::mulmod;
 use rayon::prelude::*;
@@ -226,15 +227,12 @@ pub fn fiber_count(
     Ok(pairs
         .par_iter()
         .map(|(ga, gb)| {
-            let mut sorted = gb.0.clone();
-            sorted.sort_unstable();
+            let tab = SortedMultiMap::new(gb.0.iter().map(|&y| (y, ())).collect());
             ga.0.iter()
                 .map(|&x| {
                     // x * y = value  =>  y = value * x^{-1}
                     let y = mulmod(value, crate::field::powmod(x, p - 2, p), p);
-                    let lo = sorted.partition_point(|&t| t < y);
-                    let hi = sorted.partition_point(|&t| t <= y);
-                    (hi - lo) as u64
+                    tab.get(&y).len() as u64
                 })
                 .sum::<u64>()
         })
@@ -254,25 +252,26 @@ pub fn fiber_members(
     let pairs = matched_pairs(a, b, size, class)?;
     let mut out = Vec::new();
     'outer: for (ga, gb) in pairs {
+        let tab = SortedMultiMap::new(gb.0.iter().zip(&gb.1).map(|(&y, &mb)| (y, mb)).collect());
         for (&x, &ma) in ga.0.iter().zip(&ga.1) {
-            for (&y, &mb) in gb.0.iter().zip(&gb.1) {
-                if mulmod(x, y, p) == value {
-                    let mut exps: Vec<usize> = Vec::with_capacity(size);
-                    for (t, &e) in a.hexp.iter().enumerate() {
-                        if ma >> t & 1 == 1 {
-                            exps.push(e);
-                        }
+            // x * y = value  =>  y = value * x^{-1}
+            let y = mulmod(value, crate::field::powmod(x, p - 2, p), p);
+            for &mb in tab.get(&y) {
+                let mut exps: Vec<usize> = Vec::with_capacity(size);
+                for (t, &e) in a.hexp.iter().enumerate() {
+                    if ma >> t & 1 == 1 {
+                        exps.push(e);
                     }
-                    for (t, &e) in b.hexp.iter().enumerate() {
-                        if mb >> t & 1 == 1 {
-                            exps.push(e);
-                        }
+                }
+                for (t, &e) in b.hexp.iter().enumerate() {
+                    if mb >> t & 1 == 1 {
+                        exps.push(e);
                     }
-                    exps.sort_unstable();
-                    out.push(exps);
-                    if out.len() >= cap {
-                        break 'outer;
-                    }
+                }
+                exps.sort_unstable();
+                out.push(exps);
+                if out.len() >= cap {
+                    break 'outer;
                 }
             }
         }

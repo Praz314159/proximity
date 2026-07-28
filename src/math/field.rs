@@ -186,7 +186,8 @@ pub fn distinct_prime_factors(mut n: u64) -> Vec<u64> {
     out
 }
 
-fn gcd(mut a: u64, mut b: u64) -> u64 {
+/// Euclidean gcd (shared utility; also the batch step of Brent-rho).
+pub fn gcd(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         (a, b) = (b, a % b);
     }

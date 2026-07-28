@@ -39,40 +39,20 @@
 //! The Python mirror is `experiments/landscape/probes/`
 //! (`probe_membership.py` / `probe_n128_sample.py`).
 
+use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
-use crate::field::{mulmod, powmod};
+use crate::field::mulmod;
 use rayon::prelude::*;
 
 const MAXK: usize = 15;
 
-/// The three verification primes (`p = 1 mod 64`), with the factor
-/// lists of `p - 1` used for primitive-root search.
+/// The three verification primes (`p = 1 mod 64`); the order-`L`
+/// roots come from [`MultiplicativeSubgroup`].
 const PRIMES: [u64; 3] = [2_130_706_433, 2_013_265_921, 2_281_701_377];
 
-fn prime_factors(p: u64) -> &'static [u64] {
-    match p {
-        2_130_706_433 => &[2, 127],
-        2_013_265_921 => &[2, 3, 5],
-        2_281_701_377 => &[2, 17],
-        _ => unreachable!("verification primes are fixed"),
-    }
-}
-
-fn root_of_order(l: u64, p: u64) -> u64 {
-    let fs = prime_factors(p);
-    let mut g = 2u64;
-    while !fs.iter().all(|&q| powmod(g, (p - 1) / q, p) != 1) {
-        g += 1;
-    }
-    powmod(g, (p - 1) / l, p)
-}
-
+/// `usize` shim over [`crate::field::gcd`] for slot arithmetic.
 fn gcd(a: usize, b: usize) -> usize {
-    if b == 0 {
-        a
-    } else {
-        gcd(b, a % b)
-    }
+    crate::field::gcd(a as u64, b as u64) as usize
 }
 
 /// `8 alpha_j` at level 32 (row `j - 1`), padded to MAXK
@@ -219,13 +199,8 @@ fn params(l: usize) -> Result<Par> {
     let mut pow_w: [Vec<u64>; 3] = Default::default();
     let mut one_minus: [Vec<u64>; 3] = Default::default();
     for (i, &p) in PRIMES.iter().enumerate() {
-        let w = root_of_order(l as u64, p);
-        debug_assert_eq!(powmod(w, l as u64, p), 1);
-        debug_assert_ne!(powmod(w, l as u64 / 2, p), 1);
-        let mut pw = vec![1u64; l];
-        for e in 1..l {
-            pw[e] = mulmod(pw[e - 1], w, p);
-        }
+        // consecutive powers w^0..w^{l-1} of an exact-order-l root
+        let pw = MultiplicativeSubgroup::new(p, l)?.elements().to_vec();
         one_minus[i] = pw.iter().map(|&x| (1 + p - x) % p).collect();
         pow_w[i] = pw;
     }

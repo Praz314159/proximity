@@ -931,6 +931,28 @@ fn foldunit_rank_certificate(s: usize) -> PyResult<(f64, f64, bool)> {
     Ok((c.det_lo, c.det_hi, c.independent))
 }
 
+/// A certified alpha table:
+/// `(denom, alpha rows, torsion2s, residual_bound, height_gap)`.
+type AlphaCertRow = (i64, Vec<Vec<i64>>, Vec<usize>, f64, f64);
+
+/// The certified atom-address table at `level` (a power of two,
+/// 16..=8192): `(denom, alpha, torsion2s, residual_bound, height_gap)`
+/// with `alpha[j-1]` = the integer vector `denom * alpha_j` of
+/// `A_j = (1 - zeta^j)/(1 - zeta)^{gcd(j, level)}` in the fold-unit
+/// basis, certified exact (interval residual below the height gap +
+/// two-camera torsion pin).
+#[pyfunction]
+fn foldunit_alpha_certificate(py: Python<'_>, level: usize) -> PyResult<AlphaCertRow> {
+    let c = err(py.allow_threads(|| crate::ring::foldunits::alpha_certificate(level)))?;
+    Ok((
+        c.denom,
+        c.alpha,
+        c.torsion2s,
+        c.residual_bound,
+        c.height_gap,
+    ))
+}
+
 /// Batch `N(v) mod p` over many half-basis coefficient vectors (one
 /// shared subgroup construction, rayon-parallel): the extremal-norm
 /// campaign workhorse.
@@ -1195,6 +1217,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(valuemap_fiber_members, m)?)?;
     m.add_function(wrap_pyfunction!(fold_unit, m)?)?;
     m.add_function(wrap_pyfunction!(foldunit_rank_certificate, m)?)?;
+    m.add_function(wrap_pyfunction!(foldunit_alpha_certificate, m)?)?;
     m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;

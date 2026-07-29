@@ -178,3 +178,19 @@ def test_skeleton_census():
     assert (m1, m2, solvable) == (31788, 20288, 15564)
     # the stage-67-certified counting instrument: |solutions(32)| exactly
     assert sols == 26084
+
+
+def test_alpha_certificate():
+    # certified atom addresses: D = 8 at the skeleton levels, sixteenths
+    # at 128 (first certified table beyond the measured regime)
+    denom, alpha, tors, resid, gap = vanish.foldunit_alpha_certificate(64)
+    assert denom == 8 and len(alpha) == 63
+    assert all(x == 0 for x in alpha[0]) and tors[0] == 0
+    assert resid < 1e-4 * gap
+    import math
+    for ji, row in enumerate(alpha):
+        ord_ = 64 // math.gcd(ji + 1, 64)
+        step = 8 // min(max(ord_ // 8, 1), 8)
+        assert all(x % step == 0 for x in row), f"atom {ji+1}"
+    denom128, alpha128, _, resid128, gap128 = vanish.foldunit_alpha_certificate(128)
+    assert denom128 == 16 and len(alpha128) == 127 and resid128 < 1e-4 * gap128

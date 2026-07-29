@@ -220,6 +220,14 @@ def fold_unit(s: int, e: int) -> Cyclo:
 def foldunit_rank_certificate(s: int) -> Tuple[float, float, bool]:
     """(det_lo, det_hi, independent): certified fold-unit independence."""
 
+def foldunit_alpha_certificate(
+    level: int,
+) -> Tuple[int, List[List[int]], List[int], float, float]:
+    """Certified atom-address table at level (power of two, 16..=8192):
+    (denom, alpha, torsion2s, residual_bound, height_gap) with
+    alpha[j-1] = denom * alpha_j, certified exact (interval residual
+    below the height gap + two-camera torsion pin)."""
+
 def valuemap_census(
     p: int, level: int, h1: List[int], h2: List[int],
     size: int, class_: int, point: int,

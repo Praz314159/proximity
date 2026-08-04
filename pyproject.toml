@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "vanish"
 version = "0.5.0"
-description = "Fast exact kernels for the bucket-landscape program"
+description = "Exact kernels for Reed-Solomon codes on smooth domains: list decoding, syndrome cuts, censuses, cyclotomic norms"
 requires-python = ">=3.9"
 
 [tool.maturin]

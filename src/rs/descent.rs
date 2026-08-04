@@ -16,14 +16,22 @@
 //! behavior *under* this module (the top word's `b_eff` is again
 //! two-spike — pinned below); conventions (fold signs, slice offsets,
 //! `psi_Y` normalization) are pinned against [`VsSpace`], the
-//! convention authority. [`Descent`] is a handle holding the
-//! precomputed domain tables; construct once per `(p, s, k)` and reuse
-//! across a campaign.
+//! convention authority.
 //!
-//! Cost notes: constructors are `O(s^2)` (the interpolant transform);
-//! `psi_y` is `O(avail * k)` per core; `stratum_identity_check`
-//! enumerates all `C(s/2, k_odd)` cores (~11k at `(32, 15)`, serial,
-//! sub-second).
+//! Two handles, matching the cost tiers: [`Descent`] holds the
+//! per-`(p, s, k)` domain tables (build once per campaign);
+//! [`Descent::word`] builds a [`WordView`] holding the per-word data —
+//! the interpolant transform and the channel split — once, so that
+//! per-pair and per-core queries pay only their own tier (the
+//! `HalfTables` build-once/query-many pattern).
+//!
+//! Cost notes: [`Descent::new`] is `O(s)`; [`Descent::word`] is
+//! `O(s^2)` (the transform — the only quadratic step);
+//! [`WordView::effective_syndrome`] is `O(s - k)` per pair;
+//! [`WordView::psi_y`] is `O(avail * k_odd)` per core (batched
+//! barycentric + one batched inversion); the stratum sweep runs over
+//! all `C(s/2, k_odd)` cores, rayon-parallel over the leading core
+//! element (~11k cores at `(32, 15)`: well under a second).
 
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
@@ -31,6 +39,7 @@ use crate::field::{batch_inv, mulmod, powmod};
 use crate::rs::decode::interp_eval_all;
 use crate::rs::linalg::dd;
 use crate::rs::vs::VsSpace;
+use rayon::prelude::*;
 
 /// Fiber statistics of a derived word over its available points.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,8 +54,8 @@ pub struct PsiStats {
     pub collisions: u64,
 }
 
-/// The level-halving handle for `(p, s, k)`: domain tables, channel
-/// dimensions, and the descent kernels.
+/// The level-halving handle for `(p, s, k)`: domain tables and channel
+/// dimensions. Per-word data lives on [`WordView`].
 pub struct Descent {
     vs: VsSpace,
     dom: Vec<u64>,
@@ -54,8 +63,6 @@ pub struct Descent {
     /// the channel words take their values (`w_even[j]` at
     /// `half_points[j]`, whose lifts are `dom[j]` and `dom[j + s/2]`).
     half_points: Vec<u64>,
-    /// Full-interpolant monomial-coefficient transform rows are built on
-    /// demand; the handle caches inverses of the domain instead.
     inv_dom: Vec<u64>,
     inv2: u64,
 }
@@ -164,7 +171,8 @@ impl Descent {
     }
 
     /// Monomial coefficients of the full interpolant (degree `< s`):
-    /// `c[m] = s^{-1} sum_i w[i] dom[i]^{-m}`.
+    /// `c[m] = s^{-1} sum_i w[i] dom[i]^{-m}`. The `O(s^2)` step; pay it
+    /// once per word through [`Descent::word`].
     pub fn monomial_coeffs(&self, word: &[u64]) -> Result<Vec<u64>> {
         self.check_word(word)?;
         let (p, s) = (self.p(), self.s());
@@ -180,45 +188,89 @@ impl Descent {
         Ok(c)
     }
 
+    /// Build the per-word view: the interpolant transform and the
+    /// channel split, computed once; every per-pair and per-core query
+    /// runs off the cached data.
+    pub fn word(&self, word: &[u64]) -> Result<WordView<'_>> {
+        let coeffs = self.monomial_coeffs(word)?;
+        let (wev, wod) = self.channels(word)?;
+        Ok(WordView {
+            d: self,
+            word: word.to_vec(),
+            coeffs,
+            wev,
+            wod,
+        })
+    }
+}
+
+/// Per-word descent data: the word, its interpolant coefficients, and
+/// its channel words — built once by [`Descent::word`], queried many
+/// times.
+pub struct WordView<'a> {
+    d: &'a Descent,
+    word: Vec<u64>,
+    coeffs: Vec<u64>,
+    wev: Vec<u64>,
+    wod: Vec<u64>,
+}
+
+impl WordView<'_> {
+    /// The cell handle this view descends under.
+    #[must_use]
+    pub fn descent(&self) -> &Descent {
+        self.d
+    }
+    /// The interpolant's monomial coefficients (degree `< s`).
+    #[must_use]
+    pub fn coeffs(&self) -> &[u64] {
+        &self.coeffs
+    }
+    /// The channel words `(w_even, w_odd)`.
+    #[must_use]
+    pub fn channel_words(&self) -> (&[u64], &[u64]) {
+        (&self.wev, &self.wod)
+    }
+
     /// The channel syndromes: the interleaved slices
     /// `B_t[j] = c[k + 2j + t]`, `t = 0, 1, 2`, of the interpolant's top
     /// coefficients (`0` past degree `s - 1`). `B_0, B_2` read the odd
     /// channel, `B_1` the even — the level-drop's currency.
-    pub fn channel_syndromes(&self, word: &[u64]) -> Result<[Vec<u64>; 3]> {
-        let c = self.monomial_coeffs(word)?;
-        let (s, k) = (self.s(), self.k());
-        let len = (s / 2).saturating_sub(self.k() / 2);
+    #[must_use]
+    pub fn channel_syndromes(&self) -> [Vec<u64>; 3] {
+        let (s, k) = (self.d.s(), self.d.k());
+        let len = (s / 2).saturating_sub(k / 2);
         let slice = |t: usize| -> Vec<u64> {
             (0..len)
                 .map(|j| {
                     if k + 2 * j + t < s {
-                        c[k + 2 * j + t]
+                        self.coeffs[k + 2 * j + t]
                     } else {
                         0
                     }
                 })
                 .collect()
         };
-        Ok([slice(0), slice(1), slice(2)])
+        [slice(0), slice(1), slice(2)]
     }
 
     /// The effective syndrome of a point pair `(x, x')`:
     /// `b_eff[i] = c[k + 2i] + s1 c[k + 2i + 1] + s2 c[k + 2i + 2]` with
     /// `s1 = x + x'`, `s2 = x x'` — the level-`s/2` syndrome whose cut
-    /// carries the pair's collision condition. Requires odd `k` (the
-    /// even case is the parity variant of the species layer).
-    pub fn effective_syndrome(&self, word: &[u64], x: u64, xp: u64) -> Result<Vec<u64>> {
-        if self.k() % 2 == 0 {
+    /// carries the pair's collision condition. A slice combination over
+    /// the cached coefficients. Requires odd `k` (the even case is the
+    /// parity variant of the species layer).
+    pub fn effective_syndrome(&self, x: u64, xp: u64) -> Result<Vec<u64>> {
+        let (p, s, k) = (self.d.p(), self.d.s(), self.d.k());
+        if k % 2 == 0 {
             return Err(Error::Unsupported(
                 "effective_syndrome requires odd k".into(),
             ));
         }
-        let c = self.monomial_coeffs(word)?;
-        let (p, s, k) = (self.p(), self.s(), self.k());
         let s1 = (x + xp) % p;
         let s2 = mulmod(x, xp, p);
         let kp = k.div_ceil(2);
-        let at = |i: usize| if i < s { c[i] } else { 0 };
+        let at = |i: usize| if i < s { self.coeffs[i] } else { 0 };
         Ok((0..s / 2 - kp)
             .map(|i| {
                 let t = (at(k + 2 * i) + mulmod(s1, at(k + 2 * i + 1), p)) % p;
@@ -233,32 +285,27 @@ impl Descent {
     /// `psi_Y(x) = (w(x) - g(x^2) - x h(x^2)) / V(x^2)`,
     /// with `g, h` the interpolants of the channel words on `Y` and
     /// `V(u) = prod_{y in Y} (u - u_y)`. Returns `(domain index, value)`
-    /// pairs.
-    pub fn psi_y(&self, word: &[u64], core: &[usize]) -> Result<Vec<(usize, u64)>> {
-        self.check_word(word)?;
-        if core.len() != self.k_odd() {
+    /// pairs. One batched-barycentric evaluation per channel and one
+    /// batched inversion; no per-point work beyond `O(k_odd)`.
+    pub fn psi_y(&self, core: &[usize]) -> Result<Vec<(usize, u64)>> {
+        let (p, s) = (self.d.p(), self.d.s());
+        if core.len() != self.d.k_odd() {
             return Err(Error::OutOfRange(format!(
                 "core size {} != k_odd = {}",
                 core.len(),
-                self.k_odd()
+                self.d.k_odd()
             )));
         }
-        let (p, s) = (self.p(), self.s());
         if core.iter().any(|&y| y >= s / 2) {
             return Err(Error::OutOfRange(
                 "core index out of the half domain".into(),
             ));
         }
-        let (wev, wod) = self.channels(word)?;
-        let nodes: Vec<u64> = core.iter().map(|&y| self.half_points[y]).collect();
-        let gy: Vec<u64> = core.iter().map(|&y| wev[y]).collect();
-        let hy: Vec<u64> = core.iter().map(|&y| wod[y]).collect();
-        // the available half points, each carrying two lifts
+        let nodes: Vec<u64> = core.iter().map(|&y| self.d.half_points[y]).collect();
+        let gy: Vec<u64> = core.iter().map(|&y| self.wev[y]).collect();
+        let hy: Vec<u64> = core.iter().map(|&y| self.wod[y]).collect();
         let avail_half: Vec<usize> = (0..s / 2).filter(|j| !core.contains(j)).collect();
-        let us: Vec<u64> = avail_half.iter().map(|&j| self.half_points[j]).collect();
-        // one batched-barycentric evaluation per channel over the distinct
-        // u-values (the decode hot kernel), plus one batched inversion of
-        // the V-products — no per-point interpolation or Fermat inverses
+        let us: Vec<u64> = avail_half.iter().map(|&j| self.d.half_points[j]).collect();
         let (gs, hs) = if core.is_empty() {
             (vec![0u64; us.len()], vec![0u64; us.len()])
         } else {
@@ -279,8 +326,8 @@ impl Descent {
         let mut out = Vec::with_capacity(2 * us.len());
         for (a, &j) in avail_half.iter().enumerate() {
             for i in [j, j + s / 2] {
-                let x = self.dom[i];
-                let num = ((word[i] + p - gs[a]) % p + p - mulmod(x, hs[a], p)) % p;
+                let x = self.d.dom[i];
+                let num = ((self.word[i] + p - gs[a]) % p + p - mulmod(x, hs[a], p)) % p;
                 out.push((i, mulmod(num, v_inv[a], p)));
             }
         }
@@ -291,9 +338,9 @@ impl Descent {
     /// Fiber statistics of `psi_Y`; `collisions` counts unordered
     /// non-antipodal pairs with equal value — the stratum-identity
     /// currency.
-    pub fn psi_y_stats(&self, word: &[u64], core: &[usize]) -> Result<PsiStats> {
-        let vals = self.psi_y(word, core)?;
-        let s = self.s();
+    pub fn psi_y_stats(&self, core: &[usize]) -> Result<PsiStats> {
+        let vals = self.psi_y(core)?;
+        let s = self.d.s();
         let mut sorted: Vec<u64> = vals.iter().map(|&(_, v)| v).collect();
         sorted.sort_unstable();
         let mut distinct = 0usize;
@@ -328,47 +375,62 @@ impl Descent {
 
     /// The stratum identity, both sides: `(sum over all cores of
     /// psi_Y collisions, |Z^(k_odd)(b)|)` — equal by the identity the
-    /// descent chapter proves; callers assert equality.
-    pub fn stratum_identity_check(&self, word: &[u64]) -> Result<(u64, u64)> {
-        self.check_word(word)?;
-        let (s, kod) = (self.s(), self.k_odd());
-        let mut core: Vec<usize> = (0..kod).collect();
-        let mut total = 0u64;
-        loop {
-            total += self.psi_y_stats(word, &core)?.collisions;
-            // next lex combination of kod from s/2
-            let mut i = kod;
-            loop {
-                if i == 0 {
-                    let b = self.vs.syndrome(word)?;
-                    let strata = self.vs.strata_counts(&b)?;
-                    let z = strata.get(kod).copied().unwrap_or(0);
-                    return Ok((total, z));
+    /// descent chapter proves; callers assert equality. Rayon-parallel
+    /// over the leading core element.
+    pub fn stratum_identity_check(&self) -> Result<(u64, u64)> {
+        let (s, kod) = (self.d.s(), self.d.k_odd());
+        let half = s / 2;
+        let total: u64 = (0..=half.saturating_sub(kod))
+            .into_par_iter()
+            .map(|first| -> Result<u64> {
+                if kod == 0 {
+                    return Ok(if first == 0 {
+                        self.psi_y_stats(&[])?.collisions
+                    } else {
+                        0
+                    });
                 }
-                i -= 1;
-                if core[i] != i + s / 2 - kod {
-                    break;
+                let mut core: Vec<usize> = (0..kod).collect();
+                core[0] = first;
+                for (t, c) in core.iter_mut().enumerate().skip(1) {
+                    *c = first + t;
                 }
-            }
-            core[i] += 1;
-            for j in i + 1..kod {
-                core[j] = core[j - 1] + 1;
-            }
-        }
+                if *core.last().unwrap() >= half {
+                    return Ok(0);
+                }
+                let mut sum = 0u64;
+                loop {
+                    sum += self.psi_y_stats(&core)?.collisions;
+                    // next lex combination with the first element fixed
+                    let mut i = kod;
+                    loop {
+                        if i <= 1 {
+                            return Ok(sum);
+                        }
+                        i -= 1;
+                        if core[i] != i + half - kod {
+                            break;
+                        }
+                    }
+                    core[i] += 1;
+                    for j in i + 1..kod {
+                        core[j] = core[j - 1] + 1;
+                    }
+                }
+            })
+            .try_reduce(|| 0, |a, b| Ok(a + b))?;
+        let b = self.d.vs.syndrome(&self.word)?;
+        let strata = self.d.vs.strata_counts(&b)?;
+        let z = strata.get(kod).copied().unwrap_or(0);
+        Ok((total, z))
     }
 
     /// Direct level-drop check for one assembled member: the cut
-    /// functional of `S = fibers(Y) u {x, x'}` equals
-    /// `<b_eff(x, x'), coefficients of prod_{u in W}(1 - u z)>` — used
-    /// by the identity tests; exposed for campaign spot checks.
-    pub fn member_functional(
-        &self,
-        word: &[u64],
-        core: &[usize],
-        i1: usize,
-        i2: usize,
-    ) -> Result<u64> {
-        let s = self.s();
+    /// functional of `S = fibers(Y) u {x, x'}` — compared by tests
+    /// against `<b_eff, prod (1 - u z) over the complement>`; exposed
+    /// for campaign spot checks.
+    pub fn member_functional(&self, core: &[usize], i1: usize, i2: usize) -> Result<u64> {
+        let s = self.d.s();
         let mut subset: Vec<usize> = Vec::with_capacity(2 * core.len() + 2);
         for &y in core {
             subset.push(y);
@@ -381,10 +443,9 @@ impl Descent {
         if subset.len() != 2 * core.len() + 2 {
             return Err(Error::OutOfRange("member overlaps its core fibers".into()));
         }
-        let dom = &self.dom;
-        let xs: Vec<u64> = subset.iter().map(|&i| dom[i]).collect();
-        let ys: Vec<u64> = subset.iter().map(|&i| word[i]).collect();
-        dd(self.p(), &xs, &ys)
+        let xs: Vec<u64> = subset.iter().map(|&i| self.d.dom[i]).collect();
+        let ys: Vec<u64> = subset.iter().map(|&i| self.word[i]).collect();
+        dd(self.d.p(), &xs, &ys)
     }
 }
 
@@ -406,7 +467,8 @@ mod tests {
         let (wev, wod) = d.channels(&w).unwrap();
         assert_eq!(d.unfold(&wev, &wod).unwrap(), w);
         // the interpolant reconstructs the word
-        let c = d.monomial_coeffs(&w).unwrap();
+        let wv = d.word(&w).unwrap();
+        let c = wv.coeffs();
         for (i, &x) in sg.elements().iter().enumerate() {
             let mut v = 0u64;
             for m in (0..16).rev() {
@@ -417,7 +479,7 @@ mod tests {
         // channel-syndrome slices agree with the dual view's syndrome
         // through the sign convention b_j = (-1)^j c_{k+j}
         let b = d.vs().syndrome(&w).unwrap();
-        let [b0, b1, b2] = d.channel_syndromes(&w).unwrap();
+        let [b0, b1, b2] = wv.channel_syndromes();
         for j in 0..b.len() {
             let expect = if j % 2 == 0 { b[j] } else { (97 - b[j]) % 97 };
             let got = match j % 2 {
@@ -437,20 +499,21 @@ mod tests {
         let sg = MultiplicativeSubgroup::new(p, s).unwrap();
         let d = Descent::new(&sg, k).unwrap();
         let w: Vec<u64> = (0..s as u64).map(|i| (i * i * i + 5 * i + 3) % p).collect();
+        let wv = d.word(&w).unwrap();
         let core = [1usize, 4, 6];
-        let psi: Vec<(usize, u64)> = d.psi_y(&w, &core).unwrap();
+        let psi: Vec<(usize, u64)> = wv.psi_y(&core).unwrap();
         let mut checked = 0;
         for (a, &(i1, v1)) in psi.iter().enumerate() {
             for &(i2, v2) in psi.iter().skip(a + 1) {
                 if i2 == (i1 + s / 2) % s {
                     continue;
                 }
-                let delta = d.member_functional(&w, &core, i1, i2).unwrap();
+                let delta = wv.member_functional(&core, i1, i2).unwrap();
                 // the dictionary: psi collision <=> vanishing functional
                 assert_eq!(v1 == v2, delta == 0, "dictionary at ({i1}, {i2})");
                 // the level drop: delta = <b_eff, prod (1 - u z) over W>
-                let beff = d
-                    .effective_syndrome(&w, sg.elements()[i1], sg.elements()[i2])
+                let beff = wv
+                    .effective_syndrome(sg.elements()[i1], sg.elements()[i2])
                     .unwrap();
                 let mut wt = vec![1u64];
                 for j in 0..s / 2 {
@@ -486,16 +549,25 @@ mod tests {
         let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
         let d = Descent::new(&sg, 7).unwrap();
         let top = crate::smooth::rung::top_word(&sg, 8, 12).unwrap();
-        assert_eq!(d.stratum_identity_check(&top).unwrap(), (96, 96));
+        assert_eq!(
+            d.word(&top).unwrap().stratum_identity_check().unwrap(),
+            (96, 96)
+        );
         let plain = top_word(65537, sg.elements(), 7, 16);
-        assert_eq!(d.stratum_identity_check(&plain).unwrap(), (128, 128));
+        assert_eq!(
+            d.word(&plain).unwrap().stratum_identity_check().unwrap(),
+            (128, 128)
+        );
         let w18: Vec<u64> = vec![
             14274, 45571, 60798, 30803, 16774, 53622, 23957, 63873, 57198, 44950, 44028, 28126,
             25267, 3166, 17634, 55356,
         ];
-        assert_eq!(d.stratum_identity_check(&w18).unwrap(), (180, 180));
+        assert_eq!(
+            d.word(&w18).unwrap().stratum_identity_check().unwrap(),
+            (180, 180)
+        );
         let wr: Vec<u64> = (0..16u64).map(|i| (i * 40961 + 11) % 65537).collect();
-        let (lhs, rhs) = d.stratum_identity_check(&wr).unwrap();
+        let (lhs, rhs) = d.word(&wr).unwrap().stratum_identity_check().unwrap();
         assert_eq!(lhs, rhs);
     }
 
@@ -508,8 +580,9 @@ mod tests {
         let sg = MultiplicativeSubgroup::new(p, s).unwrap();
         let d = Descent::new(&sg, k).unwrap();
         let w = top_word(p, sg.elements(), 15, 32);
+        let wv = d.word(&w).unwrap();
         let (x, xp) = (sg.elements()[3], sg.elements()[9]);
-        let beff = d.effective_syndrome(&w, x, xp).unwrap();
+        let beff = wv.effective_syndrome(x, xp).unwrap();
         let s2 = mulmod(x, xp, p);
         assert_eq!(beff[0], 1);
         assert_eq!(*beff.last().unwrap(), s2);

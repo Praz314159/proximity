@@ -4,16 +4,14 @@
 //! A word with a large list is the shared near-center of many codewords. In an
 //! MDS code that is rigid — distinct codewords agree on at most `k - 1` points —
 //! so a *large* cluster forces its members' agreement sets to interlock
-//! tightly. Whether that rigidity forces the frozen-symmetric-function
-//! structure of a bucket, or admits something else, is exactly the reduction
-//! question the data program turns on. This engine lets the answer emerge:
-//! grow a cluster, then read its structure with [`crate::rs::classify`].
-//!
-//! It is a **constructive probe of bucket-extremality**. If every large cluster
-//! it grows is algebraic (a bucket), that is evidence for the reduction; a
-//! large *non*-bucket cluster is a candidate new attack. And because it is
-//! output-sensitive — cost scales with the cluster, not `C(n, k)` — it reaches
-//! the `s = 64` accident regime where exact enumeration is infeasible.
+//! tightly. This engine grows such clusters directly; read the result's
+//! structure with [`crate::rs::classify`]. Every extremal word it and its
+//! GPU descendants have found is a bucket word (the records at
+//! `(32, 15, 17)` — lists 2423, 2202, 2674 — are spiked top words), so its
+//! remaining use is search under constraints: seed it inside a stratum and
+//! look for counterexamples. Because it is output-sensitive — cost scales
+//! with the cluster, not `C(n, k)` — it reaches the `s = 64` regime where
+//! exact enumeration is infeasible.
 //!
 //! The engine is `grow-and-center`: alternate **recruitment** (list-decode the
 //! current center) and **majority re-centering** to a fixed point. It is a

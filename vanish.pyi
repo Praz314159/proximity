@@ -141,7 +141,8 @@ def decode_profile(
     joint_distinct). The canonical frozen-invariant probe."""
 
 def c5_word(p: int, s: int, r: int, lam: List[int]) -> List[int]:
-    """The additive C.5 word sum_i (-1)^i lam_i x^{r-i} on mu_s."""
+    """The additive frozen-head word sum_i (-1)^i lam_i x^{r-i} on mu_s
+    (identifier kept for API stability)."""
 
 def top_word(p: int, s: int, r: int, c: int) -> List[int]:
     """The proven multiplicative extremal word x^{r-1} - (-1)^{r+1} zeta^c

@@ -74,7 +74,7 @@ pub fn lg_ball(n: u64, z: u64, q: &Integer) -> Result<Lg> {
     Ok(top.widen_hi(&tail_bits))
 }
 
-/// Certified enclosure of log2 E[list] = k log2 Q + log2 V(n, z) - n log2 Q:
+/// Certified enclosure of log2 E\[list\] = k log2 Q + log2 V(n, z) - n log2 Q:
 /// the exact expected number of codewords of ANY [n, k] code over the
 /// alphabet within radius z of a uniformly random word.
 pub fn lg_expected_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
@@ -92,14 +92,14 @@ pub struct CrossingRow {
     pub z: u64,
     /// Fractional radius z / n.
     pub delta: f64,
-    /// Certified lower endpoint of log2 E[list].
+    /// Certified lower endpoint of log2 E\[list\].
     pub lg_e_lo: f64,
-    /// Certified upper endpoint of log2 E[list].
+    /// Certified upper endpoint of log2 E\[list\].
     pub lg_e_hi: f64,
 }
 
 /// The certified first-moment crossing: the largest radius z such that
-/// log2 E[list] >= target is *certified* (lower endpoint clears the target),
+/// log2 E\[list\] >= target is *certified* (lower endpoint clears the target),
 /// plus the smallest z where it is certified NOT to (upper endpoint below).
 /// Between the two the bracket straddles the target (a gap of at most a few
 /// z-values at challenge scale, where one z step moves the log by ~log2 Q).
@@ -110,8 +110,8 @@ pub struct Crossing {
     pub certified_below: Option<CrossingRow>,
 }
 
-/// Binary-search the crossing of log2 E[list] against `target` over
-/// z in [z_min, z_max]. E[list] is strictly increasing in z, so the
+/// Binary-search the crossing of log2 E\[list\] against `target` over
+/// z in [z_min, z_max]. E\[list\] is strictly increasing in z, so the
 /// certified predicates are monotone and binary search is sound.
 pub fn first_moment_crossing(
     n: u64,
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn expected_list_is_exact_identity_small() {
-        // E[list] = |C| V / q^n for ANY code (linearity). Check the interval
+        // E\[list\] = |C| V / q^n for ANY code (linearity). Check the interval
         // against the exact rational at small parameters.
         let (n, k, z, q) = (16u64, 8u64, 7u64, 97u64);
         let q = Integer::from(q);

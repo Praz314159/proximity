@@ -1,10 +1,9 @@
-//! The linear-code layer: Reed–Solomon codes evaluated on a subgroup domain
-//! (`m = 1` in the useful-family framework: domain = subgroup), plus the
-//! structural combinatorics of the quantized ladder.
+//! The linear-code layer: Reed–Solomon codes evaluated on a subgroup
+//! domain, plus the structural combinatorics of the quantized ladder.
 //!
-//! The central connection (the exactness theorem): for the extremal
-//! "C.5-form" words `f = x^r - lambda_1 x^{r-1} + ... +- lambda_q x^{r-q}`
-//! with `(r - q - 1) < k <= r`, the list of `f` at radius `1 - r/n` is
+//! The central connection (the exactness theorem): for the frozen-head
+//! words `f = x^r - lambda_1 x^{r-1} + ... +- lambda_q x^{r-q}` with
+//! `(r - q - 1) < k <= r`, the list of `f` at radius `1 - r/n` is
 //! *exactly* the bucket `{S : e_i(S) = lambda_i}` — so bucket sizes computed
 //! by [`crate::census::buckets`] are exact list sizes beyond the Johnson radius.
 
@@ -87,8 +86,8 @@ impl ReedSolomon {
         1.0 - self.rate().sqrt()
     }
 
-    /// Whether `(r, q)` satisfies the Lemma-C.5 window `(r - q - 1) < k <= r`
-    /// at `m = 1`, i.e. the C.5-form word at these parameters certifies (and,
+    /// Whether `(r, q)` satisfies the exactness window `(r - q - 1) < k <= r`
+    /// (the survey's Lemma C.5), i.e. the frozen-head word at these parameters certifies (and,
     /// by exactness, *equals*) the bucket list at radius `1 - r/n`.
     #[must_use]
     pub fn in_c5_window(&self, r: usize, q: usize) -> bool {
@@ -116,7 +115,7 @@ impl ReedSolomon {
 }
 
 impl ReedSolomon {
-    /// Materialize the C.5-form (payoff) word on the domain: the "frozen head"
+    /// Materialize the frozen-head (payoff) word on the domain: the "frozen head"
     /// `f(x) = sum_{i=0}^q (-1)^i lambda_i x^{r-i}` (with `lambda_0 = 1`, `m = 1`).
     ///
     /// This is the *received word* whose list at radius `1 - r/n` is, by the

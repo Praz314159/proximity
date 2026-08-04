@@ -4,7 +4,7 @@
 //! `lambda = (lambda_1, ..., lambda_q)` is the number of `r`-subsets `S` of
 //! `mu_s` whose top elementary symmetric functions satisfy
 //! `e_i(S) = lambda_i` for `i <= q`. By the exactness theorem these are exact
-//! list sizes of the extremal C.5-form words beyond the Johnson radius
+//! list sizes of the extremal frozen-head words beyond the Johnson radius
 //! (see [`crate::rs::code`]), which makes them the central computational object of
 //! the proximity-gaps landscape.
 //!

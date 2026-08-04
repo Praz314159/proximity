@@ -26,8 +26,16 @@ jobs:
       - name: Clippy (python feature)
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --features python -- -D warnings
+      - name: Clippy (certified feature)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update && sudo apt-get install -y m4
+          cargo clippy --all-targets --features certified -- -D warnings
       - name: Tests (golden + property suite)
         run: cargo test --release
+      - name: Tests (certified feature)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --release --features certified
       - name: CLI smoke test
         run: |
           cargo run --release --bin vanish -- rung --p 3457 --s 32 --r 16 --q 2 | grep "bucket = 422"

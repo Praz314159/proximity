@@ -22,6 +22,7 @@ required-features = []
 rayon = "1.10"
 thiserror = "2"
 num-bigint = "0.4"
+rug = { version = "1.24", optional = true }
 pyo3 = { version = "0.22", features = ["abi3-py39"], optional = true }
 numpy = { version = "0.22", optional = true }
 
@@ -35,6 +36,9 @@ harness = false
 [features]
 default = []
 python = ["dep:pyo3", "dep:numpy", "pyo3/extension-module", "pyo3/num-bigint"]
+# The certified bracket arithmetic + attack tier (MPFR via rug).
+# Optional: rug builds gmp-mpfr-sys from source (~minutes, needs m4).
+certified = ["dep:rug"]
 
 [profile.release]
 lto = true
@@ -45,3 +49,7 @@ name = "bench_dp"
 
 [[example]]
 name = "bench_sweep"
+
+[[example]]
+name = "table4"
+required-features = ["certified"]

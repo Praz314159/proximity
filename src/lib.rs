@@ -44,10 +44,14 @@
 //! [`smooth::norms::ingest`] streams GPU norm tables), [`smooth::certify`]
 //! (per-prime structural certificates).
 //!
-//! **Applications.** [`toy`] (toy-protocol soundness) and [`attack`] (the
-//! float parameter-space attack-radius calculator). GPU campaign drivers
-//! live in `gpu/` (Python; each certifies itself against the `VsSpace`
-//! certificate before use).
+//! **Applications.** [`toy`] (toy-protocol soundness) and [`attack`], in
+//! two rigor tiers: the float parameter-space explorer (`attack::ladder`)
+//! and — behind the `certified` feature — the certified tier
+//! (`attack::certified`), whose brackets come from the third arithmetic,
+//! `math::enclosure`; reproductions of published attack tables are
+//! configuration in `examples/`. GPU campaign drivers live in `gpu/`
+//! (Python; each certifies itself against the `VsSpace` certificate
+//! before use).
 //!
 //! ## Validation contract
 //!
@@ -95,6 +99,8 @@ pub mod attack;
 pub mod toy;
 
 pub use error::{Error, Result};
+#[cfg(feature = "certified")]
+pub use math::enclosure;
 pub use math::{field, ring};
 
 #[cfg(feature = "python")]

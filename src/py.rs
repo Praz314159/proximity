@@ -979,6 +979,38 @@ fn exact_value_census(s: usize, r: usize, coord: usize) -> PyResult<(u64, u64, V
     err(crate::census::exact_value_census(s, r, coord))
 }
 
+/// One certified Table-4-style row (present only when the crate is built
+/// with the `certified` feature): the smallest radius z* whose exact-Elias +
+/// Lemma 6.12 chain certifies soundness >= 2^target_bits, for interleaving
+/// width s, block length total_len / s, rate 1/2, base alphabet size
+/// base_q, extension |F| = base_q^ext_degree. Returns
+/// (z_star, n, delta_star, lg_sound_lo, lg_sound_hi, crossing_pinned).
+#[cfg(feature = "certified")]
+#[pyfunction]
+fn elias_row(
+    py: Python<'_>,
+    s: u64,
+    total_len: u64,
+    base_q: u64,
+    ext_degree: u32,
+    target_bits: f64,
+) -> PyResult<(u64, u64, f64, f64, f64, bool)> {
+    use rug::ops::Pow;
+    let base = rug::Integer::from(base_q);
+    let ext = base.clone().pow(ext_degree);
+    let r = err(py.allow_threads(|| {
+        crate::attack::certified::elias_row(s, total_len, &base, &ext, target_bits)
+    }))?;
+    Ok((
+        r.z_star,
+        r.n,
+        r.delta_star,
+        r.lg_sound_lo,
+        r.lg_sound_hi,
+        r.crossing_pinned,
+    ))
+}
+
 /// Graham-Sloane class counts `out[c] = #{T in C(Z_s, t) : sum T = c mod s}`.
 #[pyfunction]
 fn gs_class_counts(py: Python<'_>, s: usize, t: usize) -> PyResult<Py<PyArray1<u64>>> {
@@ -1227,6 +1259,10 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;
+    #[cfg(feature = "certified")]
+    m.add_function(wrap_pyfunction!(elias_row, m)?)?;
+    m.add("KOALABEAR", crate::field::named::KOALABEAR)?;
+    m.add("BABYBEAR", crate::field::named::BABYBEAR)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;
     m.add_function(wrap_pyfunction!(cut_counts, m)?)?;

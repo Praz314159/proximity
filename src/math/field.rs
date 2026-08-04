@@ -364,12 +364,36 @@ pub fn top_elementary_symmetric(els: &[u64], q: usize, p: u64) -> Vec<u64> {
     e
 }
 
+/// Named primes of the deployment landscape — the single source of truth
+/// for the concrete fields that tests, gates, and attack reproductions
+/// share. Anything that needs "the KoalaBear prime" references these
+/// constants; nothing re-declares them.
+pub mod named {
+    /// KoalaBear: `2^31 - 2^24 + 1`. Smooth through `s = 2^24`
+    /// (`2^24 | p - 1`); deployments use the sextic extension
+    /// (`|F| = p^6`, `log2 |F| ≈ 185.93`).
+    pub const KOALABEAR: u64 = (1 << 31) - (1 << 24) + 1;
+    /// BabyBear: `2^31 - 2^27 + 1`. Smooth through `s = 2^27`
+    /// (`2^27 | p - 1`); quartic and quintic extensions appear in
+    /// deployments.
+    pub const BABYBEAR: u64 = (1 << 31) - (1 << 27) + 1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// `checked_binom` matches `binom` in range and returns `None` (rather
     /// than panicking) past u64.
+    #[test]
+    fn named_primes() {
+        assert_eq!(named::KOALABEAR, 2_130_706_433);
+        assert_eq!(named::BABYBEAR, 2_013_265_921);
+        assert!(is_prime(named::KOALABEAR) && is_prime(named::BABYBEAR));
+        assert_eq!((named::KOALABEAR - 1) % (1 << 24), 0);
+        assert_eq!((named::BABYBEAR - 1) % (1 << 27), 0);
+    }
+
     #[test]
     fn checked_binom_range_and_overflow() {
         assert_eq!(checked_binom(16, 8), Some(12870));

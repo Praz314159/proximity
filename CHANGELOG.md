@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **field**: `field::named` — the single home for named deployment
+  primes (`KOALABEAR`, `BABYBEAR`), documented and pinned; exposed to
+  Python as module constants.
+- **volumes (new, feature-gated)**: the certified interval log2 engine
+  from the `certified-floor` branch (issue #29), integrated generically
+  — MPFR directed rounding (`rug`, optional), certified ball enclosures
+  with geometric-tail capping, the exact Lemma 3.7 Elias count, the
+  Lemma 6.12 soundness map. Alphabet sizes are plain `Integer`
+  parameters; the library models no deployment — the Table-4
+  reproduction is configuration (`examples/table4.rs` wires
+  `field::named::KOALABEAR` into the generic engine). Golden pins:
+  the 13-row certified Table-4 profile and the wall floor
+  `delta* = 981106/2^21 = 0.46783`; `vanish.elias_row` exposes rows to
+  Python when built with the feature. The wall constant regenerates
+  from `main` with one command.
+
 - **norms**: `Cyclo::norm_crt` — exact field norms at any height, by
   CRT over `norm_mod` at 62-bit good primes with the height-law prime
   supply; the wrapper `norm_i128`'s overflow error has pointed to since

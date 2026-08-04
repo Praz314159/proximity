@@ -12,6 +12,7 @@ pub mod classify;
 pub mod cluster;
 pub mod code;
 pub mod decode;
+pub mod descent;
 pub mod linalg;
 pub mod moments;
 pub mod vs;

@@ -11,7 +11,7 @@
 //!
 //! Generic over the evaluation domain — nothing here depends on the
 //! multiplicative-subgroup structure; it decodes `RS[F_p, D, k]` for any domain
-//! `D`. The exactness bridge to [`crate::census::buckets`] (decode a C.5 word, check its
+//! `D`. The exactness bridge to [`crate::census::buckets`] (decode a frozen-head word, check its
 //! size equals the counted bucket) is validated in the tests, on a subgroup
 //! domain where buckets are defined.
 //!
@@ -244,7 +244,7 @@ impl ListOracle for DecodeOracle<'_> {
     }
 }
 
-// The exactness bridge (decode == bucket for a C.5 word) and the reduction
+// The exactness bridge (decode == bucket for a frozen-head word) and the reduction
 // defect are subgroup/bucket-specific, so they are not part of the generic
 // decode API: the bridge is validated in this module's tests, and the defect
 // (D4) is computed in the Python discovery layer via `list_decode` + the bucket
@@ -381,7 +381,7 @@ mod tests {
     use crate::domain::MultiplicativeSubgroup;
 
     /// The exactness bridge: at `p = 65537` (accident-free at `s = 16`, since
-    /// any `{-1,0,1}` accident needs `p <= w^{s/4} <= 8^4 = 4096`), the C.5
+    /// any `{-1,0,1}` accident needs `p <= w^{s/4} <= 8^4 = 4096`), the frozen-head
     /// word `f = x^8` (`r = 8`, `q = 1`, `lambda = 0`) has list size exactly
     /// the zero bucket `C(8, 4) = 70` at radius `1 - 8/16`. The decode axis and
     /// the count axis must agree on it.

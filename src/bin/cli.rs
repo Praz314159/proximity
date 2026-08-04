@@ -203,7 +203,7 @@ fn main() {
                 Verdict::ZeroBucketStructural { census2_by_weight } => {
                     println!(
                         "CERTIFIED (tier 2): zero bucket exactly structural = {} \
-                         (the rung/C.6 word's exact list);\nother buckets may merge: \
+                         (the rung word's exact list);\nother buckets may merge: \
                          [-2,2] census by weight:",
                         c.zero_class
                     );

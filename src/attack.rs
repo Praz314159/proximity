@@ -4,14 +4,14 @@
 //! Given a domain size `n` (power of two), message length `k`, and a required
 //! list size in bits (`list_bits = log2(eps * |F|)` in the grand-challenge
 //! normalization), this module optimizes over the quantized-ladder rung
-//! constructions — `(G, r, 2^t - 1)`-useful families of size
+//! constructions — `(G, r, 2^t - 1)` ladder families of size
 //! `C(s_G/2^t - [r0 != 0], floor(r/2^t))` on subgroups `s_G | n` — and returns
 //! the smallest radius `delta* = 1 - r/s_G` at which a certified list of the
 //! required size exists. Restricting to `t = 1` reproduces the antipodal
 //! (survey Table-5) method; the full ladder strictly improves it.
 //!
 //! Also provided: the structural-framework ceiling
-//! `delta_min - H2(rate)/list_bits` (no useful-family construction can beat
+//! `delta_min - H2(rate)/list_bits` (no ladder-family construction can beat
 //! it), and the Elias/volume threshold for codes defined over a small base
 //! field.
 
@@ -104,7 +104,7 @@ fn optimize(p: &AttackParams, t_max: u32) -> Result<Option<RungAttack>> {
             let r_lo = p.k.div_ceil(m);
             let r_hi = ((p.k - 1) / m + q + 1).min(s_g - 1);
             for r in r_lo..=r_hi {
-                // Lemma C.5 window: (r - q - 1) m < k <= r m
+                // the exactness window: (r - q - 1) m < k <= r m
                 if !(r.saturating_sub(q + 1) * m < p.k && p.k <= r * m) {
                     continue;
                 }
@@ -152,7 +152,7 @@ pub fn antipodal_attack(p: &AttackParams) -> Result<Option<RungAttack>> {
 }
 
 /// The structural-framework ceiling `delta_min - H2(rate)/list_bits`: by the
-/// ladder upper bound, no characteristic-zero useful-family construction can
+/// ladder upper bound, no characteristic-zero ladder construction can
 /// certify the required list size below this radius.
 pub fn hyperbola_ceiling(p: &AttackParams) -> Result<f64> {
     validate(p)?;

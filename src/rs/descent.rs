@@ -452,6 +452,7 @@ impl WordView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::smooth::rung;
 
     fn top_word(p: u64, dom: &[u64], k: u32, s: u32) -> Vec<u64> {
         dom.iter()
@@ -548,7 +549,7 @@ mod tests {
         // random word: both sides agree.
         let sg = MultiplicativeSubgroup::new(65537, 16).unwrap();
         let d = Descent::new(&sg, 7).unwrap();
-        let top = crate::smooth::rung::top_word(&sg, 8, 12).unwrap();
+        let top = rung::top_word(&sg, 8, 12).unwrap();
         assert_eq!(
             d.word(&top).unwrap().stratum_identity_check().unwrap(),
             (96, 96)

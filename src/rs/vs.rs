@@ -44,6 +44,7 @@ use crate::error::{Error, Result};
 use crate::field::{checked_binom, mulmod, powmod};
 use crate::rs::code::ReedSolomon;
 use crate::rs::decode::for_each_combination;
+use crate::rs::linalg::dd;
 use crate::rs::moments;
 use crate::smooth::rung;
 use rayon::prelude::*;
@@ -233,7 +234,7 @@ impl VsSpace {
         }
         let xs: Vec<u64> = subset.iter().map(|&i| self.sg.elements()[i]).collect();
         let ys: Vec<u64> = subset.iter().map(|&i| word[i] % p).collect();
-        crate::rs::linalg::dd(p, &xs, &ys)
+        dd(p, &xs, &ys)
     }
 
     // ---------------------------------------------------------------------

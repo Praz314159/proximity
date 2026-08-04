@@ -27,8 +27,9 @@
 
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
-use crate::field::{mulmod, powmod};
-use crate::rs::linalg::{dd, interp_eval};
+use crate::field::{batch_inv, mulmod, powmod};
+use crate::rs::decode::interp_eval_all;
+use crate::rs::linalg::dd;
 use crate::rs::vs::VsSpace;
 
 /// Fiber statistics of a derived word over its available points.
@@ -252,27 +253,38 @@ impl Descent {
         let nodes: Vec<u64> = core.iter().map(|&y| self.half_points[y]).collect();
         let gy: Vec<u64> = core.iter().map(|&y| wev[y]).collect();
         let hy: Vec<u64> = core.iter().map(|&y| wod[y]).collect();
-        let mut out = Vec::new();
-        for (i, &x) in self.dom.iter().enumerate() {
-            if core.contains(&(i % (s / 2))) {
-                continue;
+        // the available half points, each carrying two lifts
+        let avail_half: Vec<usize> = (0..s / 2).filter(|j| !core.contains(j)).collect();
+        let us: Vec<u64> = avail_half.iter().map(|&j| self.half_points[j]).collect();
+        // one batched-barycentric evaluation per channel over the distinct
+        // u-values (the decode hot kernel), plus one batched inversion of
+        // the V-products — no per-point interpolation or Fermat inverses
+        let (gs, hs) = if core.is_empty() {
+            (vec![0u64; us.len()], vec![0u64; us.len()])
+        } else {
+            (
+                interp_eval_all(&nodes, &gy, &us, p),
+                interp_eval_all(&nodes, &hy, &us, p),
+            )
+        };
+        let mut v_inv: Vec<u64> = us
+            .iter()
+            .map(|&u| {
+                nodes
+                    .iter()
+                    .fold(1u64, |v, &n| mulmod(v, (u + p - n) % p, p))
+            })
+            .collect();
+        batch_inv(&mut v_inv, p);
+        let mut out = Vec::with_capacity(2 * us.len());
+        for (a, &j) in avail_half.iter().enumerate() {
+            for i in [j, j + s / 2] {
+                let x = self.dom[i];
+                let num = ((word[i] + p - gs[a]) % p + p - mulmod(x, hs[a], p)) % p;
+                out.push((i, mulmod(num, v_inv[a], p)));
             }
-            let u = mulmod(x, x, p);
-            let (g, h) = if core.is_empty() {
-                (0, 0)
-            } else {
-                (
-                    interp_eval(p, &nodes, &gy, u)?,
-                    interp_eval(p, &nodes, &hy, u)?,
-                )
-            };
-            let mut v = 1u64;
-            for &n in &nodes {
-                v = mulmod(v, (u + p - n) % p, p);
-            }
-            let num = ((word[i] + p - g) % p + p - mulmod(x, h, p)) % p;
-            out.push((i, mulmod(num, powmod(v, p - 2, p), p)));
         }
+        out.sort_unstable();
         Ok(out)
     }
 

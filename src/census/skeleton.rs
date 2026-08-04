@@ -1,4 +1,4 @@
-//! `census::skeleton` — the G1 skeleton-census kernel (stages 65–67).
+//! `census::skeleton` — the G1 skeleton-census kernel.
 //!
 //! Counts the unit-equation solution census at level `L` through the
 //! proven criterion stack rather than brute enumeration: a solution

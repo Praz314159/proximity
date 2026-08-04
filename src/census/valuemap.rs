@@ -1,7 +1,7 @@
 //! `census::valuemap` — the meet-in-the-middle value-map census kernel.
 //!
-//! The workhorse behind the shell and rung censuses (stages 49/50/54,
-//! the four rung computations, the collision instruments): subset
+//! The workhorse behind the shell and rung censuses and the collision
+//! instruments: subset
 //! products `prod (point - dom[e])` over all subsets of a half
 //! exponent list, grouped by `(subset size, exponent sum mod level)`,
 //! joined across two halves under a size-and-sum constraint, and
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn shell_census_golden() {
-        // stage 49/50/54 pins, regenerated from the python toolkit at
+        // shell/rung census pins, regenerated from the python toolkit at
         // the standard prime (2026-07-27)
         let dom = dom32();
         let h1: Vec<usize> = (1..16).collect();
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn rung_census_golden() {
-        // the level-32 rung-ensemble class-1 census (stage 63 pins)
+        // the level-32 rung-ensemble class-1 census pins
         let dom = dom32();
         let h1: Vec<usize> = (1..16).collect();
         let h2: Vec<usize> = (16..32).collect();

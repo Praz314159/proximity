@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **volumes (new, feature-gated)**: the certified interval log2 engine
+  ported from the `certified-floor` branch (issue #29) — MPFR directed
+  rounding (`rug`, optional), certified Hamming-ball enclosures with
+  geometric-tail capping, the exact Lemma 3.7 Elias count, the
+  Lemma 6.12 soundness map, and the Table-4 driver
+  (`examples/table4.rs`). Golden pins include the full 13-row certified
+  Table-4 profile and the wall floor `delta* = 981106/2^21 = 0.46783`;
+  `vanish.elias_row` exposes a row to Python when built with the
+  feature. The wall constant regenerates from `main` with one command.
+
 - **norms**: `Cyclo::norm_crt` — exact field norms at any height, by
   CRT over `norm_mod` at 62-bit good primes with the height-law prime
   supply; the wrapper `norm_i128`'s overflow error has pointed to since

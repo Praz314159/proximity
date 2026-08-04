@@ -26,9 +26,10 @@
 //! cuts, cliques — which is the crate's **convention authority**: its
 //! certificate (subset ranking, moment rows, domain order, syndrome signs)
 //! is what every accelerated or external view must reproduce before it is
-//! trusted. Alongside: the moment cloud and cut kernels ([`rs::moments`]),
-//! cluster growth ([`rs::cluster`]), and the graded structure diagnostic
-//! ([`rs::classify`]).
+//! trusted. Alongside: the descent — the level-halving operation, channel
+//! words, and derived words ([`rs::descent`]) — the moment cloud and cut
+//! kernels ([`rs::moments`]), cluster growth ([`rs::cluster`]), and the
+//! graded structure diagnostic ([`rs::classify`]).
 //!
 //! **[`census`] — every exact counting kernel**, organized by what is
 //! counted: [`census::buckets`] (bucket sizes, which by the exactness

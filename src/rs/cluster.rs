@@ -118,7 +118,10 @@ pub fn grow(
 
 /// Build the sunflower center word from a pencil, without growing: the core on
 /// `core_coords`, and every other coordinate assigned round-robin to a petal
-/// codeword. The raw code-first seed shared by [`grow_from_pencil`], [`search`],
+/// codeword. ("Pencil" here is the search-era construction role of the
+/// same core-plus-petals object whose decomposition role lives in
+/// [`crate::rs::descent`] — one concept, two modes.) The raw code-first
+/// seed shared by [`grow_from_pencil`], [`search`],
 /// and direct callers.
 pub fn pencil_seed(
     rs: &ReedSolomon,

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **rs::descent (new, issue #30)**: the level-halving layer — the
+  `Descent` cell handle and per-word `WordView` (build-once/query-many):
+  channel splits and their inverse, the interpolant transform, channel
+  syndromes (interleaved slices, bridged to the dual view's sign
+  convention in tests), effective syndromes `b_eff`, derived words
+  `psi_Y` with fiber statistics (batched barycentric + batched
+  inversion), and the stratum identity as a rayon-parallel checkable.
+  Pins: the level-drop identity and the `psi` dictionary sampled
+  exhaustively at `(16, 7, 97)`; the stratum identity at the
+  maximal-class top word (96), plain (128), and W18 (180); the top
+  word's two-spike `b_eff` at `(32, 15)`. Python: `Descent` /
+  `WordView` classes.
+- **rs::linalg**: generic-node `dd` / `interp_eval`, and `dd_weights`
+  as the single divided-difference kernel (one batched inversion) —
+  `dd`, `dd_rows`, and `VsSpace::divided_difference` all route through
+  it.
+- **rs::vs**: the certificate gains `descent_pins` (fold sign, slice
+  interleaving, `psi_Y` normalization, computed on the canonical word)
+  for accelerated descent implementations to verify against.
 - **field**: `field::named` — the single home for named deployment
   primes (`KOALABEAR`, `BABYBEAR`), documented and pinned; exposed to
   Python as module constants.

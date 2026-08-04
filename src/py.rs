@@ -979,6 +979,32 @@ fn exact_value_census(s: usize, r: usize, coord: usize) -> PyResult<(u64, u64, V
     err(crate::census::exact_value_census(s, r, coord))
 }
 
+/// Tower cleanliness certificate at a named prime (ring::primes):
+/// one (s, tier, counts) triple per level from s_top down to 8.
+/// tier: 0 = Certified (full census empty), 1 = CertifiedAtUnit
+/// (zero class exact; counts = [-2,2] census by weight),
+/// 2 = CertifiedToWeight (counts = [wmax]), 3 = Dirty (counts =
+/// {-1,0,1} census by weight).
+#[pyfunction]
+fn certify_clean(
+    py: Python<'_>,
+    p: u64,
+    s_top: usize,
+    wmax_large: usize,
+) -> PyResult<Vec<(usize, u8, Vec<u64>)>> {
+    use crate::ring::primes::{certify_clean as cert, LevelCleanliness as L};
+    let c = err(py.allow_threads(|| cert(p, s_top, wmax_large)))?;
+    Ok(c.levels
+        .into_iter()
+        .map(|l| match l.verdict {
+            L::Certified => (l.s, 0, vec![]),
+            L::CertifiedAtUnit { census2_by_weight } => (l.s, 1, census2_by_weight),
+            L::CertifiedToWeight { wmax } => (l.s, 2, vec![wmax as u64]),
+            L::Dirty { census_by_weight } => (l.s, 3, census_by_weight),
+        })
+        .collect())
+}
+
 /// One certified Table-4-style row (present only when the crate is built
 /// with the `certified` feature): the smallest radius z* whose exact-Elias +
 /// Lemma 6.12 chain certifies soundness >= 2^target_bits, for interleaving
@@ -1374,6 +1400,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fold, m)?)?;
     m.add_function(wrap_pyfunction!(norms_mod_batch, m)?)?;
     m.add_function(wrap_pyfunction!(exact_value_census, m)?)?;
+    m.add_function(wrap_pyfunction!(certify_clean, m)?)?;
     #[cfg(feature = "certified")]
     m.add_function(wrap_pyfunction!(elias_row, m)?)?;
     m.add("KOALABEAR", crate::field::named::KOALABEAR)?;

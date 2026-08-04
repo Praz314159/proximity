@@ -6,5 +6,8 @@
 //! [`crate::census`].
 
 pub mod certify;
-pub mod norms;
+/// Moved to [`crate::ring::primes::norms`] (pure number theory —
+/// its interface never involved a subgroup); re-export keeps paths
+/// working.
+pub use crate::ring::primes::norms;
 pub mod rung;

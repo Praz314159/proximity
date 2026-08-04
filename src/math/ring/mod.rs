@@ -32,6 +32,7 @@
 mod cyclo;
 pub mod foldunits;
 pub mod ntt;
+pub mod primes;
 
 pub use cyclo::Cyclo;
 pub use foldunits::{

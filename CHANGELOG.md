@@ -2,18 +2,19 @@
 
 ## Unreleased
 
-- **ring::primes::kernel — the sort-join census (issue #4)**:
-  `sort_join` / `sort_join_empty`, the weight-capped census at any
-  even `s` via per-weight-pair joins that hold the smaller coordinate
-  half sorted and stream the larger against it. Memory stays at the
-  held side; reach scales in compute alone — the KoalaBear tower at
-  `wmax = 8` runs in 2.4 s where the direct recursion took 306 s.
-  `clean_at_level` routes `s > 32` through it and now refines dirty
-  large-`s` verdicts with a `{-1, 0, 1}` pass (unit-confined vs
-  zero-class dirt, weight-capped claims stated as such). Pinned
-  finding, cross-verified against `direct`: KoalaBear at `s = 64` is
-  CertifiedAtUnit to weight 8 — three dilation orbits (192 vectors) of
-  weight-8 `[-2, 2]` kernel vectors, zero class empty through 8.
+- **gpu: cloud-engine pod extensions (issue #16)**: `pool_cut_counts`
+  — batched syndrome fitness as one matmul per cloud chunk against the
+  resident rows (the rank-3 search's inner loop), with the per-term-
+  reduction doctrine carried into matmul form via 16-bit-split
+  accumulation (`mod_matmul`, shared helper) and a device-resident
+  output option (the pool API — no per-candidate host round-trip).
+  `DescentTier` — device-side channel splits, interpolant coefficients,
+  channel syndromes, and batched `psi_Y` fiber statistics; construction
+  certifies against the authority (`vanish.Descent`) on the canonical
+  and random words at two cores, plus the certificate's `descent_pins`
+  when the engine carries one. Both gated in `--selfcheck` (pool matmul
+  vs authority on a 23-pool; tier certification on full and light
+  engines).
 
 - **ring::primes (new; the prime axis of `Z[zeta_s]`)**: the kernel
   engines move down from `census` (they count ring elements, not

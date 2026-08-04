@@ -106,9 +106,6 @@ pub fn inv_mod(vals: &[u64], p: u64) -> Result<Vec<u64>> {
     Ok(out)
 }
 
-/// The divided-difference row of an index subset `T`: `row[x] =
-/// 1 / prod_{y in T, y != x}(x - y)` at the domain points of `T`, zero
-/// elsewhere — the functional with `D_T(w) = <row, w>`.
 /// Leading divided difference of the values `ys` over arbitrary nodes
 /// `xs` (generic degree): the coefficient of `x^{|xs|-1}` in the
 /// interpolant, `sum_i ys[i] / prod_{j != i} (xs[i] - xs[j])`. The
@@ -159,6 +156,9 @@ pub fn interp_eval(p: u64, xs: &[u64], ys: &[u64], t: u64) -> Result<u64> {
     Ok(acc)
 }
 
+/// The divided-difference row of an index subset `T`: `row[x] =
+/// 1 / prod_{y in T, y != x}(x - y)` at the domain points of `T`, zero
+/// elsewhere — the functional with `D_T(w) = <row, w>`.
 pub fn dd_rows(p: u64, domain: &[u64], subsets: &[Vec<usize>]) -> Result<Vec<Vec<u64>>> {
     let n = domain.len();
     subsets

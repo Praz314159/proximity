@@ -19,6 +19,15 @@ Every kernel (new or optimized) must ship with:
      direct ↔ MitM census).
 3. **A cost note** in the module docs: what the cost scales with (`p`?
    `2^{s/2}`? `C(s/2, w)(2c)^w`?), so users pick the right engine.
+4. **A named convention** — every kernel that produces or consumes
+   value-map data, and every dataset schema written by a campaign
+   driver, states which convention it uses *against the `VsSpace`
+   certificate* (`VsSpace.certificate()`: subset ranking, moment-row
+   convention, domain order, syndrome signs). Two silent-convention
+   incidents (a moment-row column read as a raw power sum; a
+   dictionary sign assumed rather than pinned) were each caught only
+   by a failing external cross-check; the certificate exists so that
+   agreement is declared and testable, not assumed.
 
 Why so strict: a sign-convention bug in the q≥2 triangularization once
 produced plausible-but-wrong buckets and was caught *only* because a sampled
@@ -79,11 +88,15 @@ longer than a bincount.
 
 ## Good first contributions
 
-See the issue tracker; the standing wishlist includes: norms & bad-set
-enumeration, the spectrum module (character sums / Gauss periods via FFT),
-toy-protocol winning-set tools, q=3 grid DP, CRT dual-residue counts for
-s ≥ 128, the s = 64 MitM sort-join, Montgomery arithmetic in hot loops, and
-criterion benchmarks.
+See the issue tracker; the current slate (2026-08-03): the certified
+volumes engine port (#29), the rs/pencil descent layer — channels,
+cores, pencils, derived words (#30), sign-resolved marked-complement
+enumeration (#31), the per-prime cleanliness certifier
+`certify_clean(p, level)` (#2), norms & bad-set enumeration (#1), the
+s = 64 MitM sort-join and q = 3 grid DP (#4), the GPU kernels
+(#15–#18), Montgomery arithmetic in hot loops, and criterion
+benchmarks. (The character-sum / Gauss-period spectrum module,
+formerly listed here, is closed as not consumed by the mainline.)
 
 ## License
 

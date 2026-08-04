@@ -44,6 +44,7 @@ use crate::error::{Error, Result};
 use crate::field::{checked_binom, mulmod, powmod};
 use crate::rs::code::ReedSolomon;
 use crate::rs::decode::for_each_combination;
+use crate::rs::descent::Descent;
 use crate::rs::linalg::dd;
 use crate::rs::moments;
 use crate::smooth::rung;
@@ -81,6 +82,28 @@ pub struct VsCertificate {
     /// Cut sizes of the coordinate syndromes `e_j`, `j = 1..min(4, s-k-1)`
     /// (pins the pairing end to end).
     pub coordinate_cuts: Vec<u64>,
+    /// Descent-convention pins (`None` for odd `s`): computed on the
+    /// canonical word `w[i] = dom[i]`.
+    pub descent_pins: Option<DescentPins>,
+}
+
+/// Pinned descent conventions (fold sign, slice interleaving, `psi_Y`
+/// normalization), for accelerated or external descent implementations
+/// to verify against — same doctrine as the main certificate.
+#[derive(Debug, Clone)]
+pub struct DescentPins {
+    /// Head of the even channel of the canonical word (fold sign +
+    /// half-point convention).
+    pub wev_head: Vec<u64>,
+    /// Head of the odd channel of the canonical word.
+    pub wod_head: Vec<u64>,
+    /// Heads of the three channel-syndrome slices `B_0, B_1, B_2`
+    /// (the interleaving offset).
+    pub slice_heads: [Vec<u64>; 3],
+    /// One `psi_Y` sample on the canonical word at the core
+    /// `{0, ..., k_odd - 1}`: `(domain index, value)` of the first
+    /// available point (the normalization).
+    pub psi_sample: (usize, u64),
 }
 
 impl VsSpace {
@@ -535,6 +558,24 @@ impl VsSpace {
             })
             .collect();
         let coordinate_cuts = self.cut_counts(&bs)?;
+        let descent_pins = if s % 2 == 0 {
+            let d = Descent::new(&self.sg, self.k)?;
+            let canonical: Vec<u64> = self.sg.elements().to_vec();
+            let (wev, wod) = d.channels(&canonical)?;
+            let wv = d.word(&canonical)?;
+            let [b0, b1, b2] = wv.channel_syndromes();
+            let head = |v: &[u64]| v.iter().take(4).copied().collect::<Vec<u64>>();
+            let core: Vec<usize> = (0..d.k_odd()).collect();
+            let psi = wv.psi_y(&core)?;
+            Some(DescentPins {
+                wev_head: head(&wev),
+                wod_head: head(&wod),
+                slice_heads: [head(&b0), head(&b1), head(&b2)],
+                psi_sample: psi[0],
+            })
+        } else {
+            None
+        };
         Ok(VsCertificate {
             version: 1,
             p: self.p(),
@@ -544,6 +585,7 @@ impl VsSpace {
             moment_rows,
             domain_head: self.sg.elements().iter().take(8).copied().collect(),
             coordinate_cuts,
+            descent_pins,
         })
     }
 

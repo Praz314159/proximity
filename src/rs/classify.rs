@@ -1,10 +1,13 @@
-//! The bucket-vs-entropy diagnostic (D1's classifier), graded.
+//! The bucket-vs-entropy diagnostic, graded.
 //!
-//! The open question the data program turns on: below the Elias wall, is the
-//! *extremal* (max-list) word a **bucket** — its near-codewords sharing frozen
-//! top-`q` symmetric functions — or **entropy-typical**, with no such coherence?
-//! The answer decides the defense lane (bucket-reduction vs a characteristic-`p`
-//! entropy converse). But real objects live on a *spectrum* between those poles
+//! The question this classifier was built to decide — below the Elias wall,
+//! is the *extremal* (max-list) word a **bucket**, its near-codewords sharing
+//! frozen top-`q` symmetric functions, or **entropy-typical**, with no such
+//! coherence? — is answered at every exhaustively measured cell: extremal
+//! words are bucket words, and the heavy regime's classification (spiked top
+//! words, discrete tiers) is exact where measured. The diagnostic remains
+//! the instrument that keeps that statement falsifiable, and it grades
+//! rather than labels, because real objects live on a *spectrum*
 //! — a union of a few buckets is still bucket-reducible yet is not perfectly
 //! frozen — so a binary label misroutes the fork. The order parameter is the
 //! **Shannon entropy of the symmetric-function distribution over the list**: for

@@ -5,15 +5,19 @@
 //! MDS code that is rigid — distinct codewords agree on at most `k - 1` points —
 //! so a *large* cluster forces its members' agreement sets to interlock
 //! tightly. Whether that rigidity forces the frozen-symmetric-function
-//! structure of a bucket, or admits something else, is exactly the reduction
-//! question the data program turns on. This engine lets the answer emerge:
-//! grow a cluster, then read its structure with [`crate::rs::classify`].
+//! structure of a bucket was the question this engine was built to answer,
+//! and the answer is in: at every exhaustively measured cell, every extremal
+//! word is a bucket word — the record words at `(32, 15, 17)` (L = 2423,
+//! 2202, 2674), all products of this engine and its GPU descendants, are
+//! spiked top words, exactly classified. Grow a cluster, then read its
+//! structure with [`crate::rs::classify`].
 //!
-//! It is a **constructive probe of bucket-extremality**. If every large cluster
-//! it grows is algebraic (a bucket), that is evidence for the reduction; a
-//! large *non*-bucket cluster is a candidate new attack. And because it is
-//! output-sensitive — cost scales with the cluster, not `C(n, k)` — it reaches
-//! the `s = 64` accident regime where exact enumeration is infeasible.
+//! Its current role is **adversarial**: search constrained strata for
+//! counterexamples to that classification — a heavy word of impulse rank
+//! >= 3 would refute the rigidity conjecture — and grow clusters at cells
+//! the exact enumerations cannot reach. Because it is output-sensitive —
+//! cost scales with the cluster, not `C(n, k)` — it reaches the `s = 64`
+//! regime where exact enumeration is infeasible.
 //!
 //! The engine is `grow-and-center`: alternate **recruitment** (list-decode the
 //! current center) and **majority re-centering** to a fixed point. It is a

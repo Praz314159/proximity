@@ -24,3 +24,174 @@
 
 pub mod kernel;
 pub mod norms;
+
+use crate::domain::MultiplicativeSubgroup;
+use crate::error::Result;
+
+/// Cleanliness of one level at a named prime, with the method and its
+/// coverage stated — the audit's tier vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LevelCleanliness {
+    /// Full kernel census empty at coefficients `[-2, 2]`: no bucket
+    /// coincidence beyond the structural floor, provably (the
+    /// `s <= 32` full-census route; `p`-independent cost).
+    Certified,
+    /// No kernel vector with coefficients `[-2, 2]` up to `wmax`
+    /// nonzero entries; weights above `wmax` unchecked (the large-`s`
+    /// route — never a silent claim).
+    CertifiedToWeight {
+        /// The inclusive weight bound the enumeration covered.
+        wmax: usize,
+    },
+    /// No `{-1, 0, 1}` kernel vector (the zero class is exact), but
+    /// `[-2, 2]` vectors exist: coincidences confined away from the
+    /// zero class. Counts by weight (dilation orbits of size `s`).
+    CertifiedAtUnit {
+        /// Nonzero `[-2, 2]` census counts, indexed by weight.
+        census2_by_weight: Vec<u64>,
+    },
+    /// `{-1, 0, 1}` kernel vectors exist: the prime creates
+    /// zero-class coincidences. Counts by weight.
+    Dirty {
+        /// Nonzero `{-1, 0, 1}` census counts, indexed by weight.
+        census_by_weight: Vec<u64>,
+    },
+}
+
+/// One level of a tower certificate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LevelEntry {
+    /// The level (domain size) this entry certifies.
+    pub s: usize,
+    /// Its verdict.
+    pub verdict: LevelCleanliness,
+}
+
+/// A tower cleanliness certificate for a named prime: one entry per
+/// level `s_top, s_top/2, ..., 8`. The named-prime instrument of the
+/// program's per-prime hypothesis — the interface data's arithmetic
+/// half is discharged by this object at the deployment prime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanCertificate {
+    /// The certified prime.
+    pub p: u64,
+    /// The tower top.
+    pub s_top: usize,
+    /// Per-level verdicts, top first.
+    pub levels: Vec<LevelEntry>,
+    /// The weight budget used at levels above the full-census range.
+    pub wmax_large: usize,
+}
+
+impl CleanCertificate {
+    /// Every level fully certified (no `CertifiedToWeight`, no
+    /// `Dirty`).
+    #[must_use]
+    pub fn fully_certified(&self) -> bool {
+        self.levels
+            .iter()
+            .all(|l| l.verdict == LevelCleanliness::Certified)
+    }
+    /// No level dirty (full certification or bounded-weight
+    /// certification everywhere).
+    #[must_use]
+    pub fn clean_as_checked(&self) -> bool {
+        !self
+            .levels
+            .iter()
+            .any(|l| matches!(l.verdict, LevelCleanliness::Dirty { .. }))
+    }
+}
+
+/// Cleanliness of a single level: the full census for `s <= 32`, the
+/// weight-bounded census above (`wmax_large` caps the enumeration; the
+/// verdict says so).
+pub fn clean_at_level(p: u64, s: usize, wmax_large: usize) -> Result<LevelCleanliness> {
+    let sg = MultiplicativeSubgroup::new(p, s)?;
+    if s <= 32 {
+        let counts2 = kernel::mitm(&sg, 2)?;
+        if counts2.iter().all(|&c| c == 0) {
+            return Ok(LevelCleanliness::Certified);
+        }
+        let counts1 = kernel::mitm(&sg, 1)?;
+        return Ok(if counts1.iter().all(|&c| c == 0) {
+            LevelCleanliness::CertifiedAtUnit {
+                census2_by_weight: counts2,
+            }
+        } else {
+            LevelCleanliness::Dirty {
+                census_by_weight: counts1,
+            }
+        });
+    }
+    let counts = kernel::direct(&sg, 2, wmax_large)?;
+    Ok(if counts.iter().all(|&c| c == 0) {
+        LevelCleanliness::CertifiedToWeight { wmax: wmax_large }
+    } else {
+        LevelCleanliness::Dirty {
+            census_by_weight: counts,
+        }
+    })
+}
+
+/// The tower certificate: [`clean_at_level`] at every level from
+/// `s_top` down to `8`, one prime, one call — the audit's
+/// "all levels at one `p`" requirement as an object.
+pub fn certify_clean(p: u64, s_top: usize, wmax_large: usize) -> Result<CleanCertificate> {
+    let mut levels = Vec::new();
+    let mut s = s_top;
+    while s >= 8 {
+        levels.push(LevelEntry {
+            s,
+            verdict: clean_at_level(p, s, wmax_large)?,
+        });
+        s /= 2;
+    }
+    Ok(CleanCertificate {
+        p,
+        s_top,
+        levels,
+        wmax_large,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::field::named;
+
+    #[test]
+    fn tower_certificates_at_named_and_bad_primes() {
+        // KoalaBear at s = 32: zero class exact, but one weight-14
+        // dilation orbit of [-2, 2] kernel vectors — CertifiedAtUnit,
+        // not Certified (found by this test; refines the campaign-era
+        // "KB clean at 32", which was the zero-class sense); the dirt
+        // is confined to the top level
+        let kb = certify_clean(named::KOALABEAR, 32, 4).unwrap();
+        assert!(!kb.fully_certified() && kb.clean_as_checked());
+        assert_eq!(kb.levels.len(), 3); // 32, 16, 8
+        match &kb.levels[0].verdict {
+            LevelCleanliness::CertifiedAtUnit { census2_by_weight } => {
+                assert_eq!(census2_by_weight[14], 32); // one orbit
+                assert_eq!(census2_by_weight.iter().sum::<u64>(), 32);
+            }
+            v => panic!("KB at 32: {v:?}"),
+        }
+        assert!(kb.levels[1..]
+            .iter()
+            .all(|l| l.verdict == LevelCleanliness::Certified));
+        // a strictly clean prime just above 2^31: fully certified
+        let clean = certify_clean(2_147_489_441, 32, 4).unwrap();
+        assert!(clean.fully_certified(), "{clean:?}");
+        // 77569: the bad-set poster prime — zero-class dirty at 32
+        let bad = certify_clean(77_569, 32, 4).unwrap();
+        assert!(!bad.clean_as_checked());
+        assert!(matches!(
+            bad.levels[0].verdict,
+            LevelCleanliness::Dirty { .. }
+        ));
+        // the large-s route reports its coverage honestly
+        let kb64 = clean_at_level(named::KOALABEAR, 64, 2).unwrap();
+        assert_eq!(kb64, LevelCleanliness::CertifiedToWeight { wmax: 2 });
+    }
+}

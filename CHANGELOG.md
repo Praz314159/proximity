@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **ring::primes (new; the prime axis of `Z[zeta_s]`)**: the kernel
+  engines move down from `census` (they count ring elements, not
+  subsets) and the norm-table / bad-set pipeline moves down from
+  `smooth` (its interface never involved a subgroup); both old paths
+  remain as re-exports. On top: `clean_at_level` and `certify_clean` —
+  the tower cleanliness certificate at a named prime, with tiered
+  verdicts (Certified / CertifiedAtUnit / CertifiedToWeight, coverage
+  always stated / Dirty) and a Python binding. Pinned finding:
+  KoalaBear at `s = 32` is CertifiedAtUnit, not Certified — zero class
+  exact, one weight-14 orbit of `[-2, 2]` kernel vectors; strictly
+  clean primes just above `2^31` are pinned alongside.
+
 - **rs::descent (new, issue #30)**: the level-halving layer — the
   `Descent` cell handle and per-word `WordView` (build-once/query-many):
   channel splits and their inverse, the interpolant transform, channel

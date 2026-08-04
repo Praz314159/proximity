@@ -238,6 +238,13 @@ KOALABEAR: int
 BABYBEAR: int
 """The BabyBear prime 2^31 - 2^27 + 1 (field::named)."""
 
+def certify_clean(p: int, s_top: int, wmax_large: int) -> List[Tuple[int, int, List[int]]]:
+    """Tower cleanliness certificate (ring::primes): one (s, tier,
+    counts) per level from s_top down to 8. tier: 0 Certified, 1
+    CertifiedAtUnit (zero class exact; counts = [-2,2] census by
+    weight), 2 CertifiedToWeight (counts = [wmax]), 3 Dirty (counts =
+    {-1,0,1} census by weight). GIL released."""
+
 def elias_row(s: int, total_len: int, base_q: int, ext_degree: int, target_bits: float) -> Tuple[int, int, float, float, float, bool]:
     """One certified Table-4-style row: (z_star, n, delta_star,
     lg_sound_lo, lg_sound_hi, crossing_pinned) for interleaving width s,

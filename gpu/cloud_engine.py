@@ -71,6 +71,17 @@ def unrank_block(ranks, s, r, T, xp):
     return out
 
 
+def mod_matmul(A, B, p, xp):
+    """(A @ B) % p for int64 device arrays with entries in [0, p),
+    p < 2^31: the matmul accumulates 16-bit-split halves of B so every
+    partial sum stays below 2^52 for inner dimensions up to ~2^5 rows
+    of slack (2^31 * 2^16 * dim) — the per-term-reduction doctrine in
+    matmul form."""
+    lo = (A @ (B & 0xFFFF)) % p
+    hi = (A @ (B >> 16)) % p
+    return (lo + (hi << 16)) % p
+
+
 def complement_rows(idx, dom_x, p, s, r, xp):
     """(B, r) subset indices -> (B, s-r+1) raw e-vectors of complements."""
     B = idx.shape[0]
@@ -179,6 +190,40 @@ class CloudEngine:
                 acc = ((rows64 * b[None, :]) % self.p).sum(axis=1) % self.p
                 zeros[i] += int((acc == 0).sum())
         return zeros.tolist()
+
+    def pool_cut_counts(self, B, tile_pool=512, out="host"):
+        """Batched syndrome fitness (#16 pool extension): |Z(b)| for a
+        pool of syndromes as one matmul per cloud chunk against the
+        resident rows — the rank-3 search's inner loop, ~ms per
+        candidate at (32, 15) vs ~seconds for a decode.
+
+        B: [N, cols] syndrome pool, host or device; out="device" keeps
+        the counts on-device for a resident optimizer (the pool API —
+        no per-candidate host round-trip).
+
+        Arithmetic: the matmul accumulates 16-bit-split halves of the
+        syndromes, so every partial sum stays below 2^52 (rows < 2^31,
+        half < 2^16, cols <= 33) — the per-term-reduction doctrine of
+        cut_counts carried into matmul form, same selfcheck gate.
+        """
+        xp = cp if GPU else np
+        Bd = xp.asarray(B, dtype=xp.int64) % self.p
+        n = Bd.shape[0]
+        assert Bd.shape[1] == self.cols, f"pool cols {Bd.shape[1]}"
+        zeros = xp.zeros(n, dtype=xp.int64)
+        Bt = Bd.T.copy()
+        for lo in range(0, self.total, self.chunk):
+            ranks = np.arange(lo, min(lo + self.chunk, self.total),
+                              dtype=np.int64)
+            rows, _ = self._device_rows(ranks)
+            rows64 = rows.astype(xp.int64)
+            for j in range(0, n, tile_pool):
+                acc = mod_matmul(rows64, Bt[:, j:j + tile_pool],
+                                 self.p, xp)
+                zeros[j:j + tile_pool] += (acc == 0).sum(axis=0)
+        if out == "device":
+            return zeros
+        return (cp.asnumpy(zeros) if GPU else zeros)
 
     def strata_counts(self, b):
         """Antipodal strata Z^(F) of one cut (F = pairs inside the rank
@@ -300,6 +345,201 @@ class CloudEngine:
         return manifest
 
 
+class DescentTier:
+    """#16 descent tier: channel splits, channel syndromes, and psi_Y
+    fiber statistics for batches of words, on device — the s = 64
+    stratum sweeps' acceleration path.
+
+    Certification before use (the engine's contract): the tier refuses
+    to serve until it reproduces the authority (vanish.Descent) on the
+    canonical word w[i] = dom[i] and on random words — channels,
+    interpolant coefficients, channel syndromes, and psi_Y statistics
+    at the head core and a random core. When the engine carries a full
+    certificate, the descent_pins block is checked as well.
+
+    Conventions mirrored from src/rs/descent.rs: half_points[j] =
+    dom[2j] with lifts dom[j], dom[j + s/2]; w_even[j] =
+    (w[j] + w[j+s/2])/2, w_odd[j] = (w[j] - w[j+s/2])/(2 dom[j]);
+    B_t[j] = c[k + 2j + t]; psi_Y from the core-interpolated channel
+    pair, normalized by the vanishing product."""
+
+    def __init__(self, engine, checks=8, seed=0):
+        self.eng = engine
+        p, s, k = engine.p, engine.s, engine.k
+        self.p, self.s, self.k = p, s, k
+        self.half = s // 2
+        assert s % 2 == 0, "descent needs an even level"
+        self.auth = vanish.Descent(p, s, k)
+        self.k_odd = self.auth.k_odd()
+        xp = cp if GPU else np
+        dom = engine.dom
+        self.dom_d = xp.asarray(dom)
+        self.inv2 = pow(2, p - 2, p)
+        self.inv_dom_d = xp.asarray(np.array(
+            [pow(int(x), p - 2, p) for x in dom[: self.half]],
+            dtype=np.int64))
+        # inverse-DFT interpolation: c_j = s^{-1} sum_i w_i dom_i^{-j}
+        sinv = pow(s, p - 2, p)
+        Mi = np.zeros((s, s), dtype=np.int64)
+        for i in range(s):
+            xinv = pow(int(dom[i]), p - 2, p)
+            v = sinv
+            for j in range(s):
+                Mi[j, i] = v
+                v = (v * xinv) % p
+        self.interp_t = xp.asarray(Mi.T.copy())
+        self._certify(checks, seed)
+
+    # -- batch operations (words: [N, s] int64 in [0, p)) --------------
+
+    def channels(self, W):
+        xp = cp if GPU else np
+        Wd = xp.asarray(W, dtype=xp.int64)
+        lo, hi = Wd[:, : self.half], Wd[:, self.half:]
+        wev = ((lo + hi) % self.p) * self.inv2 % self.p
+        wod = (((lo - hi) % self.p) * self.inv2 % self.p
+               * self.inv_dom_d[None, :]) % self.p
+        return wev, wod
+
+    def coeffs(self, W):
+        xp = cp if GPU else np
+        Wd = xp.asarray(W, dtype=xp.int64)
+        return mod_matmul(Wd, self.interp_t, self.p, xp)
+
+    def channel_syndromes(self, W):
+        """[N, 3, m] with B_t[j] = c[k + 2j + t] (zero past s - 1)."""
+        xp = cp if GPU else np
+        c = self.coeffs(W)
+        m = self.half - self.k // 2
+        out = xp.zeros((c.shape[0], 3, m), dtype=xp.int64)
+        for t in range(3):
+            js = np.arange(m)
+            keep = self.k + 2 * js + t < self.s
+            out[:, t, keep] = c[:, self.k + 2 * js[keep] + t]
+        return out
+
+    def _core_tables(self, core):
+        """Host precompute for a fixed core: the Lagrange evaluation
+        matrix over the available half points and the vanishing-product
+        inverses."""
+        p = self.p
+        dom = self.eng.dom
+        core = list(core)
+        assert len(core) == self.k_odd and all(
+            0 <= y < self.half for y in core), "bad core"
+        nodes = [int(dom[2 * y % self.s]) for y in core]
+        avail = [j for j in range(self.half) if j not in core]
+        us = [int(dom[2 * j % self.s]) for j in avail]
+        Lg = np.zeros((len(us), len(nodes)), dtype=np.int64)
+        for a, u in enumerate(us):
+            for c, n in enumerate(nodes):
+                num = den = 1
+                for c2, n2 in enumerate(nodes):
+                    if c2 != c:
+                        num = num * ((u - n2) % p) % p
+                        den = den * ((n - n2) % p) % p
+                Lg[a, c] = num * pow(den, p - 2, p) % p
+        v_inv = np.array(
+            [pow(int(np.prod([(u - n) % p for n in nodes]) % p),
+                 p - 2, p) for u in us], dtype=np.int64)
+        return avail, Lg, v_inv
+
+    def psi_y(self, W, core):
+        """psi_Y values for a batch of words at one shared core:
+        [N, 2 * navail], columns (2a, 2a+1) = the two lifts (j_a,
+        j_a + s/2) of the a-th available half point, ascending."""
+        xp = cp if GPU else np
+        p = self.p
+        Wd = xp.asarray(W, dtype=xp.int64)
+        wev, wod = self.channels(Wd)
+        avail, Lg, v_inv = self._core_tables(core)
+        core_ix = xp.asarray(np.array(core, dtype=np.int64))
+        Lg_t = xp.asarray(Lg.T.copy())
+        gs = mod_matmul(wev[:, core_ix], Lg_t, p, xp)
+        hs = mod_matmul(wod[:, core_ix], Lg_t, p, xp)
+        vd = xp.asarray(v_inv)
+        out = xp.zeros((Wd.shape[0], 2 * len(avail)), dtype=xp.int64)
+        for a, j in enumerate(avail):
+            for lift, i in enumerate((j, j + self.half)):
+                x = int(self.eng.dom[i])
+                num = (Wd[:, i] - gs[:, a] - x * hs[:, a] % p) % p
+                out[:, 2 * a + lift] = num * vd[a] % p
+        return out
+
+    def psi_stats(self, W, core, chunk=1 << 14):
+        """Per-word psi_Y fiber statistics [N, 4]: (total, distinct,
+        max_fiber, collisions), collisions counting unordered
+        non-antipodal equal-value pairs — the authority's psi_y_stats,
+        batched. The two lifts of one half point are antipodal, so the
+        correction is the per-column lift agreement count."""
+        xp = cp if GPU else np
+        V = self.psi_y(W, core)
+        n, m = V.shape
+        out = np.zeros((n, 4), dtype=np.int64)
+        out[:, 0] = m
+        for lo in range(0, n, chunk):
+            v = V[lo:lo + chunk]
+            eq = v[:, :, None] == v[:, None, :]
+            pairs = (eq.sum(axis=(1, 2)) - m) // 2
+            antip = (v[:, 0::2] == v[:, 1::2]).sum(axis=1)
+            fibers = eq.sum(axis=2)
+            vs = xp.sort(v, axis=1)
+            distinct = 1 + (vs[:, 1:] != vs[:, :-1]).sum(axis=1)
+            blk = np.stack([
+                (cp.asnumpy(x) if GPU else np.asarray(x)) for x in (
+                    distinct, fibers.max(axis=1), pairs - antip)], axis=1)
+            out[lo:lo + chunk, 1:] = blk
+        return out
+
+    # -- certification -------------------------------------------------
+
+    def _certify(self, checks, seed):
+        p, s = self.p, self.s
+        rng = np.random.default_rng(seed)
+        canonical = np.array(self.eng.dom, dtype=np.int64)
+        words = np.vstack([canonical[None, :],
+                           rng.integers(0, p, (checks, s))])
+        head_core = list(range(self.k_odd))
+        wev, wod = self.channels(words)
+        cs = self.coeffs(words)
+        syn = self.channel_syndromes(words)
+        stats = self.psi_stats(words, head_core)
+        rand_core = sorted(
+            rng.choice(self.half, self.k_odd, replace=False).tolist())
+        stats_r = self.psi_stats(words, rand_core)
+        for i, w in enumerate(words):
+            wl = [int(x) for x in w]
+            aev, aod = self.auth.channels(wl)
+            assert [int(x) for x in wev[i]] == aev, f"tier channels {i}"
+            assert [int(x) for x in wod[i]] == aod, f"tier channels {i}"
+            assert [int(x) for x in cs[i]] == \
+                self.auth.monomial_coeffs(wl), f"tier coeffs {i}"
+            view = self.auth.word(wl)
+            for t, bt in enumerate(view.channel_syndromes()):
+                assert [int(x) for x in syn[i, t]] == bt, \
+                    f"tier syndrome slice {t} word {i}"
+            for core, got in ((head_core, stats[i]), (rand_core,
+                                                      stats_r[i])):
+                want = view.psi_y_stats(core)
+                assert tuple(int(x) for x in got) == want, \
+                    f"tier psi stats word {i} core {core}: " \
+                    f"{tuple(got)} vs {want}"
+        cert = self.eng.cert
+        if cert is not None and cert.get("descent"):
+            pins = cert["descent"]
+            assert [int(x) for x in wev[0][:4]] == \
+                list(pins["wev_head"]), "descent_pins wev"
+            assert [int(x) for x in wod[0][:4]] == \
+                list(pins["wod_head"]), "descent_pins wod"
+            for t in range(3):
+                assert [int(x) for x in syn[0, t, :4]] == \
+                    list(pins["slice_heads"][t]), f"descent_pins B{t}"
+            v = self.psi_y(words[:1], head_core)
+            avail, _, _ = self._core_tables(head_core)
+            assert (avail[0], int(v[0, 0])) == \
+                tuple(pins["psi_sample"]), "descent_pins psi"
+
+
 def _cert_jsonable(cert):
     return {
         "version": cert["version"], "p": cert["p"], "s": cert["s"],
@@ -354,6 +594,17 @@ def selfcheck():
     st = eng.strata_counts(b18)
     assert st == [0, 48, 164, 180, 12], f"strata gate: {st}"
     print(f"  engine strata (18-word): {st} PASS")
+    # pool extension gate: the matmul path == the streamed path == the
+    # authority, on the pins plus a random pool (odd size to exercise
+    # the tile remainder)
+    pool = [b_top, b18] + [[int(x) for x in rng.integers(0, eng.p, eng.cols)]
+                           for rng in [np.random.default_rng(7)]
+                           for _ in range(21)]
+    got_pool = eng.pool_cut_counts(np.array(pool), tile_pool=8).tolist()
+    want_pool = [int(x) for x in eng.space.cut_counts(pool)]
+    assert got_pool == want_pool, f"pool gate: {got_pool} vs {want_pool}"
+    assert got_pool[:2] == [810, 404]
+    print(f"  pool matmul cut vs authority (23-pool): PASS")
     # C6 gate: value histograms vs the authority cloud
     rows_auth = np.array(
         [eng.space.moment_row(eng.space.subset_unrank(i))
@@ -370,6 +621,12 @@ def selfcheck():
     lite = CloudEngine(eng.p, eng.s, eng.k, light=True)
     lite.verify_pins(n=8)
     print("  light-engine pins vs authority: PASS")
+    # descent tier: construction IS the gate (authority + descent_pins
+    # checks on the canonical and random words); light engines certify
+    # through the authority path alone
+    DescentTier(eng, checks=8)
+    DescentTier(lite, checks=4)
+    print("  descent tier certified (full + light engines): PASS")
     print("SELFCHECK PASS")
 
 

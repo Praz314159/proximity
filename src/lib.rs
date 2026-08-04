@@ -10,24 +10,44 @@
 //! **Foundation.** [`field`] (`F_p` arithmetic), [`domain`] — the
 //! [`MultiplicativeSubgroup`](domain::MultiplicativeSubgroup) `mu_s <= F_p^*`
 //! (cosets, dilation) and the [`EvalDomain`](domain::EvalDomain) an RS code
-//! sits on. Shared by both families below.
+//! sits on. Shared by every layer above.
 //!
-//! **[`rs`] — generic Reed–Solomon + list-decoding discovery.**
-//! [`ReedSolomon`](rs::code::ReedSolomon) over *any* evaluation domain; exact
-//! and sampled list decoding ([`rs::decode`]); bottom-up cluster growth and
-//! optimization ([`rs::cluster`]); the graded structure diagnostic
-//! ([`rs::classify`]). Decoupled from the subgroup structure.
+//! **[`ring`] — exact `Z[zeta_s]` arithmetic, the characteristic-zero
+//! home.** [`Cyclo`](ring::Cyclo) on the negacyclic half-basis, with norms
+//! at every height (`norm_mod` / `norm_i128` / `norm_crt`); the fold; the
+//! fold units and their certified alpha tables ([`ring::foldunits`]); exact
+//! negacyclic NTT. What is computed here descends to every good prime at
+//! once.
 //!
-//! **[`smooth`] — the smooth multiplicative-subgroup program.** *Bucket* sizes
-//! `#{ |S| = r : e_i(S) = lambda_i }` ([`census::buckets`]), which by the
-//! exactness theorem are exact list sizes beyond the Johnson radius; the
-//! rung/ladder combinatorics ([`smooth::rung`]); the arithmetic accidents that
-//! inflate buckets ([`census::kernel`], [`smooth::norms`], with
-//! [`smooth::norms::ingest`] streaming GPU norm tables); and the structural
-//! certificates ([`smooth::certify`]).
+//! **[`rs`] — Reed–Solomon, both views.** The primal view
+//! [`ReedSolomon`](rs::code::ReedSolomon) over *any* evaluation domain (the
+//! frozen-head words, the ladder), with exact and sampled list decoding
+//! ([`rs::decode`]); the dual view [`VsSpace`](rs::vs::VsSpace) — syndromes,
+//! cuts, cliques — which is the crate's **convention authority**: its
+//! certificate (subset ranking, moment rows, domain order, syndrome signs)
+//! is what every accelerated or external view must reproduce before it is
+//! trusted. Alongside: the moment cloud and cut kernels ([`rs::moments`]),
+//! cluster growth ([`rs::cluster`]), and the graded structure diagnostic
+//! ([`rs::classify`]).
 //!
-//! **Applications.** [`toy`] (Section-6 toy-protocol soundness) and [`attack`]
-//! (the float parameter-space attack-radius calculator).
+//! **[`census`] — every exact counting kernel**, organized by what is
+//! counted: [`census::buckets`] (bucket sizes, which by the exactness
+//! theorem are exact list sizes beyond the Johnson radius),
+//! [`census::kernel`] (accident vectors), [`census::value`] (exact ring
+//! values), [`census::valuemap`] (value-map fibers mod `p`),
+//! [`census::skeleton`] (the unit-equation census), over the shared MITM
+//! keyed-table layer [`census::join`].
+//!
+//! **[`smooth`] — the smooth-subgroup layer.** [`smooth::rung`] (the
+//! quantized ladder and the closed-form top-word / GS-class layer),
+//! [`smooth::norms`] (per-prime accident inventories via cyclotomic norms;
+//! [`smooth::norms::ingest`] streams GPU norm tables), [`smooth::certify`]
+//! (per-prime structural certificates).
+//!
+//! **Applications.** [`toy`] (toy-protocol soundness) and [`attack`] (the
+//! float parameter-space attack-radius calculator). GPU campaign drivers
+//! live in `gpu/` (Python; each certifies itself against the `VsSpace`
+//! certificate before use).
 //!
 //! ## Validation contract
 //!

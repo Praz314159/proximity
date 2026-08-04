@@ -567,7 +567,7 @@ fn decode_profile(
     ))
 }
 
-/// The additive C.5 word `sum_i (-1)^i lambda_i x^{r-i}` on `mu_s` (the
+/// The additive frozen-head word `sum_i (-1)^i lambda_i x^{r-i}` on `mu_s` (the
 /// Theorem-B word class; `lam` holds `(e_1..e_q)`).
 #[pyfunction]
 fn c5_word(p: u64, s: usize, r: usize, lam: Vec<u64>) -> PyResult<Vec<u64>> {

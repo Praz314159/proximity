@@ -10,8 +10,8 @@
 //!
 //! - kernel census empty at `cmax = 2` ⟹ **every** `q = 1` bucket is a single
 //!   structural class; the maximum bucket equals the ladder value.
-//! - kernel census empty at `cmax = 1` ⟹ the zero-coset bucket (the rung /
-//!   C.6 word's exact list, by the exactness theorem) is exactly structural.
+//! - kernel census empty at `cmax = 1` ⟹ the zero-coset bucket (the
+//!   rung word's exact list, by the exactness theorem) is exactly structural.
 //!
 //! When a census is nonzero, the certificate reports the accident orbits and
 //! the *exact* inflated zero-bucket via the decomposition engine instead —

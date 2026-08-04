@@ -109,6 +109,56 @@ pub fn inv_mod(vals: &[u64], p: u64) -> Result<Vec<u64>> {
 /// The divided-difference row of an index subset `T`: `row[x] =
 /// 1 / prod_{y in T, y != x}(x - y)` at the domain points of `T`, zero
 /// elsewhere — the functional with `D_T(w) = <row, w>`.
+/// Leading divided difference of the values `ys` over arbitrary nodes
+/// `xs` (generic degree): the coefficient of `x^{|xs|-1}` in the
+/// interpolant, `sum_i ys[i] / prod_{j != i} (xs[i] - xs[j])`. The
+/// subgroup-indexed form is [`crate::rs::vs::VsSpace::divided_difference`];
+/// parity between the two is pinned in tests.
+pub fn dd(p: u64, xs: &[u64], ys: &[u64]) -> Result<u64> {
+    if xs.len() != ys.len() || xs.is_empty() {
+        return Err(Error::OutOfRange("dd: mismatched or empty nodes".into()));
+    }
+    let mut acc = 0u64;
+    for (i, &xi) in xs.iter().enumerate() {
+        let mut den = 1u64;
+        for (j, &xj) in xs.iter().enumerate() {
+            if j != i {
+                den = mulmod(den, (xi + p - xj) % p, p);
+            }
+        }
+        if den == 0 {
+            return Err(Error::OutOfRange("dd: repeated node".into()));
+        }
+        acc = (acc + mulmod(ys[i], powmod(den, p - 2, p), p)) % p;
+    }
+    Ok(acc)
+}
+
+/// Lagrange interpolant through `(xs, ys)`, evaluated at `t`.
+pub fn interp_eval(p: u64, xs: &[u64], ys: &[u64], t: u64) -> Result<u64> {
+    if xs.len() != ys.len() || xs.is_empty() {
+        return Err(Error::OutOfRange(
+            "interp_eval: mismatched or empty nodes".into(),
+        ));
+    }
+    let mut acc = 0u64;
+    for (i, &xi) in xs.iter().enumerate() {
+        let mut num = 1u64;
+        let mut den = 1u64;
+        for (j, &xj) in xs.iter().enumerate() {
+            if j != i {
+                num = mulmod(num, (t + p - xj) % p, p);
+                den = mulmod(den, (xi + p - xj) % p, p);
+            }
+        }
+        if den == 0 {
+            return Err(Error::OutOfRange("interp_eval: repeated node".into()));
+        }
+        acc = (acc + mulmod(ys[i], mulmod(num, powmod(den, p - 2, p), p), p)) % p;
+    }
+    Ok(acc)
+}
+
 pub fn dd_rows(p: u64, domain: &[u64], subsets: &[Vec<usize>]) -> Result<Vec<Vec<u64>>> {
     let n = domain.len();
     subsets
@@ -145,6 +195,40 @@ pub fn dd_rows(p: u64, domain: &[u64], subsets: &[Vec<usize>]) -> Result<Vec<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dd_and_interp_parity() {
+        use crate::domain::MultiplicativeSubgroup;
+        use crate::rs::vs::VsSpace;
+        let (p, s, k) = (97u64, 16usize, 7usize);
+        let sg = MultiplicativeSubgroup::new(p, s).unwrap();
+        let vs = VsSpace::new(&sg, k).unwrap();
+        let dom = sg.elements().to_vec();
+        let w: Vec<u64> = (0..s as u64).map(|i| (i * i * 13 + 5) % p).collect();
+        // parity with the subgroup-indexed divided difference on r-subsets
+        for sub in [[0usize, 1, 2, 3, 4, 5, 6, 7], [2, 3, 5, 7, 9, 11, 13, 15]] {
+            let xs: Vec<u64> = sub.iter().map(|&i| dom[i]).collect();
+            let ys: Vec<u64> = sub.iter().map(|&i| w[i]).collect();
+            assert_eq!(
+                dd(p, &xs, &ys).unwrap(),
+                vs.divided_difference(&w, &sub).unwrap()
+            );
+        }
+        // interp_eval reproduces values on the nodes and interpolates a
+        // known polynomial off them
+        let xs: Vec<u64> = dom[..5].to_vec();
+        let ys: Vec<u64> = xs.iter().map(|&x| (x * x + 3 * x + 1) % p).collect();
+        for (&x, &y) in xs.iter().zip(&ys) {
+            assert_eq!(interp_eval(p, &xs, &ys, x).unwrap(), y);
+        }
+        let t = dom[9];
+        assert_eq!(
+            interp_eval(p, &xs, &ys, t).unwrap(),
+            (t * t + 3 * t + 1) % p
+        );
+        // degree-(n-1) leading coefficient of that quadratic on 5 nodes is 0
+        assert_eq!(dd(p, &xs, &ys).unwrap(), 0);
+    }
     use crate::domain::MultiplicativeSubgroup;
     use crate::smooth::rung::top_word;
 

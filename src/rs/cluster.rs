@@ -4,20 +4,14 @@
 //! A word with a large list is the shared near-center of many codewords. In an
 //! MDS code that is rigid — distinct codewords agree on at most `k - 1` points —
 //! so a *large* cluster forces its members' agreement sets to interlock
-//! tightly. Whether that rigidity forces the frozen-symmetric-function
-//! structure of a bucket was the question this engine was built to answer,
-//! and the answer is in: at every exhaustively measured cell, every extremal
-//! word is a bucket word — the record words at `(32, 15, 17)` (L = 2423,
-//! 2202, 2674), all products of this engine and its GPU descendants, are
-//! spiked top words, exactly classified. Grow a cluster, then read its
-//! structure with [`crate::rs::classify`].
-//!
-//! Its current role is **adversarial**: search constrained strata for
-//! counterexamples to that classification — a heavy word of impulse rank
-//! >= 3 would refute the rigidity conjecture — and grow clusters at cells
-//! the exact enumerations cannot reach. Because it is output-sensitive —
-//! cost scales with the cluster, not `C(n, k)` — it reaches the `s = 64`
-//! regime where exact enumeration is infeasible.
+//! tightly. This engine grows such clusters directly; read the result's
+//! structure with [`crate::rs::classify`]. Every extremal word it and its
+//! GPU descendants have found is a bucket word (the records at
+//! `(32, 15, 17)` — lists 2423, 2202, 2674 — are spiked top words), so its
+//! remaining use is search under constraints: seed it inside a stratum and
+//! look for counterexamples. Because it is output-sensitive — cost scales
+//! with the cluster, not `C(n, k)` — it reaches the `s = 64` regime where
+//! exact enumeration is infeasible.
 //!
 //! The engine is `grow-and-center`: alternate **recruitment** (list-decode the
 //! current center) and **majority re-centering** to a fixed point. It is a

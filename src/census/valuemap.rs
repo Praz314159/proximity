@@ -14,7 +14,7 @@
 //! GPU pod's territory, not this kernel's). The Python mirror is
 //! `experiments/analysis/toolkit.py::half_tables`; the golden pins
 //! here were generated from it at the standard prime and are
-//! cross-checked exactly in `Z[zeta_s]` via [`Cyclo`] glue tests.
+//! cross-checked exactly in `Z[zeta_s]` via [`crate::ring::Cyclo`] glue tests.
 
 use crate::census::join::SortedMultiMap;
 use crate::error::{Error, Result};

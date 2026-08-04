@@ -4,10 +4,9 @@
 //! extremal words by *counting* (the bucket = symmetric-function level set,
 //! via the exactness theorem). This module is the dual: given any word
 //! `w in F_p^n` and a radius, it *decodes* — enumerates the actual codewords
-//! within that radius. It is the measurement arm of the arbitrary-word ->
-//! bucket comparison; the analytic arm (the syndrome dictionary and its
-//! descent) lives in the notes, and this decoder is what checks it against
-//! ground truth.
+//! within that radius. The counting kernels compute list sizes of structured
+//! words; this module measures the list of any word, structured or not, and
+//! the tests pin the two against each other on the frozen-head words.
 //!
 //! Generic over the evaluation domain — nothing here depends on the
 //! multiplicative-subgroup structure; it decodes `RS[F_p, D, k]` for any domain

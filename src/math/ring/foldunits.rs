@@ -345,7 +345,7 @@ fn torsion_pin(s: usize, j: usize, vj: usize, d: u64, a: &[i64], p: u64) -> Resu
 ///    archimedean residual of `w_j = A_j^D prod u_c^{-D alpha_c}` at
 ///    every conjugate-pair embedding, summed as a bound on
 ///    `sum max(0, log|w_j|)`.
-/// 3. The bound is below [`height_gap`] — by Voutier's explicit
+/// 3. The bound is below `height_gap` — by Voutier's explicit
 ///    height bound (and the fundamental unit of `Q(sqrt 2)` for the
 ///    quadratic subfield), `w_j` must be torsion.
 /// 4. Two independent cameras pin *which* root of unity, exactly

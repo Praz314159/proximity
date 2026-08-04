@@ -106,29 +106,48 @@ pub fn inv_mod(vals: &[u64], p: u64) -> Result<Vec<u64>> {
     Ok(out)
 }
 
+/// The divided-difference weights of a node set: `w[i] =
+/// 1 / prod_{j != i} (xs[i] - xs[j])`, with one batched inversion.
+/// The single implementation under [`dd`], [`dd_rows`], and
+/// [`crate::rs::vs::VsSpace::divided_difference`].
+pub fn dd_weights(p: u64, xs: &[u64]) -> Result<Vec<u64>> {
+    if xs.is_empty() {
+        return Err(Error::OutOfRange("dd_weights: empty nodes".into()));
+    }
+    let mut dens: Vec<u64> = xs
+        .iter()
+        .enumerate()
+        .map(|(i, &xi)| {
+            let mut d = 1u64;
+            for (j, &xj) in xs.iter().enumerate() {
+                if j != i {
+                    d = mulmod(d, (xi + p - xj) % p, p);
+                }
+            }
+            d
+        })
+        .collect();
+    if dens.contains(&0) {
+        return Err(Error::OutOfRange("dd_weights: repeated node".into()));
+    }
+    batch_inv(&mut dens, p);
+    Ok(dens)
+}
+
 /// Leading divided difference of the values `ys` over arbitrary nodes
 /// `xs` (generic degree): the coefficient of `x^{|xs|-1}` in the
 /// interpolant, `sum_i ys[i] / prod_{j != i} (xs[i] - xs[j])`. The
-/// subgroup-indexed form is [`crate::rs::vs::VsSpace::divided_difference`];
-/// parity between the two is pinned in tests.
+/// subgroup-indexed form [`crate::rs::vs::VsSpace::divided_difference`]
+/// delegates here.
 pub fn dd(p: u64, xs: &[u64], ys: &[u64]) -> Result<u64> {
-    if xs.len() != ys.len() || xs.is_empty() {
-        return Err(Error::OutOfRange("dd: mismatched or empty nodes".into()));
+    if xs.len() != ys.len() {
+        return Err(Error::OutOfRange("dd: mismatched nodes and values".into()));
     }
-    let mut acc = 0u64;
-    for (i, &xi) in xs.iter().enumerate() {
-        let mut den = 1u64;
-        for (j, &xj) in xs.iter().enumerate() {
-            if j != i {
-                den = mulmod(den, (xi + p - xj) % p, p);
-            }
-        }
-        if den == 0 {
-            return Err(Error::OutOfRange("dd: repeated node".into()));
-        }
-        acc = (acc + mulmod(ys[i], powmod(den, p - 2, p), p)) % p;
-    }
-    Ok(acc)
+    let wts = dd_weights(p, xs)?;
+    Ok(wts
+        .iter()
+        .zip(ys)
+        .fold(0u64, |acc, (&w, &y)| (acc + mulmod(w, y, p)) % p))
 }
 
 /// Lagrange interpolant through `(xs, ys)`, evaluated at `t`.
@@ -167,25 +186,11 @@ pub fn dd_rows(p: u64, domain: &[u64], subsets: &[Vec<usize>]) -> Result<Vec<Vec
             if t.iter().any(|&i| i >= n) {
                 return Err(Error::OutOfRange("subset index out of range".into()));
             }
-            let mut denoms: Vec<u64> = t
-                .iter()
-                .map(|&i| {
-                    let mut d = 1u64;
-                    for &j in t {
-                        if j != i {
-                            d = mulmod(d, (domain[i] + p - domain[j]) % p, p);
-                        }
-                    }
-                    d
-                })
-                .collect();
-            if denoms.contains(&0) {
-                return Err(Error::OutOfRange("repeated domain point in subset".into()));
-            }
-            batch_inv(&mut denoms, p);
+            let xs: Vec<u64> = t.iter().map(|&i| domain[i]).collect();
+            let wts = dd_weights(p, &xs)?;
             let mut row = vec![0u64; n];
-            for (&i, &d) in t.iter().zip(&denoms) {
-                row[i] = d;
+            for (&i, &w) in t.iter().zip(&wts) {
+                row[i] = w;
             }
             Ok(row)
         })

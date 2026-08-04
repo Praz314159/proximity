@@ -232,18 +232,8 @@ impl VsSpace {
             return Err(Error::OutOfRange("word length != s".into()));
         }
         let xs: Vec<u64> = subset.iter().map(|&i| self.sg.elements()[i]).collect();
-        let mut acc = 0u64;
-        for (a, &xa) in xs.iter().enumerate() {
-            let mut den = 1u64;
-            for (bi, &xb) in xs.iter().enumerate() {
-                if bi != a {
-                    den = mulmod(den, (xa + p - xb) % p, p);
-                }
-            }
-            let inv = powmod(den, p - 2, p);
-            acc = (acc + mulmod(word[subset[a]] % p, inv, p)) % p;
-        }
-        Ok(acc)
+        let ys: Vec<u64> = subset.iter().map(|&i| word[i] % p).collect();
+        crate::rs::linalg::dd(p, &xs, &ys)
     }
 
     // ---------------------------------------------------------------------

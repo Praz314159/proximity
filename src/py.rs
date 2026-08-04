@@ -700,6 +700,12 @@ impl PyCyclo {
     fn norm_i128(&self) -> PyResult<i128> {
         err(self.inner.norm_i128())
     }
+    /// Exact field norm at any height (CRT over `norm_mod` at 62-bit
+    /// good primes; arbitrary-precision result). The wrapper that
+    /// `norm_i128`'s overflow error points to.
+    fn norm_crt(&self, py: Python<'_>) -> PyResult<num_bigint::BigInt> {
+        err(py.allow_threads(|| self.inner.norm_crt()))
+    }
     fn weight(&self) -> usize {
         self.inner.weight()
     }

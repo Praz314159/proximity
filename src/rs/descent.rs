@@ -215,7 +215,26 @@ pub struct WordView<'a> {
     wod: Vec<u64>,
 }
 
-impl WordView<'_> {
+impl<'a> WordView<'a> {
+    /// Reassemble a view from cached parts (the Python binding's route:
+    /// it stores the per-word data across calls and re-borrows the cell
+    /// handle per query; the parts are `O(s)` clones).
+    pub(crate) fn from_parts(
+        d: &'a Descent,
+        word: Vec<u64>,
+        coeffs: Vec<u64>,
+        wev: Vec<u64>,
+        wod: Vec<u64>,
+    ) -> Self {
+        WordView {
+            d,
+            word,
+            coeffs,
+            wev,
+            wod,
+        }
+    }
+
     /// The cell handle this view descends under.
     #[must_use]
     pub fn descent(&self) -> &Descent {

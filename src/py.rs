@@ -1228,13 +1228,128 @@ impl PyVsSpace {
         d.set_item("moment_rows", cert.moment_rows)?;
         d.set_item("domain_head", cert.domain_head)?;
         d.set_item("coordinate_cuts", cert.coordinate_cuts)?;
+        if let Some(dp) = cert.descent_pins {
+            let dd = pyo3::types::PyDict::new_bound(py);
+            dd.set_item("wev_head", dp.wev_head)?;
+            dd.set_item("wod_head", dp.wod_head)?;
+            dd.set_item("slice_heads", dp.slice_heads.to_vec())?;
+            dd.set_item("psi_sample", dp.psi_sample)?;
+            d.set_item("descent", dd)?;
+        }
         Ok(d)
+    }
+}
+
+/// The descent handle: the level-halving operation `s -> s/2` at
+/// `(p, s, k)` — channel splits, channel syndromes, derived words.
+/// Build once per cell; build per-word views with `word()`.
+#[pyclass(name = "Descent")]
+struct PyDescent {
+    inner: std::sync::Arc<crate::rs::descent::Descent>,
+}
+
+#[pymethods]
+impl PyDescent {
+    #[new]
+    fn new(p: u64, s: usize, k: usize) -> PyResult<Self> {
+        let sg = err(MultiplicativeSubgroup::new(p, s))?;
+        Ok(PyDescent {
+            inner: std::sync::Arc::new(err(crate::rs::descent::Descent::new(&sg, k))?),
+        })
+    }
+    fn k_even(&self) -> usize {
+        self.inner.k_even()
+    }
+    fn k_odd(&self) -> usize {
+        self.inner.k_odd()
+    }
+    fn half_points(&self) -> Vec<u64> {
+        self.inner.half_points().to_vec()
+    }
+    fn channels(&self, word: Vec<u64>) -> PyResult<(Vec<u64>, Vec<u64>)> {
+        err(self.inner.channels(&word))
+    }
+    fn unfold(&self, wev: Vec<u64>, wod: Vec<u64>) -> PyResult<Vec<u64>> {
+        err(self.inner.unfold(&wev, &wod))
+    }
+    fn monomial_coeffs(&self, word: Vec<u64>) -> PyResult<Vec<u64>> {
+        err(self.inner.monomial_coeffs(&word))
+    }
+    /// The per-word view: the interpolant transform and channel split,
+    /// computed once and cached across queries.
+    fn word(&self, word: Vec<u64>) -> PyResult<PyWordView> {
+        let coeffs = err(self.inner.monomial_coeffs(&word))?;
+        let (wev, wod) = err(self.inner.channels(&word))?;
+        Ok(PyWordView {
+            d: self.inner.clone(),
+            word,
+            coeffs,
+            wev,
+            wod,
+        })
+    }
+}
+
+/// Per-word descent data (built by `Descent.word`): cached interpolant
+/// coefficients and channel words; per-pair and per-core queries.
+#[pyclass(name = "WordView")]
+struct PyWordView {
+    d: std::sync::Arc<crate::rs::descent::Descent>,
+    word: Vec<u64>,
+    coeffs: Vec<u64>,
+    wev: Vec<u64>,
+    wod: Vec<u64>,
+}
+
+impl PyWordView {
+    fn view(&self) -> crate::rs::descent::WordView<'_> {
+        crate::rs::descent::WordView::from_parts(
+            &self.d,
+            self.word.clone(),
+            self.coeffs.clone(),
+            self.wev.clone(),
+            self.wod.clone(),
+        )
+    }
+}
+
+#[pymethods]
+impl PyWordView {
+    fn coeffs(&self) -> Vec<u64> {
+        self.coeffs.clone()
+    }
+    fn channel_words(&self) -> (Vec<u64>, Vec<u64>) {
+        (self.wev.clone(), self.wod.clone())
+    }
+    fn channel_syndromes(&self) -> (Vec<u64>, Vec<u64>, Vec<u64>) {
+        let [b0, b1, b2] = self.view().channel_syndromes();
+        (b0, b1, b2)
+    }
+    fn effective_syndrome(&self, x: u64, xp: u64) -> PyResult<Vec<u64>> {
+        err(self.view().effective_syndrome(x, xp))
+    }
+    fn psi_y(&self, core: Vec<usize>) -> PyResult<Vec<(usize, u64)>> {
+        err(self.view().psi_y(&core))
+    }
+    /// `(total, distinct, max_fiber, collisions)` of `psi_Y`.
+    fn psi_y_stats(&self, core: Vec<usize>) -> PyResult<(usize, usize, usize, u64)> {
+        let s = err(self.view().psi_y_stats(&core))?;
+        Ok((s.total, s.distinct, s.max_fiber, s.collisions))
+    }
+    /// Both sides of the stratum identity (GIL released; rayon inside).
+    fn stratum_identity_check(&self, py: Python<'_>) -> PyResult<(u64, u64)> {
+        err(py.allow_threads(|| self.view().stratum_identity_check()))
+    }
+    fn member_functional(&self, core: Vec<usize>, i1: usize, i2: usize) -> PyResult<u64> {
+        err(self.view().member_functional(&core, i1, i2))
     }
 }
 
 #[pymodule]
 fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVsSpace>()?;
+    m.add_class::<PyDescent>()?;
+    m.add_class::<PyWordView>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;

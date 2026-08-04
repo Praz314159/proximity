@@ -2,7 +2,22 @@
 
 ## Unreleased
 
-- **vs**: new module `src/vs.rs` — the vanishing-syndrome geometry
+- **norms**: `Cyclo::norm_crt` — exact field norms at any height, by
+  CRT over `norm_mod` at 62-bit good primes with the height-law prime
+  supply; the wrapper `norm_i128`'s overflow error has pointed to since
+  the s = 64 census (issue #32). Python binding returns an
+  arbitrary-precision `int` (pyo3/num-bigint), GIL released.
+- **py**: the exported surface is now fully stubbed — `fold`,
+  `norms_mod_batch`, `exact_value_census` added to `vanish.pyi`
+  (issue #32).
+- **docs**: CONTRIBUTING gains the convention rule (every kernel and
+  dataset schema names its value convention against the `VsSpace`
+  certificate) and the wishlist is synced to the open-issue reality
+  (issue #32).
+
+## v0.5.0 (2026-08-02)
+
+- **vs**: new module `src/rs/vs.rs` (landed as `src/vs.rs`, moved beside its primal view in the census reorg below) — the vanishing-syndrome geometry
   `VsSpace(p, s, k)`, the dual (quotient) view of `ReedSolomon` and the
   crate's convention authority: syndrome coordinates (`b_j = (-1)^j
   c_{k+j}`, paired with raw complement e-vectors), the lex subset-ranking
@@ -80,6 +95,14 @@
 - **rung**: `top_word`, `word_from_syndrome`, `gs_class_counts` in Rust with
   golden pins (810 at 65537 AND the accident prime 97; 715; 17,678,835; the
   e_1-coordinate cut = 70).
+- **census (reorg, #27)**: every counting kernel gathered under
+  `src/census/` — `buckets`, `kernel`, `value`, `valuemap`, `skeleton` —
+  with the shared MITM keyed-table layer factored into `census::join`;
+  `vs` flattened and moved to `rs::vs`, beside its primal view.
+- **ring::foldunits (#28)**: certified alpha tables — the fold-unit
+  alpha certificate (`foldunit_alpha_certificate`), exact per-level
+  tables consumed by the skeleton kernel; the address-law gate's
+  certification anchor.
 
 ## v0.4.0 (2026-07-05)
 

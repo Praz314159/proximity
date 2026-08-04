@@ -207,12 +207,29 @@ class Cyclo:
     def eval_at(self, x: int, p: int) -> int: ...
     def norm_mod(self, p: int) -> int: ...
     def norm_i128(self) -> int: ...
+    def norm_crt(self) -> int:
+        """Exact field norm at any height (CRT over norm_mod at 62-bit
+        good primes; arbitrary-precision int). The wrapper that
+        norm_i128's overflow error points to."""
     def weight(self) -> int: ...
     def sq_sum(self) -> int: ...
     def height(self) -> int: ...
     def is_zero(self) -> bool: ...
     def as_int(self) -> int | None: ...
     def eq_int(self, v: int) -> bool: ...
+
+def fold(half: int, exp: int) -> Tuple[int, int]:
+    """The negacyclic fold: zeta^exp = sign * zeta^index on the
+    half-basis; returns (index, sign) with sign in {+1, -1}."""
+
+def norms_mod_batch(coeffs: List[List[int]], p: int, s: int) -> List[int]:
+    """Batch Cyclo.norm_mod over many coefficient vectors at one good
+    prime (subgroup built once; rayon-parallel)."""
+
+def exact_value_census(s: int, r: int, coord: int) -> Tuple[int, int, List[int]]:
+    """Exact Z[zeta_s] value census of coordinate coord over all
+    r-subsets: (distinct, intrinsic_floor, top5_multiplicities).
+    Prime-independent; integer-exact."""
 
 def fold_unit(s: int, e: int) -> Cyclo:
     """The fold unit u_e = (1 + zeta^e)/(1 - zeta^e), exact closed form."""

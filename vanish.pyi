@@ -231,6 +231,11 @@ def exact_value_census(s: int, r: int, coord: int) -> Tuple[int, int, List[int]]
     r-subsets: (distinct, intrinsic_floor, top5_multiplicities).
     Prime-independent; integer-exact."""
 
+def elias_row(s: int, total_len: int, target_bits: float) -> Tuple[int, int, float, float, float, bool]:
+    """One certified Table-4 row over the KoalaBear stack: (z_star, n,
+    delta_star, lg_sound_lo, lg_sound_hi, crossing_pinned). Present only
+    when the wheel is built with the volumes feature."""
+
 def fold_unit(s: int, e: int) -> Cyclo:
     """The fold unit u_e = (1 + zeta^e)/(1 - zeta^e), exact closed form."""
 

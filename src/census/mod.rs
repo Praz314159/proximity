@@ -26,7 +26,9 @@
 
 pub mod buckets;
 pub mod join;
-pub mod kernel;
+/// Moved to [`crate::ring::primes::kernel`] (it counts ring elements,
+/// not subsets); this re-export keeps existing paths working.
+pub use crate::ring::primes::kernel;
 pub mod skeleton;
 pub mod value;
 pub mod valuemap;

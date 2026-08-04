@@ -164,15 +164,6 @@ marked-complement enumeration (#31), the per-prime cleanliness certifier
 `s = 64` MitM sort-join and q=3 grid DP (#4), GPU kernels (#15–#18),
 Montgomery arithmetic in hot loops, criterion benches.
 
-## Context
-
-`vanish` is the kernel layer of a research program on proximity gaps and
-list decoding beyond the Johnson radius for the smooth-domain Reed–Solomon
-codes used in SNARKs. The program's evidence suite — paper-keyed
-verification gates consuming these kernels — lives in a companion
-repository; the library stands alone, and everything above is defined,
-computed, and certified without reference to it.
-
 ## License
 
 MIT or Apache-2.0, at your option.

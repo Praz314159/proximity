@@ -3,7 +3,7 @@
 use super::fold;
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
-use crate::field::mulmod;
+use crate::field::{is_prime, mulmod, powmod};
 
 /// An element of `Z[zeta_s] = Z[x]/(x^{s/2}+1)`, `s = 2 * coeffs.len()`
 /// a power of two; coefficients on the half-basis `1..zeta^{s/2-1}`.
@@ -345,12 +345,97 @@ impl Cyclo {
         }
         Ok(sign * m[half - 1][half - 1])
     }
+
+    /// Exact field norm at any height: CRT reconstruction over
+    /// [`Cyclo::norm_mod`] at 62-bit good primes — the wrapper that
+    /// [`Cyclo::norm_i128`]'s overflow error points to.
+    ///
+    /// For `s >= 4` the field `Q(zeta_s)` is totally imaginary, so the
+    /// norm of any element is nonnegative, and the height law
+    /// `N(v) <= (sum v_i^2)^(s/4)` (AM–GM over the conjugate pairs
+    /// against the Parseval identity) bounds it; residues at good
+    /// primes whose product exceeds twice that bound therefore
+    /// determine it exactly, with no big-integer arithmetic inside the
+    /// per-prime kernel. `s = 2` is the rational line, where the norm
+    /// is the (signed) coefficient itself.
+    pub fn norm_crt(&self) -> Result<num_bigint::BigInt> {
+        use num_bigint::{BigInt, BigUint};
+        let half = self.coeffs.len();
+        let s = self.s();
+        if half == 1 {
+            return Ok(BigInt::from(self.coeffs[0]));
+        }
+        // the height bound (sum v_i^2)^(s/4), then the prime supply
+        let sum_sq: u128 = self
+            .coeffs
+            .iter()
+            .map(|&c| (c as i128 * c as i128) as u128)
+            .sum();
+        let bound = BigUint::from(sum_sq).pow((s / 4) as u32);
+        let target = &bound * 2u32 + 1u32;
+        let mut acc = BigUint::from(0u32);
+        let mut modulus = BigUint::from(1u32);
+        let mut cand = ((1u64 << 61) / s as u64) * s as u64 + 1;
+        while modulus <= target {
+            while !is_prime(cand) {
+                cand -= s as u64;
+            }
+            let p = cand;
+            cand -= s as u64;
+            let r = self.norm_mod(p)?;
+            // incremental CRT: lift acc (mod modulus) to (mod modulus*p)
+            let m_mod_p = (&modulus % p).to_u64_digits().first().copied().unwrap_or(0);
+            let a_mod_p = (&acc % p).to_u64_digits().first().copied().unwrap_or(0);
+            let diff = (r + p - a_mod_p % p) % p;
+            let inv = powmod(m_mod_p, p - 2, p);
+            let t = mulmod(diff, inv, p);
+            acc += &modulus * t;
+            modulus *= p;
+        }
+        // norms are nonnegative for s >= 4; the representative in
+        // [0, modulus) is the value itself
+        debug_assert!(acc <= bound, "norm_crt exceeded the height bound");
+        Ok(BigInt::from(acc))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field::powmod;
+
+    #[test]
+    fn norm_crt_parity_and_overflow() {
+        use num_bigint::BigInt;
+        // parity with the exact i128 determinant wherever it fits
+        let cases: Vec<Vec<i64>> = vec![
+            vec![1, 0, 0, 0, 0, 0, 0, 0],   // 1: norm 1
+            vec![2, 0, 0, 0, 0, 0, 0, 0],   // 2: norm 2^8
+            vec![1, -1, 2, 0, 3, 0, -2, 1], // generic s = 16
+            vec![0, 1, 1, 0, -1, 2, 0, 0],
+        ];
+        for c in &cases {
+            let v = Cyclo::from_coeffs(c.clone()).unwrap();
+            let a = v.norm_i128().unwrap();
+            let b = v.norm_crt().unwrap();
+            assert_eq!(BigInt::from(a), b, "parity at {c:?}");
+        }
+        // an s = 64 weight vector where the determinant overflows i128
+        let mut big = vec![0i64; 32];
+        for (i, slot) in big.iter_mut().enumerate() {
+            *slot = if i % 3 == 0 { 3 } else { -3 };
+        }
+        let v = Cyclo::from_coeffs(big).unwrap();
+        assert!(v.norm_i128().is_err(), "expected i128 overflow");
+        let n = v.norm_crt().unwrap();
+        assert!(n > BigInt::from(0));
+        // self-check: the reconstructed value reduces correctly at a
+        // fresh good prime not used in the reconstruction (below 2^61)
+        let p = 1_270_222_529u64; // = 1 (mod 64), prime
+        assert!(is_prime(p) && (p - 1) % 64 == 0);
+        let r = v.norm_mod(p).unwrap();
+        let n_mod_p = ((&n) % BigInt::from(p)).to_string().parse::<u64>().unwrap();
+        assert_eq!(n_mod_p, r, "CRT value inconsistent with a fresh prime");
+    }
 
     #[test]
     fn fold_is_the_relation() {

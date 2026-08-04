@@ -150,7 +150,9 @@ pub fn dd(p: u64, xs: &[u64], ys: &[u64]) -> Result<u64> {
         .fold(0u64, |acc, (&w, &y)| (acc + mulmod(w, y, p)) % p))
 }
 
-/// Lagrange interpolant through `(xs, ys)`, evaluated at `t`.
+/// Lagrange interpolant through `(xs, ys)`, evaluated at `t` — the
+/// single-point convenience. For evaluation at many points, the batched
+/// barycentric kernel (`decode`'s `interp_eval_all`) is the hot path.
 pub fn interp_eval(p: u64, xs: &[u64], ys: &[u64], t: u64) -> Result<u64> {
     if xs.len() != ys.len() || xs.is_empty() {
         return Err(Error::OutOfRange(

@@ -36,7 +36,7 @@
 use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{batch_inv, mulmod, powmod};
-use crate::rs::decode::interp_eval_all;
+use crate::rs::decode::{for_each_combination, interp_eval_all};
 use crate::rs::linalg::dd;
 use crate::rs::vs::VsSpace;
 use rayon::prelude::*;
@@ -79,6 +79,7 @@ impl Descent {
         let p = sg.p();
         let dom = sg.elements().to_vec();
         let half_points: Vec<u64> = (0..s / 2).map(|j| dom[(2 * j) % s]).collect();
+        // group inverses by index: dom[i] = g^i, so dom[i]^{-1} = g^{s-i}
         let inv_dom: Vec<u64> = (0..s).map(|i| dom[(s - i) % s]).collect();
         let inv2 = powmod(2, p - 2, p);
         Ok(Descent {
@@ -143,15 +144,18 @@ impl Descent {
     /// `w(x) = w_even(x^2) + x * w_odd(x^2)`.
     pub fn channels(&self, word: &[u64]) -> Result<(Vec<u64>, Vec<u64>)> {
         self.check_word(word)?;
-        let (p, s) = (self.p(), self.s());
-        let mut wev = Vec::with_capacity(s / 2);
-        let mut wod = Vec::with_capacity(s / 2);
-        for j in 0..s / 2 {
-            let (a, b) = (word[j], word[j + s / 2]);
-            wev.push(mulmod((a + b) % p, self.inv2, p));
-            let d = mulmod((a + p - b) % p, self.inv2, p);
-            wod.push(mulmod(d, self.inv_dom[j], p));
-        }
+        let p = self.p();
+        let (lo, hi) = word.split_at(self.s() / 2);
+        let (wev, wod) = lo
+            .iter()
+            .zip(hi)
+            .zip(&self.inv_dom)
+            .map(|((&a, &b), &xinv)| {
+                let even = mulmod((a + b) % p, self.inv2, p);
+                let odd = mulmod(mulmod((a + p - b) % p, self.inv2, p), xinv, p);
+                (even, odd)
+            })
+            .unzip();
         Ok((wev, wod))
     }
 
@@ -161,13 +165,16 @@ impl Descent {
         if wev.len() != s / 2 || wod.len() != s / 2 {
             return Err(Error::OutOfRange("channel length != s/2".into()));
         }
-        let mut w = vec![0u64; s];
-        for j in 0..s / 2 {
-            let t = mulmod(self.dom[j], wod[j], p);
-            w[j] = (wev[j] + t) % p;
-            w[j + s / 2] = (wev[j] + p - t) % p;
-        }
-        Ok(w)
+        let (lo, hi): (Vec<u64>, Vec<u64>) = wev
+            .iter()
+            .zip(wod)
+            .zip(&self.dom)
+            .map(|((&e, &o), &x)| {
+                let t = mulmod(x, o, p);
+                ((e + t) % p, (e + p - t) % p)
+            })
+            .unzip();
+        Ok([lo, hi].concat())
     }
 
     /// Monomial coefficients of the full interpolant (degree `< s`):
@@ -219,6 +226,7 @@ impl<'a> WordView<'a> {
     /// Reassemble a view from cached parts (the Python binding's route:
     /// it stores the per-word data across calls and re-borrows the cell
     /// handle per query; the parts are `O(s)` clones).
+    #[cfg(feature = "python")]
     pub(crate) fn from_parts(
         d: &'a Descent,
         word: Vec<u64>,
@@ -360,29 +368,29 @@ impl<'a> WordView<'a> {
     pub fn psi_y_stats(&self, core: &[usize]) -> Result<PsiStats> {
         let vals = self.psi_y(core)?;
         let s = self.d.s();
-        let mut sorted: Vec<u64> = vals.iter().map(|&(_, v)| v).collect();
-        sorted.sort_unstable();
-        let mut distinct = 0usize;
-        let mut max_fiber = 0usize;
-        let mut run = 0usize;
-        let mut prev = None;
-        for &v in &sorted {
-            if prev == Some(v) {
-                run += 1;
-            } else {
-                distinct += 1;
-                run = 1;
-                prev = Some(v);
-            }
-            max_fiber = max_fiber.max(run);
-        }
-        let mut collisions = 0u64;
-        for (a, &(i, vi)) in vals.iter().enumerate() {
-            for &(j, vj) in vals.iter().skip(a + 1) {
-                if vi == vj && j != (i + s / 2) % s {
-                    collisions += 1;
-                }
-            }
+        // one sort, then per-run counting: a run of m equal values holds
+        // C(m, 2) pairs, minus its antipodal pairs (each seen from both
+        // ends, hence the halving)
+        let mut pairs: Vec<(u64, usize)> = vals.iter().map(|&(i, v)| (v, i)).collect();
+        pairs.sort_unstable();
+        let (mut distinct, mut max_fiber, mut collisions) = (0usize, 0usize, 0u64);
+        let mut start = 0usize;
+        while start < pairs.len() {
+            let v = pairs[start].0;
+            let end = start + pairs[start..].partition_point(|&(w, _)| w == v);
+            let run = &pairs[start..end];
+            distinct += 1;
+            max_fiber = max_fiber.max(run.len());
+            let antipodal: u64 = run
+                .iter()
+                .filter(|&&(_, i)| {
+                    run.binary_search_by_key(&((i + s / 2) % s), |&(_, j)| j)
+                        .is_ok()
+                })
+                .count() as u64;
+            let m = run.len() as u64;
+            collisions += m * (m - 1) / 2 - antipodal / 2;
+            start = end;
         }
         Ok(PsiStats {
             total: vals.len(),
@@ -399,45 +407,29 @@ impl<'a> WordView<'a> {
     pub fn stratum_identity_check(&self) -> Result<(u64, u64)> {
         let (s, kod) = (self.d.s(), self.d.k_odd());
         let half = s / 2;
-        let total: u64 = (0..=half.saturating_sub(kod))
-            .into_par_iter()
-            .map(|first| -> Result<u64> {
-                if kod == 0 {
-                    return Ok(if first == 0 {
-                        self.psi_y_stats(&[])?.collisions
-                    } else {
-                        0
+        let total: u64 = if kod == 0 {
+            self.psi_y_stats(&[])?.collisions
+        } else {
+            // parallel over the leading core element; the tail runs
+            // through the shared combination enumerator
+            (0..=half - kod)
+                .into_par_iter()
+                .map(|first| {
+                    let mut sum = 0u64;
+                    let mut core = vec![first; kod];
+                    for_each_combination(half - first - 1, kod - 1, |tail| {
+                        for (c, &t) in core[1..].iter_mut().zip(tail) {
+                            *c = first + 1 + t;
+                        }
+                        sum += self
+                            .psi_y_stats(&core)
+                            .expect("enumerated core stays inside the half domain")
+                            .collisions;
                     });
-                }
-                let mut core: Vec<usize> = (0..kod).collect();
-                core[0] = first;
-                for (t, c) in core.iter_mut().enumerate().skip(1) {
-                    *c = first + t;
-                }
-                if *core.last().unwrap() >= half {
-                    return Ok(0);
-                }
-                let mut sum = 0u64;
-                loop {
-                    sum += self.psi_y_stats(&core)?.collisions;
-                    // next lex combination with the first element fixed
-                    let mut i = kod;
-                    loop {
-                        if i <= 1 {
-                            return Ok(sum);
-                        }
-                        i -= 1;
-                        if core[i] != i + half - kod {
-                            break;
-                        }
-                    }
-                    core[i] += 1;
-                    for j in i + 1..kod {
-                        core[j] = core[j - 1] + 1;
-                    }
-                }
-            })
-            .try_reduce(|| 0, |a, b| Ok(a + b))?;
+                    sum
+                })
+                .sum()
+        };
         let b = self.d.vs.syndrome(&self.word)?;
         let strata = self.d.vs.strata_counts(&b)?;
         let z = strata.get(kod).copied().unwrap_or(0);

@@ -36,9 +36,9 @@ harness = false
 [features]
 default = []
 python = ["dep:pyo3", "dep:numpy", "pyo3/extension-module", "pyo3/num-bigint"]
-# The certified interval log2 engine (MPFR directed rounding via rug).
+# The certified bracket arithmetic + attack tier (MPFR via rug).
 # Optional: rug builds gmp-mpfr-sys from source (~minutes, needs m4).
-volumes = ["dep:rug"]
+certified = ["dep:rug"]
 
 [profile.release]
 lto = true
@@ -52,4 +52,4 @@ name = "bench_sweep"
 
 [[example]]
 name = "table4"
-required-features = ["volumes"]
+required-features = ["certified"]

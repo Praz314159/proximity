@@ -8,5 +8,7 @@
 //! out — as machine-checked interval brackets fit to cite; explore with
 //! the ladder, cite from the certified tier.
 
+#[cfg(feature = "certified")]
+pub mod certified;
 pub mod ladder;
 pub use ladder::*;

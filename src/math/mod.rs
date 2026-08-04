@@ -5,10 +5,15 @@
 //! - [`ring`]: the cyclotomic (negacyclic) ring `Z[zeta_s]` — the
 //!   [`ring::fold`] primitive, [`ring::Cyclo`], and the NTTs
 //!   ([`ring::ntt`]).
+//! - `enclosure` (behind the `certified` feature): certified bracket
+//!   arithmetic — interval enclosures of base-2 logarithms under MPFR
+//!   directed rounding, for quantities too large for the other two.
 //!
 //! The coding-theory layers (`crate::rs`, `crate::smooth`)
 //! consume these; both are re-exported at the crate root, so
 //! `crate::field` and `crate::ring` remain valid paths.
 
+#[cfg(feature = "certified")]
+pub mod enclosure;
 pub mod field;
 pub mod ring;

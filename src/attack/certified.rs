@@ -1,207 +1,33 @@
-//! Certified volume bounds — rigorous interval evaluation of Hamming-ball
-//! counting attacks at challenge scale.
+//! The certified attack tier: counting bounds and attack radii as
+//! machine-checked brackets ([`Lg`] enclosures from
+//! [`enclosure`](crate::enclosure)).
 //!
-//! The headline use is a certified reproduction of ABF26 (ePrint 2026/680)
-//! Table 4: the Elias attack radius per interleaving width. The chain is
-//! exact throughout — Lemma 3.7's counting identity
+//! The counting layer is generic over any `[n, k]` code on an alphabet
+//! of size `Q` (passed as a plain `Integer`; named fields live in
+//! [`crate::field::named`], extension sizes are `Integer::pow` at the
+//! call site): certified Hamming-ball volumes ([`lg_ball`], with
+//! Theta(n)-term sums never enumerated — the dominant term exact, the
+//! tail capped by a certified geometric series, which is what makes
+//! `n = 2^41` tractable), the exact expected-list identity
+//! ([`lg_expected_list`]), and the *original* Elias count of ABF26
+//! Lemma 3.7 ([`lg_elias_list`]) — not the MS77 approximation of their
+//! Corollary 3.8.
 //!
-//! ```text
-//!   |Λ(C, z/n)| >= V(n, z) / Q^(n-k),   V(n, z) = sum_{j<=z} C(n,j) (Q-1)^j
-//! ```
-//!
-//! (the *original* Elias statement, not the MS77 approximation of ABF's
-//! Corollary 3.8), fed through the Lemma 6.12 soundness map x / (|F| + 2x).
-//! Because attack radii are distances on the lattice {z/n}, the certified
-//! crossing is an integer z*, not a continuous delta — at small n this
-//! corrects the printed Table 4 tail rows upward by up to ~10^-3.
-//!
-//! Same machinery, secondary use: the expected-list identity
-//! `E[list] = Q^k V(n,z) / Q^n` (exact, linearity of expectation) gives the
-//! Diamond–Gruen (ePrint 2025/2010) random-words attack, and their Thm 2.5
-//! converts `P = Pr[d(u, C) <= z]` into a proximity-gap error floor
-//! `err >= (1 - 1/Q) P` (P needs a Bonferroni pairwise correction that is
-//! not implemented here; E[list] does not).
-//!
-//! Numbers at challenge scale (n = 2^41, log2 Q ~ 186) have ~10^14-bit
-//! exponents: exact integers are unrepresentable and f64 is unsound (the MDS
-//! weight enumerator alternates). Everything here is therefore computed as an
-//! *interval enclosure of the base-2 logarithm*, in MPFR floats with directed
-//! rounding: lower endpoints round down, upper endpoints round up, every
-//! operation, no exceptions. A returned `[lo, hi]` is a machine-checked
-//! bracket; certified claims use `lo` (for ">=") or `hi` (for "<=") only.
-//!
-//! Sums with Theta(n) terms are never enumerated: in the challenge regime
-//! `Q >> n` every sum here is dominated by its extreme term with an explicit
-//! per-step ratio, so we take the dominant term exactly and cap the rest by a
-//! certified geometric series. Exact-bignum cross-checks at small parameters
-//! pin the enclosures in tests.
+//! The attack layer chains these into certified radii: the Lemma 6.12
+//! soundness map ([`lg_soundness`]), Table-4-style rows ([`elias_row`] —
+//! because attack radii live on the lattice `{z/n}`, the certified
+//! crossing is an integer `z*`, which corrects printed continuous-delta
+//! tables at small `n`), and first-moment crossings
+//! ([`first_moment_crossing`], the Diamond–Gruen random-words attack).
+//! Reproductions of published tables are configuration at the edges
+//! (`examples/table4.rs`); [`ball_exact`] is the small-parameter bignum
+//! oracle the tests cross-check against.
 
 use crate::error::{Error, Result};
-use rug::float::{Constant, Round};
-use rug::ops::{AddAssignRound, DivAssignRound, MulAssignRound, SubAssignRound};
+use crate::math::enclosure::{lg_binom, Lg};
+use rug::float::Round;
+use rug::ops::SubAssignRound;
 use rug::{Float, Integer};
-
-/// Working precision (bits). Final log2 values are ~2^48 in magnitude and we
-/// want ~30 certified fractional bits; 192 leaves two orders of margin over
-/// accumulated rounding across ~10^4 operations.
-const PREC: u32 = 192;
-
-/// Interval `[lo, hi]` enclosing the base-2 logarithm of a positive quantity.
-#[derive(Clone, Debug)]
-pub struct Lg {
-    /// Lower endpoint (rounded down at every step).
-    pub lo: Float,
-    /// Upper endpoint (rounded up at every step).
-    pub hi: Float,
-}
-
-fn f(v: f64) -> Float {
-    Float::with_val(PREC, v)
-}
-
-/// ln(2) rounded in both directions (shared divisor for lngamma -> log2).
-fn ln2(round: Round) -> Float {
-    let mut x = Float::with_val(PREC, Constant::Log2);
-    // Constant::Log2 is correctly rounded to nearest; nudge one ulp outward.
-    match round {
-        Round::Down => x.next_down(),
-        Round::Up => x.next_up(),
-        _ => unreachable!(),
-    }
-    x
-}
-
-impl Lg {
-    /// Exact zero (the quantity 1).
-    pub fn zero() -> Self {
-        Lg {
-            lo: f(0.0),
-            hi: f(0.0),
-        }
-    }
-
-    /// log2 of an exact nonzero integer.
-    pub fn from_integer(x: &Integer) -> Self {
-        assert!(*x > 0);
-        let mut lo = Float::with_val_round(PREC, x, Round::Down).0;
-        let mut hi = Float::with_val_round(PREC, x, Round::Up).0;
-        lo.log2_round(Round::Down);
-        hi.log2_round(Round::Up);
-        Lg { lo, hi }
-    }
-
-    /// log2 of an exact nonzero u64.
-    pub fn from_u64(x: u64) -> Self {
-        Self::from_integer(&Integer::from(x))
-    }
-
-    /// Product of quantities = sum of logs.
-    pub fn mul(&self, o: &Lg) -> Lg {
-        let mut lo = self.lo.clone();
-        lo.add_assign_round(&o.lo, Round::Down);
-        let mut hi = self.hi.clone();
-        hi.add_assign_round(&o.hi, Round::Up);
-        Lg { lo, hi }
-    }
-
-    /// Quotient of quantities = difference of logs.
-    pub fn div(&self, o: &Lg) -> Lg {
-        let mut lo = self.lo.clone();
-        lo.sub_assign_round(&o.hi, Round::Down);
-        let mut hi = self.hi.clone();
-        hi.sub_assign_round(&o.lo, Round::Up);
-        Lg { lo, hi }
-    }
-
-    /// Integer power of the quantity = scale the log by `e >= 0`.
-    pub fn pow(&self, e: u64) -> Lg {
-        let ef = Float::with_val(PREC, e);
-        let mut lo = self.lo.clone();
-        lo.mul_assign_round(&ef, Round::Down);
-        let mut hi = self.hi.clone();
-        hi.mul_assign_round(&ef, Round::Up);
-        // negative logs scale the other way; swap if needed
-        if lo > hi {
-            std::mem::swap(&mut lo, &mut hi);
-        }
-        Lg { lo, hi }
-    }
-
-    /// Sum of quantities: log2(2^a + 2^b), each endpoint with its own
-    /// rounding direction.
-    pub fn add(&self, o: &Lg) -> Lg {
-        Lg {
-            lo: lg_add_dir(&self.lo, &o.lo, Round::Down),
-            hi: lg_add_dir(&self.hi, &o.hi, Round::Up),
-        }
-    }
-
-    /// Widen the upper endpoint by `bits` (multiplicative slack 2^bits).
-    pub fn widen_hi(&self, bits: &Float) -> Lg {
-        let mut hi = self.hi.clone();
-        hi.add_assign_round(bits, Round::Up);
-        Lg {
-            lo: self.lo.clone(),
-            hi,
-        }
-    }
-}
-
-/// Directed log2(2^a + 2^b): m + log2(1 + 2^(s - m)) with m = max, s = min.
-fn lg_add_dir(a: &Float, b: &Float, round: Round) -> Float {
-    let (m, s) = if a >= b { (a, b) } else { (b, a) };
-    let mut d = s.clone();
-    d.sub_assign_round(m, round); // <= 0
-    let mut t = d.exp2();
-    t.add_assign_round(&f(1.0), round);
-    t.log2_round(round);
-    t.add_assign_round(m, round);
-    t
-}
-
-/// Certified lower bound on log2(2^a - 2^b) given a lower bound `a_lo` on the
-/// first log and an upper bound `b_hi` on the second. None if the bracket
-/// cannot certify positivity.
-pub fn lg_sub_lower(a_lo: &Float, b_hi: &Float) -> Option<Float> {
-    if a_lo <= b_hi {
-        return None;
-    }
-    // a_lo + log2(1 - 2^(b_hi - a_lo)), rounding down throughout.
-    let mut d = b_hi.clone();
-    d.sub_assign_round(a_lo, Round::Up); // d < 0; round the exponent up so 2^d is over-estimated
-    let mut t = d.exp2(); // rounding of exp2: use next_up to stay safe
-    t.next_up();
-    let mut one_minus = f(1.0);
-    one_minus.sub_assign_round(&t, Round::Down);
-    if one_minus <= 0 {
-        return None;
-    }
-    one_minus.log2_round(Round::Down);
-    one_minus.add_assign_round(a_lo, Round::Down);
-    Some(one_minus)
-}
-
-/// log2 Gamma(x) as an interval, for integer x >= 1.
-fn lgamma2(x: u64) -> Lg {
-    if x <= 2 {
-        return Lg::zero(); // Gamma(1) = Gamma(2) = 1
-    }
-    let xf = Float::with_val(PREC, x);
-    let mut lo = xf.clone();
-    lo.ln_gamma_round(Round::Down);
-    let mut hi = xf;
-    hi.ln_gamma_round(Round::Up);
-    // divide by ln 2 (positive), directed
-    lo.div_assign_round(&ln2(Round::Up), Round::Down);
-    hi.div_assign_round(&ln2(Round::Down), Round::Up);
-    Lg { lo, hi }
-}
-
-/// log2 of the binomial coefficient C(n, k).
-pub fn lg_binom(n: u64, k: u64) -> Lg {
-    assert!(k <= n);
-    lgamma2(n + 1).div(&lgamma2(k + 1)).div(&lgamma2(n - k + 1))
-}
 
 /// Validate an alphabet size and return the log2 enclosures of `Q` and
 /// `Q - 1`. Sizes come from the caller — named fields live in
@@ -240,7 +66,7 @@ pub fn lg_ball(n: u64, z: u64, q: &Integer) -> Result<Lg> {
         ));
     }
     // sum <= top / (1 - r): widen hi by -log2(1 - r)
-    let mut one_minus = f(1.0);
+    let mut one_minus = Float::with_val(r.prec(), 1.0);
     one_minus.sub_assign_round(&r, Round::Down);
     let mut tail_bits = one_minus;
     tail_bits.log2_round(Round::Down);
@@ -359,11 +185,7 @@ pub fn lg_elias_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
 pub fn lg_soundness(lg_list: &Lg, ext_q: &Integer) -> Result<Lg> {
     let (lg_q, _) = lg_q_pair(ext_q)?;
     let two_x = lg_list.mul(&Lg::from_u64(2));
-    let den = Lg {
-        lo: lg_add_dir(&lg_q.lo, &two_x.lo, Round::Down),
-        hi: lg_add_dir(&lg_q.hi, &two_x.hi, Round::Up),
-    };
-    Ok(lg_list.div(&den))
+    Ok(lg_list.div(&lg_q.add(&two_x)))
 }
 
 /// One certified Table-4-style row: the attack radius for interleaved RS at
@@ -470,20 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn binom_encloses_exact() {
-        for &(n, k) in &[
-            (10u64, 3u64),
-            (24, 12),
-            (100, 47),
-            (1000, 400),
-            (5000, 2500),
-        ] {
-            let exact = Integer::from(n).binomial(k as u32);
-            assert_encloses(&lg_binom(n, k), &exact);
-        }
-    }
-
-    #[test]
     fn ball_encloses_exact() {
         let cases: &[(u64, u64, u64)] = &[
             (10, 4, 97),
@@ -559,19 +367,5 @@ mod tests {
                 assert!((r.delta_star * 1e5).round() / 1e5 == 0.46783);
             }
         }
-    }
-
-    #[test]
-    fn lg_sub_lower_sound() {
-        // log2(2^10 - 2^8) = log2(768) exactly
-        let a = f(10.0);
-        let b = f(8.0);
-        let lo = lg_sub_lower(&a, &b).unwrap();
-        let exact = Lg::from_u64(768);
-        assert!(lo <= exact.lo);
-        // and not absurdly loose
-        assert!(lo.to_f64_round(Round::Down) > 9.58);
-        // refuses to certify when bracket overlaps
-        assert!(lg_sub_lower(&f(8.0), &f(10.0)).is_none());
     }
 }

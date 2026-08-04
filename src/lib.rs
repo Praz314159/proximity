@@ -26,12 +26,12 @@
 //! [`smooth::norms::ingest`] streaming GPU norm tables); and the structural
 //! certificates ([`smooth::certify`]).
 //!
-//! **Applications.** [`toy`] (Section-6 toy-protocol soundness), [`attack`]
-//! (the float parameter-space attack-radius calculator), and — behind the
-//! `volumes` feature — `volumes`, the certified interval log2 engine (MPFR
-//! directed rounding): generic certified counting over alphabet sizes,
-//! consumed by the attack reproductions in `examples/`; [`attack`] is its
-//! fast uncertified counterpart.
+//! **Applications.** [`toy`] (Section-6 toy-protocol soundness) and
+//! [`attack`], in two rigor tiers: the float parameter-space explorer
+//! (`attack::ladder`) and — behind the `certified` feature — the
+//! certified tier (`attack::certified`), whose brackets come from the
+//! third arithmetic, `math::enclosure`. Reproductions of published
+//! attack tables are configuration in `examples/`.
 //!
 //! ## Validation contract
 //!
@@ -77,10 +77,10 @@ pub mod smooth;
 // Applications.
 pub mod attack;
 pub mod toy;
-#[cfg(feature = "volumes")]
-pub mod volumes;
 
 pub use error::{Error, Result};
+#[cfg(feature = "certified")]
+pub use math::enclosure;
 pub use math::{field, ring};
 
 #[cfg(feature = "python")]

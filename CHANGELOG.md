@@ -24,6 +24,15 @@
   when the engine carries one. Both gated in `--selfcheck` (pool matmul
   vs authority on a 23-pool; tier certification on full and light
   engines).
+  Optimization pass (pod-session measurements: 38 s/pass rebuild,
+  ~89 ms/candidate marginal): `materialize()` — the resident cloud
+  (P1), per-chunk uint32 device arrays serving every counter, so the
+  unrank + e-vector rebuild disappears from all subsequent calls; the
+  fused zero-count RawKernel (P2) — per-term Barrett reduction in
+  registers, atomics only on the rare zero hits, no materialized
+  accumulators — as `pool_cut_counts`'s GPU default, with the matmul
+  path retained for CPU and as the cross-check; selfcheck gates
+  residency across all counters and fused == matmul == authority.
 
 - **ring::primes (new; the prime axis of `Z[zeta_s]`)**: the kernel
   engines move down from `census` (they count ring elements, not

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **norms: accident events (data canon R1)**: `AccidentEvent` — the
+  atomic row of the accidents table, one row per (prime, symmetry
+  orbit) incidence carrying the witness vector: (level, p, weight,
+  norm, valuation, cofactor, orbit_rep, orbit_size, height, max_coeff,
+  provenance, source). The symmetry group (rotation x Galois, order
+  `s^2/2`) and the canonical representative (lex-least member) are
+  stated on and owned by `norms::events`. `accident_events(&NormTable)`
+  inverts a table into its complete event set through the shared
+  `NormEngine` (extracted from `norm_table`'s hot loop), certified by
+  the per-(norm, weight) orbit-occupancy check.
+  `badset_and_events_from_gpu_bin` retains filtered events in the same
+  factoring pass as the bad set, from `.exemplars.bin` files validated
+  by norm recompute (the device-dedup association gate); checkpoints
+  record the retention filter and each binary's row count (also closing
+  a pre-existing crash window where a bin newer than its meta could
+  replay a shard). Gates: orbit machinery vs `Cyclo::norm_i128` at
+  s = 8; the s = 16 inventory pinned (11 bad primes, die-out 881 with
+  prime norm, one orbit of 128); events re-derive `bad_set` and the
+  s = 32 poster-prime census (independent MitM path); ingest events
+  match the CPU inversion from non-canonical exemplars; scrambled
+  dumps rejected; events checkpoint roundtrip. The orbit generators
+  are the ring's own (`Cyclo::galois`/`Cyclo::dilate`; the packed
+  array form is set-key/serialization only), the pattern/coefficient
+  convention is shared (`decode_pattern`), and `bad_set_from_table`
+  lets one enumeration serve both the bad set and the events
+  (campaign shape; measured (32,12,1): table 3.0s, bad set +51ms,
+  events +8.7s one-shot).
+
 - **vs: cut-driven exact list sizes (issue #48)**: `list_sizes_cut`
   — the ownership identity run as an algorithm. Every codeword at
   agreement `t >= r` contributes all of its `r`-subsets to the cut,

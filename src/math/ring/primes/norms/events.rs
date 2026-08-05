@@ -61,6 +61,54 @@ pub enum EventSource {
     GpuIngest,
 }
 
+/// Which accident primes an ingest-scale run retains events for.
+///
+/// The CPU path ([`accident_events`]) is always complete — at `s <= 32`
+/// the whole inventory is small. At ingest scale (`s = 64`, billions of
+/// norms) a large fraction of norms carry *some* bad prime, so
+/// unfiltered retention would produce an event table nobody consumes;
+/// the actual demand is named deployment primes (bad-word recipes) and
+/// the die-out frontier (large primes). A prime is admitted when it is
+/// listed explicitly or reaches `min_p`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventFilter {
+    /// Primes retained regardless of size (deployment primes).
+    pub primes: Vec<u64>,
+    /// Retain every prime at or above this bound (die-out hunting).
+    pub min_p: u64,
+}
+
+impl EventFilter {
+    /// Retain only the listed primes.
+    #[must_use]
+    pub fn named(primes: Vec<u64>) -> Self {
+        EventFilter {
+            primes,
+            min_p: u64::MAX,
+        }
+    }
+    /// Retain every prime at or above `min_p`.
+    #[must_use]
+    pub fn at_least(min_p: u64) -> Self {
+        EventFilter {
+            primes: Vec::new(),
+            min_p,
+        }
+    }
+    /// Whether events at `p` are retained.
+    #[must_use]
+    pub fn admits(&self, p: u64) -> bool {
+        p >= self.min_p || self.primes.contains(&p)
+    }
+    /// Canonical one-line form, used to guard checkpoint compatibility:
+    /// a resumed run must be retaining exactly what the checkpoint did.
+    #[must_use]
+    pub fn spec(&self) -> String {
+        let ps: Vec<String> = self.primes.iter().map(u64::to_string).collect();
+        format!("min_p={};primes={}", self.min_p, ps.join(","))
+    }
+}
+
 /// One accident event: a prime meeting one symmetry orbit of kernel
 /// vectors. The canonical row of the accidents table.
 #[derive(Debug, Clone, PartialEq, Eq)]

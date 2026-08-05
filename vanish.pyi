@@ -99,6 +99,11 @@ def list_decode(p: int, domain: List[int], k: int, word: List[int], t: int) -> n
     vector) agreeing with `word` on >= t of the n = len(domain) coordinates.
     `domain` is any distinct-point set (e.g. subgroup(p, s)). Requires t >= k."""
 
+def list_sizes(p: int, domain: List[int], k: int, words: List[List[int]], t: int) -> List[int]:
+    """Exact distinct list sizes for a batch of words in one sweep:
+    shared barycentric tables per information set, lex-first dedup,
+    rayon inside; GIL released."""
+
 def anneal_pencil(
     p: int, domain: List[int], k: int, t: int, petals: int, steps: int, seed: int
 ) -> Tuple[List[int], List[List[int]], List[int]]:

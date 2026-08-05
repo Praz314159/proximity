@@ -11,6 +11,20 @@
   summation), rayon inside, GIL released in the Python binding. The
   campaign confirm path without per-word round-trips.
 
+- **gpu: cloud-engine pod extensions (issue #16)**: `pool_cut_counts`
+  — batched syndrome fitness as one matmul per cloud chunk against the
+  resident rows (the rank-3 search's inner loop), with the per-term-
+  reduction doctrine carried into matmul form via 16-bit-split
+  accumulation (`mod_matmul`, shared helper) and a device-resident
+  output option (the pool API — no per-candidate host round-trip).
+  `DescentTier` — device-side channel splits, interpolant coefficients,
+  channel syndromes, and batched `psi_Y` fiber statistics; construction
+  certifies against the authority (`vanish.Descent`) on the canonical
+  and random words at two cores, plus the certificate's `descent_pins`
+  when the engine carries one. Both gated in `--selfcheck` (pool matmul
+  vs authority on a 23-pool; tier certification on full and light
+  engines).
+
 - **ring::primes (new; the prime axis of `Z[zeta_s]`)**: the kernel
   engines move down from `census` (they count ring elements, not
   subsets) and the norm-table / bad-set pipeline moves down from

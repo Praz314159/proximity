@@ -46,12 +46,15 @@ pub enum LevelCleanliness {
     /// No `{-1, 0, 1}` kernel vector (the zero class is exact), but
     /// `[-2, 2]` vectors exist: coincidences confined away from the
     /// zero class. Counts by weight (dilation orbits of size `s`).
+    /// On the weight-capped route (`s > 32`) both claims hold to the
+    /// certificate's `wmax_large`, not absolutely.
     CertifiedAtUnit {
         /// Nonzero `[-2, 2]` census counts, indexed by weight.
         census2_by_weight: Vec<u64>,
     },
     /// `{-1, 0, 1}` kernel vectors exist: the prime creates
-    /// zero-class coincidences. Counts by weight.
+    /// zero-class coincidences. Counts by weight (weight-capped on the
+    /// `s > 32` route).
     Dirty {
         /// Nonzero `{-1, 0, 1}` census counts, indexed by weight.
         census_by_weight: Vec<u64>,
@@ -105,7 +108,10 @@ impl CleanCertificate {
 
 /// Cleanliness of a single level: the full census for `s <= 32`, the
 /// weight-bounded census above (`wmax_large` caps the enumeration; the
-/// verdict says so).
+/// verdict says so). Above the MitM range the census runs through
+/// [`kernel::sort_join`], whose memory stays at the held join side —
+/// `wmax_large` up to ~10 is live at `s = 64` where the direct
+/// recursion stopped near 6.
 pub fn clean_at_level(p: u64, s: usize, wmax_large: usize) -> Result<LevelCleanliness> {
     let sg = MultiplicativeSubgroup::new(p, s)?;
     if s <= 32 {
@@ -124,12 +130,18 @@ pub fn clean_at_level(p: u64, s: usize, wmax_large: usize) -> Result<LevelCleanl
             }
         });
     }
-    let counts = kernel::direct(&sg, 2, wmax_large)?;
-    Ok(if counts.iter().all(|&c| c == 0) {
-        LevelCleanliness::CertifiedToWeight { wmax: wmax_large }
+    let counts2 = kernel::sort_join(&sg, 2, wmax_large)?;
+    if counts2.iter().all(|&c| c == 0) {
+        return Ok(LevelCleanliness::CertifiedToWeight { wmax: wmax_large });
+    }
+    let counts1 = kernel::sort_join(&sg, 1, wmax_large)?;
+    Ok(if counts1.iter().all(|&c| c == 0) {
+        LevelCleanliness::CertifiedAtUnit {
+            census2_by_weight: counts2,
+        }
     } else {
         LevelCleanliness::Dirty {
-            census_by_weight: counts,
+            census_by_weight: counts1,
         }
     })
 }
@@ -190,8 +202,9 @@ mod tests {
             bad.levels[0].verdict,
             LevelCleanliness::Dirty { .. }
         ));
-        // the large-s route reports its coverage honestly
-        let kb64 = clean_at_level(named::KOALABEAR, 64, 2).unwrap();
-        assert_eq!(kb64, LevelCleanliness::CertifiedToWeight { wmax: 2 });
+        // the large-s route reports its coverage honestly; the join
+        // engine reaches past the direct recursion's range
+        let kb64 = clean_at_level(named::KOALABEAR, 64, 6).unwrap();
+        assert_eq!(kb64, LevelCleanliness::CertifiedToWeight { wmax: 6 });
     }
 }

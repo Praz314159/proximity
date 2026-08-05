@@ -71,6 +71,53 @@ def unrank_block(ranks, s, r, T, xp):
     return out
 
 
+KERNEL_POOL_ZERO = r"""
+__device__ __forceinline__ unsigned long long bmod64(
+        unsigned long long x, unsigned int p, unsigned long long minv) {
+    unsigned long long q = __umul64hi(x, minv);
+    unsigned long long r = x - q * (unsigned long long)p;
+    while (r >= p) r -= p;
+    return r;
+}
+
+extern "C" __global__ void pool_zero_count(
+        const long long n_rows, const int n_pool,
+        const unsigned int p, const unsigned long long minv,
+        const unsigned int* __restrict__ rows,
+        const unsigned int* __restrict__ pool,
+        unsigned long long* counts) {
+    const long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n_rows) return;
+    unsigned int r[COLS];
+    #pragma unroll
+    for (int l = 0; l < COLS; ++l) r[l] = rows[i * COLS + l];
+    for (int j = 0; j < n_pool; ++j) {
+        unsigned long long acc = 0;
+        #pragma unroll
+        for (int l = 0; l < COLS; ++l)
+            acc += bmod64((unsigned long long)r[l] * pool[j * COLS + l],
+                          p, minv);
+        if (bmod64(acc, p, minv) == 0)
+            atomicAdd(&counts[j], 1ULL);
+    }
+}
+"""
+
+_POOLK_CACHE = {}
+
+
+def _pool_kernel(cols):
+    """Compile (or fetch) the cols-templated fused zero-count kernel
+    (#16 optimization P2): one thread per row, per-term Barrett
+    reduction in registers, atomics only on the rare zero hits — no
+    materialized accumulator matrices, so the pool screen's cost is
+    compute alone."""
+    if cols not in _POOLK_CACHE:
+        src = KERNEL_POOL_ZERO.replace("COLS", str(cols))
+        _POOLK_CACHE[cols] = cp.RawKernel(src, "pool_zero_count")
+    return _POOLK_CACHE[cols]
+
+
 def mod_matmul(A, B, p, xp):
     """(A @ B) % p for int64 device arrays with entries in [0, p),
     p < 2^31: the matmul accumulates 16-bit-split halves of B so every
@@ -116,6 +163,8 @@ class CloudEngine:
         self.T = binom_table(s, self.r)
         self.dom = np.array(self.space.domain(), dtype=np.int64)
         self.cert = None if light else self.space.certificate()
+        self._rows_res = None
+        self._pairs_res = None
 
     def verify_pins(self, n=8, seed=0):
         """Authority spot-gate for light engines: n random ranks must
@@ -181,46 +230,62 @@ class CloudEngine:
         xp = cp if GPU else np
         B = [xp.asarray(b, dtype=xp.int64) for b in bs]
         zeros = np.zeros(len(bs), dtype=np.int64)
-        for lo in range(0, self.total, self.chunk):
-            ranks = np.arange(lo, min(lo + self.chunk, self.total),
-                              dtype=np.int64)
-            rows, _ = self._device_rows(ranks)
-            rows64 = rows.astype(xp.int64)
-            for i, b in enumerate(B):
+        for i, lo, hi in self._chunk_bounds():
+            rows64 = self._chunk_rows(i, lo, hi, xp).astype(xp.int64)
+            for j, b in enumerate(B):
                 acc = ((rows64 * b[None, :]) % self.p).sum(axis=1) % self.p
-                zeros[i] += int((acc == 0).sum())
+                zeros[j] += int((acc == 0).sum())
         return zeros.tolist()
 
-    def pool_cut_counts(self, B, tile_pool=512, out="host"):
+    def pool_cut_counts(self, B, tile_pool=512, out="host", path=None):
         """Batched syndrome fitness (#16 pool extension): |Z(b)| for a
-        pool of syndromes as one matmul per cloud chunk against the
-        resident rows — the rank-3 search's inner loop, ~ms per
-        candidate at (32, 15) vs ~seconds for a decode.
+        pool of syndromes against the cloud — the rank-3 search's
+        inner loop.
 
         B: [N, cols] syndrome pool, host or device; out="device" keeps
         the counts on-device for a resident optimizer (the pool API —
         no per-candidate host round-trip).
 
-        Arithmetic: the matmul accumulates 16-bit-split halves of the
-        syndromes, so every partial sum stays below 2^52 (rows < 2^31,
-        half < 2^16, cols <= 33) — the per-term-reduction doctrine of
-        cut_counts carried into matmul form, same selfcheck gate.
-        """
+        Two arithmetic paths, gated equal in selfcheck. The fused
+        kernel (GPU default, path="fused"): one thread per row,
+        per-term Barrett reduction in registers, atomics only on the
+        rare zero hits — no materialized accumulators, so cost is
+        compute alone and the marginal price per candidate is ~ms.
+        The matmul path (CPU always, path="matmul"): 16-bit-split
+        accumulation via mod_matmul, every partial sum below 2^52 —
+        the per-term-reduction doctrine in matmul form."""
         xp = cp if GPU else np
         Bd = xp.asarray(B, dtype=xp.int64) % self.p
         n = Bd.shape[0]
         assert Bd.shape[1] == self.cols, f"pool cols {Bd.shape[1]}"
-        zeros = xp.zeros(n, dtype=xp.int64)
-        Bt = Bd.T.copy()
-        for lo in range(0, self.total, self.chunk):
-            ranks = np.arange(lo, min(lo + self.chunk, self.total),
-                              dtype=np.int64)
-            rows, _ = self._device_rows(ranks)
-            rows64 = rows.astype(xp.int64)
-            for j in range(0, n, tile_pool):
-                acc = mod_matmul(rows64, Bt[:, j:j + tile_pool],
-                                 self.p, xp)
-                zeros[j:j + tile_pool] += (acc == 0).sum(axis=0)
+        use_fused = GPU if path is None else path == "fused"
+        if use_fused and not GPU:
+            raise RuntimeError("fused path requires cupy")
+        if use_fused:
+            pool_dev = cp.ascontiguousarray(Bd.astype(cp.uint32))
+            counts = cp.zeros(n, dtype=cp.uint64)
+            minv = np.uint64((1 << 64) // self.p)
+            kern = _pool_kernel(self.cols)
+            threads = 256
+            for i, lo, hi in self._chunk_bounds():
+                rows = self._chunk_rows(i, lo, hi, cp)
+                rows_u = cp.ascontiguousarray(rows.astype(cp.uint32))
+                m = rows_u.shape[0]
+                blocks = (m + threads - 1) // threads
+                kern((blocks,), (threads,),
+                     (np.int64(m), np.int32(n), np.uint32(self.p),
+                      minv, rows_u, pool_dev, counts))
+            cp.cuda.Stream.null.synchronize()
+            zeros = counts.astype(cp.int64)
+        else:
+            zeros = xp.zeros(n, dtype=xp.int64)
+            Bt = Bd.T.copy()
+            for i, lo, hi in self._chunk_bounds():
+                rows64 = self._chunk_rows(i, lo, hi, xp).astype(xp.int64)
+                for j in range(0, n, tile_pool):
+                    acc = mod_matmul(rows64, Bt[:, j:j + tile_pool],
+                                     self.p, xp)
+                    zeros[j:j + tile_pool] += (acc == 0).sum(axis=0)
         if out == "device":
             return zeros
         return (cp.asnumpy(zeros) if GPU else zeros)
@@ -231,22 +296,17 @@ class CloudEngine:
         s = 16 and the pinned s = 32 value."""
         xp = cp if GPU else np
         bd = xp.asarray(b, dtype=xp.int64)
-        half = self.s // 2
         nf = self.r // 2 + 1
         strata = np.zeros(nf, dtype=np.int64)
-        for lo in range(0, self.total, self.chunk):
-            ranks = np.arange(lo, min(lo + self.chunk, self.total),
-                              dtype=np.int64)
-            rows, idx = self._device_rows(ranks)
+        for i, lo, hi in self._chunk_bounds():
+            rows, pairs = self._chunk_rows_pairs(i, lo, hi, xp)
             rows64 = rows.astype(xp.int64)
             acc = ((rows64 * bd[None, :]) % self.p).sum(axis=1) % self.p
             hit = acc == 0
             if bool(hit.any()):
-                in_set = xp.zeros((idx.shape[0], self.s), dtype=bool)
-                xp.put_along_axis(in_set, xp.asarray(idx), True, axis=1)
-                pairs = (in_set[:, :half] & in_set[:, half:]).sum(axis=1)
-                h = xp.bincount(pairs[hit], minlength=nf)
-                strata += (cp.asnumpy(h) if GPU else h)[:nf]
+                h = xp.bincount(pairs[hit].astype(xp.int64),
+                                minlength=nf)
+                strata += (cp.asnumpy(h) if GPU else np.asarray(h))[:nf]
         return strata.tolist()
 
     def value_histograms(self, cols=None, top=5):
@@ -263,10 +323,8 @@ class CloudEngine:
             # incremental bincount: one cloud pass, O(p) memory per
             # column, no column materialization (601M-row safe)
             cnts = {j: xp.zeros(self.p, dtype=xp.int64) for j in cols}
-            for lo in range(0, self.total, self.chunk):
-                ranks = np.arange(lo, min(lo + self.chunk, self.total),
-                                  dtype=np.int64)
-                rows, _ = self._device_rows(ranks)
+            for i, lo, hi in self._chunk_bounds():
+                rows = self._chunk_rows(i, lo, hi, xp)
                 for j in cols:
                     cnts[j] += xp.bincount(rows[:, j].astype(xp.int64),
                                            minlength=self.p)
@@ -281,10 +339,8 @@ class CloudEngine:
                           "top": tops}
             return out
         parts = {j: [] for j in cols}
-        for lo in range(0, self.total, self.chunk):
-            ranks = np.arange(lo, min(lo + self.chunk, self.total),
-                              dtype=np.int64)
-            rows, _ = self._device_rows(ranks)
+        for i, lo, hi in self._chunk_bounds():
+            rows = self._chunk_rows(i, lo, hi, xp)
             for j in cols:
                 parts[j].append(rows[:, j].astype(xp.int64))
         for j in cols:
@@ -304,14 +360,76 @@ class CloudEngine:
                       "top": tops}
         return out
 
-    def _device_rows(self, ranks_np):
-        """rows_for_ranks, but keeping arrays on-device when GPU."""
-        xp = cp if GPU else np
+    def _build_chunk(self, ranks_np, xp):
+        """One chunk of the cloud, everything on-device: (rows uint32
+        [n, cols], subset indices int64 [n, r])."""
         ranks = xp.asarray(ranks_np, dtype=xp.int64)
         idx = unrank_block(ranks, self.s, self.r, self.T, xp)
         rows = complement_rows(idx, xp.asarray(self.dom), self.p,
                                self.s, self.r, xp)
+        return rows, idx
+
+    def _device_rows(self, ranks_np):
+        """rows_for_ranks, but keeping row arrays on-device when GPU."""
+        xp = cp if GPU else np
+        rows, idx = self._build_chunk(ranks_np, xp)
         return rows, (cp.asnumpy(idx) if GPU else idx)
+
+    def materialize(self, with_pairs=False, log=print):
+        """The resident cloud (#16 optimization P1): build every row
+        chunk once (uint32, per-chunk device arrays — cols * 4 bytes
+        per row, ~43 GB at (32, 15), within an 80 GB A100) and serve
+        all counters from the resident copy. The per-call unrank +
+        e-vector rebuild (~38 s per full pass at (32, 15)) disappears
+        from every subsequent operation. with_pairs adds one uint8 per
+        row (the antipodal pair count) so strata_counts is resident
+        too."""
+        xp = cp if GPU else np
+        half = self.s // 2
+        rows_res = []
+        pairs_res = [] if with_pairs else None
+        t0 = time.time()
+        for i, lo, hi in self._chunk_bounds():
+            rows, idx = self._build_chunk(
+                np.arange(lo, hi, dtype=np.int64), xp)
+            rows_res.append(rows.astype(xp.uint32))
+            if with_pairs:
+                in_set = xp.zeros((idx.shape[0], self.s), dtype=bool)
+                xp.put_along_axis(in_set, idx, True, axis=1)
+                pairs_res.append(
+                    (in_set[:, :half] & in_set[:, half:])
+                    .sum(axis=1).astype(xp.uint8))
+            if i % 100 == 0:
+                log(f"  materialize {100 * lo / self.total:5.1f}% "
+                    f"({time.time() - t0:.0f}s)")
+        self._rows_res, self._pairs_res = rows_res, pairs_res
+        log(f"  resident: {self.total:,} rows, {len(rows_res)} chunks "
+            f"({time.time() - t0:.0f}s)")
+
+    def _chunk_bounds(self):
+        for i, lo in enumerate(range(0, self.total, self.chunk)):
+            yield i, lo, min(lo + self.chunk, self.total)
+
+    def _chunk_rows(self, i, lo, hi, xp):
+        """Row chunk (uint32, on-device when GPU), resident if built."""
+        if self._rows_res is not None:
+            return self._rows_res[i]
+        rows, _ = self._build_chunk(np.arange(lo, hi, dtype=np.int64),
+                                    xp)
+        return rows
+
+    def _chunk_rows_pairs(self, i, lo, hi, xp):
+        """(rows, antipodal pair counts) for one chunk, resident when
+        materialize(with_pairs=True) was run."""
+        if self._rows_res is not None and self._pairs_res is not None:
+            return self._rows_res[i], self._pairs_res[i]
+        rows, idx = self._build_chunk(np.arange(lo, hi, dtype=np.int64),
+                                      xp)
+        half = self.s // 2
+        in_set = xp.zeros((idx.shape[0], self.s), dtype=bool)
+        xp.put_along_axis(in_set, idx, True, axis=1)
+        pairs = (in_set[:, :half] & in_set[:, half:]).sum(axis=1)
+        return rows, pairs
 
     def build(self, out_dir, log=print):
         os.makedirs(out_dir, exist_ok=True)
@@ -600,11 +718,28 @@ def selfcheck():
     pool = [b_top, b18] + [[int(x) for x in rng.integers(0, eng.p, eng.cols)]
                            for rng in [np.random.default_rng(7)]
                            for _ in range(21)]
-    got_pool = eng.pool_cut_counts(np.array(pool), tile_pool=8).tolist()
+    got_pool = eng.pool_cut_counts(np.array(pool), tile_pool=8,
+                                   path="matmul").tolist()
     want_pool = [int(x) for x in eng.space.cut_counts(pool)]
     assert got_pool == want_pool, f"pool gate: {got_pool} vs {want_pool}"
     assert got_pool[:2] == [810, 404]
     print(f"  pool matmul cut vs authority (23-pool): PASS")
+    # P1/P2 gates: the resident cloud reproduces every counter, and on
+    # GPU the fused kernel path equals the matmul path equals the
+    # authority
+    eng.materialize(with_pairs=True, log=lambda *a, **k: None)
+    assert eng.cut_counts([b_top, b18]) == [810, 404], "resident cut"
+    assert eng.strata_counts(b18) == [0, 48, 164, 180, 12], \
+        "resident strata"
+    assert eng.pool_cut_counts(np.array(pool), tile_pool=8,
+                               path="matmul").tolist() == want_pool, \
+        "resident pool matmul"
+    if GPU:
+        fused = eng.pool_cut_counts(np.array(pool), path="fused").tolist()
+        assert fused == want_pool, f"fused path: {fused} vs {want_pool}"
+        print("  resident cloud + fused kernel vs authority: PASS")
+    else:
+        print("  resident cloud (matmul path; fused needs GPU): PASS")
     # C6 gate: value histograms vs the authority cloud
     rows_auth = np.array(
         [eng.space.moment_row(eng.space.subset_unrank(i))

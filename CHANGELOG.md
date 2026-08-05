@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **decode: batched exact list sizes (issue #45)**: `list_sizes` —
+  one sweep for a batch of words, the barycentric coefficient table of
+  each information set built once and shared (the word-independent
+  half of `interp_eval_all`, now factored as `bary_table`/`bary_eval`
+  with the single-word path delegating), dedup by the lex-first rule
+  the GPU count kernel already uses (stateless, so branch merging is
+  summation), rayon inside, GIL released in the Python binding. The
+  campaign confirm path without per-word round-trips.
+
 - **ring::primes (new; the prime axis of `Z[zeta_s]`)**: the kernel
   engines move down from `census` (they count ring elements, not
   subsets) and the norm-table / bad-set pipeline moves down from

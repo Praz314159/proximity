@@ -410,6 +410,26 @@ fn list_decode(
     rows_to_array(py, &members)
 }
 
+/// Exact distinct list sizes for a batch of words in one sweep (issue
+/// #45): shared barycentric tables per information set, lex-first
+/// dedup, rayon inside — the CPU campaign confirm path without the
+/// per-word round-trips. GIL released for the whole computation.
+#[pyfunction]
+fn list_sizes(
+    py: Python<'_>,
+    p: u64,
+    domain: Vec<u64>,
+    k: usize,
+    words: Vec<Vec<u64>>,
+    t: usize,
+) -> PyResult<Vec<u64>> {
+    err(py.allow_threads(|| {
+        let rs = code::ReedSolomon::on_domain(p, domain, k)?;
+        let oracle = crate::rs::decode::DecodeOracle::new(&rs);
+        oracle.list_sizes(&words, crate::rs::decode::Radius::agreement(t))
+    }))
+}
+
 /// One code-first optimization run on `RS[F_p, domain, k]`: build a random
 /// pencil seed and anneal it to maximize list size. Returns
 /// `(center, members, size_trajectory)` — the raw cluster (member codewords as
@@ -1377,6 +1397,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDescent>()?;
     m.add_class::<PyWordView>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
+    m.add_function(wrap_pyfunction!(list_sizes, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_word, m)?)?;

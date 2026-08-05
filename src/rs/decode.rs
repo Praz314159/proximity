@@ -155,6 +155,87 @@ impl<'a> DecodeOracle<'a> {
         Ok(out)
     }
 
+    /// Exact distinct list sizes for a batch of words in one sweep
+    /// (issue #45). The barycentric coefficient table of each
+    /// information set is word-independent, so it is built once and
+    /// every word evaluates against it as a `k`-term dot product per
+    /// point. Codewords are counted at exactly the information set
+    /// that is the lexicographically first `k`-subset of their
+    /// agreement set — the GPU count kernel's dedup rule — so no
+    /// per-word codeword sets are held and branch merging is
+    /// summation.
+    pub fn list_sizes(&self, words: &[Vec<u64>], radius: Radius) -> Result<Vec<u64>> {
+        let n = self.rs.n();
+        let k = self.rs.k();
+        let t = radius.min_agreement();
+        if words.iter().any(|w| w.len() != n) {
+            return Err(Error::OutOfRange("word length != n".into()));
+        }
+        if t < k {
+            return Err(Error::Unsupported(
+                "exact decode needs agreement t >= k (radius within capacity)".into(),
+            ));
+        }
+        if !checked_binom(n as u64, k as u64).is_some_and(|c| c <= EXACT_SUBSET_CAP) {
+            return Err(Error::Unsupported(
+                "C(n, k) exceeds the exact cap; use list_size_atleast".into(),
+            ));
+        }
+        let p = self.rs.p();
+        let dom = self.rs.points();
+        use rayon::prelude::*;
+        Ok((0..=n - k)
+            .into_par_iter()
+            .map(|i0| {
+                let mut local = vec![0u64; words.len()];
+                let mut idxs = vec![0usize; k];
+                let mut xs = vec![0u64; k];
+                let mut ys = vec![0u64; k];
+                let mut cw: Vec<u64> = Vec::with_capacity(n);
+                for_each_combination(n - i0 - 1, k - 1, |rest| {
+                    idxs[0] = i0;
+                    xs[0] = dom[i0];
+                    for (slot, &r) in rest.iter().enumerate() {
+                        idxs[slot + 1] = i0 + 1 + r;
+                        xs[slot + 1] = dom[i0 + 1 + r];
+                    }
+                    let table = bary_table(&xs, dom, p);
+                    for (wi, w) in words.iter().enumerate() {
+                        for (slot, &i) in idxs.iter().enumerate() {
+                            ys[slot] = w[i];
+                        }
+                        bary_eval(&table, &ys, p, &mut cw);
+                        // one ascending pass: the first k agreement
+                        // indices must be exactly this information set
+                        // (else another branch owns the codeword), and
+                        // the full agreement count must reach t
+                        let mut agree = 0usize;
+                        let mut canonical = true;
+                        for i in 0..n {
+                            if cw[i] == w[i] {
+                                if agree < k && idxs[agree] != i {
+                                    canonical = false;
+                                    break;
+                                }
+                                agree += 1;
+                            }
+                        }
+                        if canonical && agree >= t {
+                            local[wi] += 1;
+                        }
+                    }
+                });
+                local
+            })
+            .reduce(
+                || vec![0u64; words.len()],
+                |mut a, b| {
+                    a.iter_mut().zip(b).for_each(|(x, y)| *x += y);
+                    a
+                },
+            ))
+    }
+
     /// Whether the exact engine will run (`C(n, k)` within the cap); if not,
     /// the sampling methods are the way in.
     #[must_use]
@@ -258,9 +339,22 @@ impl ListOracle for DecodeOracle<'_> {
 /// nodes). All inversions are batched (two Fermat exponentiations per call, not
 /// `~(n-k)(k+1)`): this is the hot kernel under every decode/search flip.
 /// Shared with [`crate::rs::cluster`] for building codewords from a pencil.
-pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
+/// The word-independent half of barycentric interpolation on a fixed
+/// node set: for each domain point either its node index or a folded
+/// coefficient row, so that evaluating any word is one `k`-term dot
+/// product per off-node point. Built once per information set and
+/// shared across a batch (issue #45).
+pub(crate) struct BaryTable {
+    /// Node index of each domain point (`usize::MAX` off the nodes).
+    node_of: Vec<usize>,
+    /// Folded coefficients, one `k`-row per off-node point in domain
+    /// order: `cw[i] = sum_j coef[row][j] * ys[j]`.
+    coef: Vec<u64>,
+    k: usize,
+}
+
+pub(crate) fn bary_table(xs: &[u64], domain: &[u64], p: u64) -> BaryTable {
     let k = xs.len();
-    let n = domain.len();
     // Node index of each domain point (or usize::MAX), and the flattened
     // nonzero differences to invert: k weight denominators, then k diffs
     // `x - x_j` for each non-node point.
@@ -288,36 +382,52 @@ pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) ->
     }
     batch_inv(&mut to_inv, p);
     let (wts, diffs) = to_inv.split_at(k);
-    // First pass: numerators and denominators; collect denominators for the
-    // second (tiny) inversion batch.
-    let mut nums = vec![0u64; n];
+    // Raw terms and their row sums; the sums invert in one tiny batch
+    // and fold into the rows, leaving pure dot-product coefficients.
+    let mut coef = vec![0u64; n_off * k];
     let mut dens = Vec::with_capacity(n_off);
-    let mut off = 0usize;
-    for (i, (&_x, &nd)) in domain.iter().zip(&node_of).enumerate() {
-        if nd != usize::MAX {
-            nums[i] = ys[nd];
-        } else {
-            let row = &diffs[off * k..(off + 1) * k];
-            let (mut num, mut den) = (0u64, 0u64);
-            for j in 0..k {
-                let term = mulmod(wts[j], row[j], p);
-                num = (num + mulmod(term, ys[j], p)) % p;
-                den = (den + term) % p;
-            }
-            nums[i] = num;
-            dens.push(den);
-            off += 1;
+    for off in 0..n_off {
+        let row_in = &diffs[off * k..(off + 1) * k];
+        let row_out = &mut coef[off * k..(off + 1) * k];
+        let mut den = 0u64;
+        for j in 0..k {
+            let term = mulmod(wts[j], row_in[j], p);
+            row_out[j] = term;
+            den = (den + term) % p;
         }
+        dens.push(den);
     }
     batch_inv(&mut dens, p);
-    let mut out = nums;
+    for (off, &d) in dens.iter().enumerate() {
+        for c in &mut coef[off * k..(off + 1) * k] {
+            *c = mulmod(*c, d, p);
+        }
+    }
+    BaryTable { node_of, coef, k }
+}
+
+pub(crate) fn bary_eval(table: &BaryTable, ys: &[u64], p: u64, out: &mut Vec<u64>) {
+    out.clear();
     let mut off = 0usize;
-    for (i, &nd) in node_of.iter().enumerate() {
-        if nd == usize::MAX {
-            out[i] = mulmod(out[i], dens[off], p);
+    for &nd in &table.node_of {
+        if nd != usize::MAX {
+            out.push(ys[nd]);
+        } else {
+            let row = &table.coef[off * table.k..(off + 1) * table.k];
+            let mut v = 0u64;
+            for (c, &y) in row.iter().zip(ys) {
+                v = (v + mulmod(*c, y, p)) % p;
+            }
+            out.push(v);
             off += 1;
         }
     }
+}
+
+pub(crate) fn interp_eval_all(xs: &[u64], ys: &[u64], domain: &[u64], p: u64) -> Vec<u64> {
+    let table = bary_table(xs, domain, p);
+    let mut out = Vec::with_capacity(domain.len());
+    bary_eval(&table, ys, p, &mut out);
     out
 }
 
@@ -396,6 +506,56 @@ mod tests {
         let counted = HalfTables::build(&sg, 8, 1).unwrap().bucket(&[0]).unwrap();
         assert_eq!(counted, 70, "structural zero bucket C(8,4)");
         assert_eq!(decoded, counted, "exactness: decode == counted bucket");
+    }
+
+    /// The batch API agrees with the single-word decoder on every word:
+    /// the pinned extremizers (sign-flip 18, inverse-law peak 10 at
+    /// (16, 7, 9)), random words, and a generic-domain case — the
+    /// shared-table evaluation and the lex-first dedup change the
+    /// arithmetic path and the counting rule, so both are pinned.
+    #[test]
+    fn batch_sizes_match_single_word_lists() {
+        use crate::field::powmod;
+        let p = 65537u64;
+        let sg = MultiplicativeSubgroup::new(p, 16).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
+        let dom: Vec<u64> = rs.points().to_vec();
+        let mut flip: Vec<u64> = dom
+            .iter()
+            .map(|&x| (powmod(x, 7, p) + powmod(x, 15, p)) % p)
+            .collect();
+        flip[0] = (flip[0] + p - 4) % p;
+        flip[8] = (flip[8] + 4) % p;
+        let inv = |x: u64| powmod(x, p - 2, p);
+        let mut invlaw: Vec<u64> = dom
+            .iter()
+            .map(|&x| (powmod(x, 7, p) + powmod(x, 15, p)) % p)
+            .collect();
+        invlaw[0] = (invlaw[0] + p - 4 * inv(dom[0]) % p) % p;
+        invlaw[2] = (invlaw[2] + p - 4 * inv(dom[2]) % p) % p;
+        let mut rng = SplitMix64::new(9);
+        let randoms: Vec<Vec<u64>> = (0..3)
+            .map(|_| (0..16).map(|_| rng.next_u64() % p).collect())
+            .collect();
+        let mut words = vec![flip, invlaw];
+        words.extend(randoms);
+        let oracle = DecodeOracle::new(&rs);
+        let radius = Radius::agreement(9);
+        let sizes = oracle.list_sizes(&words, radius).unwrap();
+        assert_eq!(sizes[0], 18, "sign-flip tier");
+        assert_eq!(sizes[1], 10, "inverse-law family peak");
+        for (w, &got) in words.iter().zip(&sizes) {
+            let want = oracle.list(w, radius).unwrap().len() as u64;
+            assert_eq!(got, want, "batch vs single-word list");
+        }
+        // generic (non-subgroup) domain
+        let pts: Vec<u64> = (3u64..15).map(|x| x * x % p).collect();
+        let rs2 = ReedSolomon::on_domain(p, pts, 5).unwrap();
+        let cw = rs2.encode(&[1, 2, 3, 4, 5]).unwrap();
+        let sizes2 = DecodeOracle::new(&rs2)
+            .list_sizes(std::slice::from_ref(&cw), Radius::agreement(6))
+            .unwrap();
+        assert_eq!(sizes2, vec![1]);
     }
 
     /// The decoder is generic over the domain: it works on an arbitrary

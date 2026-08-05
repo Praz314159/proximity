@@ -29,9 +29,9 @@
 //! same orbit report the same representative, so event rows can be
 //! joined across sources by `(norm, weight, orbit_rep)`.
 
-use super::{combinations, for_each_bad_prime, NormEngine, NormTable};
+use super::{combinations, decode_pattern, for_each_bad_prime, NormEngine, NormTable};
 use crate::error::{Error, Result};
-use crate::ring::fold;
+use crate::ring::Cyclo;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -144,39 +144,35 @@ pub struct AccidentEvent {
     pub source: EventSource,
 }
 
-/// Multiply by `zeta` on the half-basis: shift up, negacyclic wrap
-/// (`zeta * zeta^{s/2-1} = zeta^{s/2} = -1`).
-fn rotate(half: usize, v: &CoeffVec) -> CoeffVec {
+/// Pack a ring element into the fixed-width working form (set key /
+/// serialization; the arithmetic itself lives on [`Cyclo`]).
+fn pack(c: &Cyclo) -> CoeffVec {
     let mut out = [0i8; 32];
-    out[0] = -v[half - 1];
-    out[1..half].copy_from_slice(&v[..half - 1]);
-    out
-}
-
-/// The Galois image `sigma_a(v)`, `a` odd: a signed permutation of
-/// half-basis slots (injective because `a` is invertible mod `s` and
-/// slot collisions would force `i - i' = s/2` inside `[0, s/2)`).
-fn galois(half: usize, a: usize, v: &CoeffVec) -> CoeffVec {
-    let mut out = [0i8; 32];
-    for (i, &c) in v.iter().enumerate().take(half) {
-        if c != 0 {
-            let (idx, sgn) = fold(half, a * i);
-            out[idx] = sgn as i8 * c;
-        }
+    for (slot, &v) in out.iter_mut().zip(c.coeffs()) {
+        *slot = i8::try_from(v).expect("orbit coefficients stay within the enumeration bound");
     }
     out
 }
 
+/// Lift the packed form back into the ring.
+fn unpack(half: usize, v: &CoeffVec) -> Cyclo {
+    Cyclo::from_coeffs(v[..half].iter().map(|&c| c as i64).collect())
+        .expect("half is a power of two >= 2 whenever s >= 4")
+}
+
 /// The full symmetry orbit of `v`, sorted, deduplicated — so `[0]` is
-/// the canonical representative and `len()` is the orbit size.
+/// the canonical representative and `len()` is the orbit size. The
+/// generators are the ring's own: [`Cyclo::galois`] and
+/// [`Cyclo::dilate`] (rotation is `dilate(1)`; negation is `dilate(s/2)`).
 pub(crate) fn orbit(s: usize, v: &CoeffVec) -> Vec<CoeffVec> {
     let half = s / 2;
+    let start = unpack(half, v);
     let mut members = Vec::with_capacity(s * half);
     for a in (1..s).step_by(2) {
-        let mut w = galois(half, a, v);
+        let mut w = start.galois(a).expect("a is odd by construction");
         for _ in 0..s {
-            members.push(w);
-            w = rotate(half, &w);
+            members.push(pack(&w));
+            w = w.dilate(1);
         }
     }
     members.sort_unstable();
@@ -185,36 +181,31 @@ pub(crate) fn orbit(s: usize, v: &CoeffVec) -> Vec<CoeffVec> {
 }
 
 /// Build one event row from an orbit's canonical form `(rep, orbit_size)`
-/// and one `(p, valuation)` incidence of its norm.
+/// and one `(p, valuation)` incidence of its norm. The orbit invariants
+/// come from the ring element itself — note the vocabulary seam: the
+/// row's `height` is the ring's [`Cyclo::sq_sum`] (Parseval mass), the
+/// row's `max_coeff` is the ring's [`Cyclo::height`].
 pub(crate) fn event_row(
     s: usize,
-    weight: usize,
     norm: u128,
     (p, e): (u64, u64),
     (rep, orbit_size): (&CoeffVec, u64),
     provenance: EventProvenance,
     source: EventSource,
 ) -> AccidentEvent {
-    let half = s / 2;
+    let rc = unpack(s / 2, rep);
     let pe = (0..e).fold(1u128, |acc, _| acc * p as u128);
     AccidentEvent {
         level: s,
         p,
-        weight,
+        weight: rc.weight(),
         norm,
         valuation: e,
         cofactor: norm / pe,
-        orbit_rep: rep[..half].iter().map(|&c| c as i64).collect(),
         orbit_size,
-        height: rep[..half]
-            .iter()
-            .map(|&c| (c as i64 * c as i64) as u64)
-            .sum(),
-        max_coeff: rep[..half]
-            .iter()
-            .map(|&c| (c as i64).abs())
-            .max()
-            .unwrap_or(0),
+        height: u64::try_from(rc.sq_sum()).expect("Parseval mass of a bounded vector fits u64"),
+        max_coeff: rc.height(),
+        orbit_rep: rc.coeffs().to_vec(),
         provenance,
         source,
     }
@@ -255,27 +246,25 @@ pub fn accident_events(table: &NormTable) -> Result<Vec<AccidentEvent>> {
     for w in 1..=table.wmax {
         let supports = combinations(half, w);
         let npat: u64 = (ncoef as u64).pow(w as u32);
-        // parallel sweep: collect the vectors landing on accident norms
-        let hits: Vec<Vec<(u128, CoeffVec)>> = supports
+        // parallel sweep: collect the vectors landing on accident norms,
+        // grouped per norm inside each chunk (one move, no flat
+        // intermediate — the hit set reaches hundreds of MB at s = 32)
+        let hits: Vec<HashMap<u128, Vec<CoeffVec>>> = supports
             .par_chunks(1.max(supports.len() / 64))
             .map(|chunk| {
-                let mut local = Vec::new();
+                let mut local: HashMap<u128, Vec<CoeffVec>> = HashMap::new();
                 for sup in chunk {
                     let folds = engine.folds(sup);
                     for pat in 0..npat {
                         let mut cvec = [0i64; 32];
-                        let mut t = pat;
-                        for slot in cvec.iter_mut().take(w) {
-                            *slot = coefs[(t % ncoef as u64) as usize];
-                            t /= ncoef as u64;
-                        }
+                        decode_pattern(pat, &coefs, w, &mut cvec);
                         let n = engine.norm(&folds, &cvec);
                         if accident_norms.contains_key(&n) {
                             let mut v = [0i8; 32];
                             for (i, &si) in sup.iter().enumerate() {
                                 v[si as usize] = cvec[i] as i8;
                             }
-                            local.push((n, v));
+                            local.entry(n).or_default().push(v);
                         }
                     }
                 }
@@ -284,8 +273,17 @@ pub fn accident_events(table: &NormTable) -> Result<Vec<AccidentEvent>> {
             .collect();
         // orbit decomposition per norm, with the occupancy certificate
         let mut by_norm: HashMap<u128, Vec<CoeffVec>> = HashMap::new();
-        for (n, v) in hits.into_iter().flatten() {
-            by_norm.entry(n).or_default().push(v);
+        for local in hits {
+            for (n, mut vs) in local {
+                match by_norm.entry(n) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        e.get_mut().append(&mut vs)
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(vs);
+                    }
+                }
+            }
         }
         for (n, vs) in by_norm {
             let mut seen: HashSet<CoeffVec> = HashSet::with_capacity(vs.len());
@@ -303,7 +301,6 @@ pub fn accident_events(table: &NormTable) -> Result<Vec<AccidentEvent>> {
                 for &pe in &accident_norms[&n] {
                     events.push(event_row(
                         s,
-                        w,
                         n,
                         pe,
                         (&rep, members.len() as u64),
@@ -334,7 +331,6 @@ mod tests {
     use crate::census::kernel as census;
     use crate::domain::MultiplicativeSubgroup;
     use crate::ring::primes::norms::{bad_set, norm_table, Provenance};
-    use crate::ring::Cyclo;
 
     /// The orbit machinery against the exact ring: every member of an
     /// orbit has the same `Cyclo::norm_i128`, the representative is the

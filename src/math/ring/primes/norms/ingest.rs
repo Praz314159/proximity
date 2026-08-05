@@ -772,7 +772,7 @@ fn ingest_core(
     out.sort_by_key(|e| e.p);
     let mut rows: Vec<AccidentEvent> = Vec::new();
     if let Some(ev) = events {
-        for ((n, w), reps) in ev.acc {
+        for ((n, _w), reps) in ev.acc {
             let mut incidences = Vec::new();
             for_each_bad_prime(n, s as u64, |p, e| {
                 if ev.filter.admits(p) {
@@ -783,7 +783,6 @@ fn ingest_core(
                 for &pe in &incidences {
                     rows.push(event_row(
                         s,
-                        w,
                         n as u128,
                         pe,
                         (&rep, size),

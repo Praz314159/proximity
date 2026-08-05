@@ -236,6 +236,20 @@ impl NormEngine {
     }
 }
 
+/// Decode enumeration pattern `pat` into its `w` nonzero coefficients —
+/// the one pattern/coefficient convention shared by [`norm_table`] and
+/// [`events::accident_events`], so the occupancy certificate compares
+/// two sweeps of the same enumeration, not two conventions.
+#[inline]
+pub(crate) fn decode_pattern(pat: u64, coefs: &[i64], w: usize, cvec: &mut [i64; 32]) {
+    let ncoef = coefs.len() as u64;
+    let mut t = pat;
+    for slot in cvec.iter_mut().take(w) {
+        *slot = coefs[(t % ncoef) as usize];
+        t /= ncoef;
+    }
+}
+
 pub(crate) fn combinations(n: usize, k: usize) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     let mut idx: Vec<u8> = (0..k as u8).collect();
@@ -289,13 +303,8 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                 for sup in chunk {
                     let folds = engine.folds(sup);
                     for pat in 0..npat {
-                        // decode coefficient pattern
                         let mut cvec = [0i64; 32];
-                        let mut t = pat;
-                        for slot in cvec.iter_mut().take(w) {
-                            *slot = coefs[(t % ncoef as u64) as usize];
-                            t /= ncoef as u64;
-                        }
+                        decode_pattern(pat, &coefs, w, &mut cvec);
                         let n = engine.norm(&folds, &cvec);
                         *local.entry(n).or_insert(0) += 1;
                     }
@@ -322,7 +331,14 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
 /// every prime `p = 1 mod s`, `p > s`, dividing any enumerated norm, with
 /// Galois-normalized per-weight kernel-vector counts.
 pub fn bad_set(s: usize, wmax: usize, cmax: i64) -> Result<Vec<BadSetEntry>> {
-    let table = norm_table(s, wmax, cmax)?;
+    bad_set_from_table(&norm_table(s, wmax, cmax)?)
+}
+
+/// [`bad_set`] from an already-built table — the campaign shape, where
+/// one enumeration serves both the bad set and
+/// [`events::accident_events`].
+pub fn bad_set_from_table(table: &NormTable) -> Result<Vec<BadSetEntry>> {
+    let (s, wmax, cmax) = (table.s, table.wmax, table.cmax);
     let half = (s / 2) as u64;
     let mut raw: HashMap<u64, (Vec<u64>, bool)> = HashMap::new();
     for (&n, counts) in &table.entries {

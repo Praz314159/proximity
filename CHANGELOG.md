@@ -22,7 +22,13 @@
   prime norm, one orbit of 128); events re-derive `bad_set` and the
   s = 32 poster-prime census (independent MitM path); ingest events
   match the CPU inversion from non-canonical exemplars; scrambled
-  dumps rejected; events checkpoint roundtrip.
+  dumps rejected; events checkpoint roundtrip. The orbit generators
+  are the ring's own (`Cyclo::galois`/`Cyclo::dilate`; the packed
+  array form is set-key/serialization only), the pattern/coefficient
+  convention is shared (`decode_pattern`), and `bad_set_from_table`
+  lets one enumeration serve both the bad set and the events
+  (campaign shape; measured (32,12,1): table 3.0s, bad set +51ms,
+  events +8.7s one-shot).
 
 - **vs: cut-driven exact list sizes (issue #48)**: `list_sizes_cut`
   — the ownership identity run as an algorithm. Every codeword at

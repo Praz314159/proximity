@@ -1549,6 +1549,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "certified")]
     m.add_function(wrap_pyfunction!(elias_row, m)?)?;
     m.add("KOALABEAR", crate::field::named::KOALABEAR)?;
+    m.add("GOLDILOCKS", crate::field::named::GOLDILOCKS)?;
     m.add("BABYBEAR", crate::field::named::BABYBEAR)?;
     m.add_function(wrap_pyfunction!(gs_class_counts, m)?)?;
     m.add_function(wrap_pyfunction!(moment_cloud, m)?)?;

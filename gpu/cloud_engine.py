@@ -226,7 +226,13 @@ class CloudEngine:
         (the 2026-07-22 ad-hoc consumer bug — 17 unreduced products of
         ~2^62 overflow int64 — is structurally excluded here; see the
         s=32 strata incident). Gated in selfcheck() against the
-        authority's cut_counts."""
+        authority's cut_counts.
+
+        Deliberately NOT routed through pool_cut_counts: this per-term
+        loop is the independent reference implementation the pool
+        paths (matmul and fused) gate against — collapsing them would
+        make the selfcheck cross-check circular. For throughput use
+        pool_cut_counts."""
         xp = cp if GPU else np
         B = [xp.asarray(b, dtype=xp.int64) for b in bs]
         zeros = np.zeros(len(bs), dtype=np.int64)

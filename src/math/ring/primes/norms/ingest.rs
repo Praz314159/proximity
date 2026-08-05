@@ -520,11 +520,9 @@ fn load_checkpoint(prefix: &str, wmax: usize, events_spec: Option<&str>) -> Opti
         for chunk in ebuf.chunks_exact(EROW) {
             let n = u64::from_le_bytes(chunk[..8].try_into().expect("record starts with 8 bytes"));
             let w = chunk[8] as usize;
-            let size = u16::from_le_bytes(
-                chunk[9..11]
-                    .try_into()
-                    .expect("slice is exactly 2 bytes"),
-            ) as u64;
+            let size =
+                u16::from_le_bytes(chunk[9..11].try_into().expect("slice is exactly 2 bytes"))
+                    as u64;
             let mut rep = [0i8; 32];
             for (slot, &b) in rep.iter_mut().zip(&chunk[11..]) {
                 *slot = b as i8;
@@ -835,7 +833,10 @@ mod tests {
                     .unwrap() as u64;
                 by_norm.entry(n).or_insert((0, v)).0 += 1;
             }
-            grouped.insert(w, by_norm.into_iter().map(|(n, (c, v))| (n, c, v)).collect());
+            grouped.insert(
+                w,
+                by_norm.into_iter().map(|(n, (c, v))| (n, c, v)).collect(),
+            );
         }
         grouped
     }
@@ -880,7 +881,9 @@ mod tests {
         for e in &events {
             let m = reference
                 .iter()
-                .find(|r| (r.p, r.norm, r.weight, &r.orbit_rep) == (e.p, e.norm, e.weight, &e.orbit_rep))
+                .find(|r| {
+                    (r.p, r.norm, r.weight, &r.orbit_rep) == (e.p, e.norm, e.weight, &e.orbit_rep)
+                })
                 .unwrap_or_else(|| panic!("ingest event at p={} unmatched", e.p));
             assert_eq!(
                 (e.valuation, e.cofactor, e.orbit_size, e.height, e.max_coeff),
@@ -1126,7 +1129,10 @@ mod tests {
         assert_eq!(stats.n_max_by_weight, ref_stats.n_max_by_weight);
         assert_eq!(stats.entries_parsed, ref_stats.entries_parsed);
         clear_checkpoint(prefix);
-        assert!(load_checkpoint(prefix, 8, None).is_none(), "checkpoint cleared");
+        assert!(
+            load_checkpoint(prefix, 8, None).is_none(),
+            "checkpoint cleared"
+        );
     }
 
     /// Missing input files surface as [`crate::Error::Io`], not as an

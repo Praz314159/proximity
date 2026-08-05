@@ -206,8 +206,15 @@ pub(crate) fn event_row(
         cofactor: norm / pe,
         orbit_rep: rep[..half].iter().map(|&c| c as i64).collect(),
         orbit_size,
-        height: rep[..half].iter().map(|&c| (c as i64 * c as i64) as u64).sum(),
-        max_coeff: rep[..half].iter().map(|&c| (c as i64).abs()).max().unwrap_or(0),
+        height: rep[..half]
+            .iter()
+            .map(|&c| (c as i64 * c as i64) as u64)
+            .sum(),
+        max_coeff: rep[..half]
+            .iter()
+            .map(|&c| (c as i64).abs())
+            .max()
+            .unwrap_or(0),
         provenance,
         source,
     }
@@ -408,7 +415,10 @@ mod tests {
         let reference = bad_set(s, wmax, cmax).unwrap();
         assert_eq!(derived.len(), reference.len(), "same prime set");
         for row in &reference {
-            let counts: Vec<u64> = derived[&row.p].iter().map(|&v| v / (s as u64 / 2)).collect();
+            let counts: Vec<u64> = derived[&row.p]
+                .iter()
+                .map(|&v| v / (s as u64 / 2))
+                .collect();
             if row.provenance == Provenance::ValuationSplit {
                 assert_eq!(counts, row.counts, "counts at p={}", row.p);
             }

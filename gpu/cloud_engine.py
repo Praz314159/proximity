@@ -260,7 +260,7 @@ class CloudEngine:
         assert Bd.shape[1] == self.cols, f"pool cols {Bd.shape[1]}"
         use_fused = GPU if path is None else path == "fused"
         if use_fused and not GPU:
-            raise RuntimeError("fused path requires cupy")
+            raise ValueError("fused path requires cupy")
         if use_fused:
             pool_dev = cp.ascontiguousarray(Bd.astype(cp.uint32))
             counts = cp.zeros(n, dtype=cp.uint64)
@@ -420,11 +420,18 @@ class CloudEngine:
 
     def _chunk_rows_pairs(self, i, lo, hi, xp):
         """(rows, antipodal pair counts) for one chunk, resident when
-        materialize(with_pairs=True) was run."""
+        materialize(with_pairs=True) was run; with rows-only residency
+        the pair counts recompute from the unrank alone (no e-vector
+        rebuild)."""
         if self._rows_res is not None and self._pairs_res is not None:
             return self._rows_res[i], self._pairs_res[i]
-        rows, idx = self._build_chunk(np.arange(lo, hi, dtype=np.int64),
-                                      xp)
+        ranks = np.arange(lo, hi, dtype=np.int64)
+        if self._rows_res is not None:
+            rows = self._rows_res[i]
+            idx = unrank_block(xp.asarray(ranks, dtype=xp.int64),
+                               self.s, self.r, self.T, xp)
+        else:
+            rows, idx = self._build_chunk(ranks, xp)
         half = self.s // 2
         in_set = xp.zeros((idx.shape[0], self.s), dtype=bool)
         xp.put_along_axis(in_set, idx, True, axis=1)

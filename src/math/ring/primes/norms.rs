@@ -132,7 +132,93 @@ fn crt_primes(s: usize, bound_bits: u32) -> Result<Vec<u64>> {
     Ok(primes_one_mod(s as u64, 1 << 61).take(n_primes).collect())
 }
 
-fn combinations(n: usize, k: usize) -> Vec<Vec<u8>> {
+/// The exact-norm kernel shared by [`norm_table`] and the event paths
+/// ([`events`], [`ingest`]): CRT tables over 61-bit split primes sized by
+/// the Parseval cap, the embedding folds of a support, and the norm of one
+/// coefficient pattern on those folds. One kernel, so every consumer's
+/// norms agree by construction rather than by parallel maintenance.
+pub(crate) struct NormEngine {
+    s: usize,
+    // per CRT prime: order-s root's half-basis power table (the images of
+    // `{1 .. zeta^{s/2-1}}`; exponents outside the half-basis are placed
+    // by [`crate::ring::fold`])
+    tables: Vec<(u64, Vec<u64>)>,
+    // hoisted CRT inverse for the two-prime path
+    crt_inv: Option<u64>,
+}
+
+impl NormEngine {
+    /// Build the CRT schedule for norms of weight-`<= wmax` vectors with
+    /// entries in `[-cmax, cmax]`. Parseval caps the norm at
+    /// `(cmax^2 * wmax)^{s/4}`, which sizes the schedule.
+    pub(crate) fn new(s: usize, wmax: usize, cmax: i64) -> Result<Self> {
+        let half = s / 2;
+        let bound_bits =
+            ((s as f64 / 4.0) * ((cmax * cmax) as f64 * wmax as f64).log2()).ceil() as u32 + 2;
+        let qs = crt_primes(s, bound_bits)?;
+        let tables: Vec<(u64, Vec<u64>)> = qs
+            .iter()
+            .map(|&q| {
+                let sg = MultiplicativeSubgroup::new(q, s)
+                    .expect("schedule primes satisfy q = 1 (mod s) by construction");
+                (q, sg.pow_table(half))
+            })
+            .collect();
+        let crt_inv = (tables.len() == 2)
+            .then(|| powmod(tables[0].0 % tables[1].0, tables[1].0 - 2, tables[1].0));
+        Ok(NormEngine { s, tables, crt_inv })
+    }
+
+    /// Embedding-exponent folds of one support, hoisted out of the pattern
+    /// loop: `folds[j][i]` = (index, sign) of `zeta^{sup_i k_j}` on the
+    /// half-basis, `k_j` the j-th odd exponent — [`crate::ring::fold`] is
+    /// the one authority for this reduction (conventions: [`crate::ring`]).
+    pub(crate) fn folds(&self, sup: &[u8]) -> Vec<Vec<(usize, i64)>> {
+        let half = self.s / 2;
+        (1..self.s)
+            .step_by(2)
+            .map(|k| sup.iter().map(|&si| fold(half, si as usize * k)).collect())
+            .collect()
+    }
+
+    /// Exact norm of the coefficient pattern `cvec` on pre-folded support
+    /// embeddings, by CRT over the schedule.
+    pub(crate) fn norm(&self, folds: &[Vec<(usize, i64)>], cvec: &[i64]) -> u128 {
+        let mut residues = [0u64; 2];
+        for (ti, (q, pw)) in self.tables.iter().enumerate() {
+            let mut prod: u64 = 1;
+            for fk in folds {
+                // Lazy accumulation: terms |c|*pw < 2^64 and at most 32 of
+                // them fit a u128 sum, so the mod drops from per-term to
+                // per-embedding.
+                let mut acc: u128 = 0;
+                for (&(idx, sgn), &cv) in fk.iter().zip(cvec.iter()) {
+                    let c = cv * sgn;
+                    acc += if c >= 0 {
+                        (c as u128) * (pw[idx] as u128)
+                    } else {
+                        ((-c) as u128) * ((q - pw[idx]) as u128)
+                    };
+                }
+                prod = mulmod(prod, (acc % (*q as u128)) as u64, *q);
+            }
+            residues[ti] = prod;
+        }
+        if self.tables.len() == 1 {
+            residues[0] as u128
+        } else {
+            // CRT for two primes
+            let (q1, q2) = (self.tables[0].0, self.tables[1].0);
+            let inv = self
+                .crt_inv
+                .expect("crt_inv precomputed whenever the schedule has two primes");
+            let diff = (residues[1] + q2 - residues[0] % q2) % q2;
+            residues[0] as u128 + (q1 as u128) * (mulmod(diff, inv, q2) as u128)
+        }
+    }
+}
+
+pub(crate) fn combinations(n: usize, k: usize) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     let mut idx: Vec<u8> = (0..k as u8).collect();
     if k == 0 || k > n {
@@ -170,26 +256,9 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
             "need 1 <= wmax <= s/2, cmax in [1,4]".into(),
         ));
     }
-    // Parseval: N <= (cmax^2 * wmax)^{s/4}
-    let bound_bits =
-        ((s as f64 / 4.0) * ((cmax * cmax) as f64 * wmax as f64).log2()).ceil() as u32 + 2;
-    let qs = crt_primes(s, bound_bits)?;
-    // per CRT prime: order-s root and its half-basis power table (the
-    // images of `{1 .. zeta^{s/2-1}}`; exponents outside the half-basis
-    // are placed by [`crate::ring::fold`] below)
-    let tables: Vec<(u64, Vec<u64>)> = qs
-        .iter()
-        .map(|&q| {
-            let sg = MultiplicativeSubgroup::new(q, s)
-                .expect("schedule primes satisfy q = 1 (mod s) by construction");
-            (q, sg.pow_table(half))
-        })
-        .collect();
+    let engine = NormEngine::new(s, wmax, cmax)?;
     let coefs: Vec<i64> = (-cmax..=cmax).filter(|&c| c != 0).collect();
     let ncoef = coefs.len();
-    // hoisted CRT inverse for the two-prime path
-    let crt_inv = (tables.len() == 2)
-        .then(|| powmod(tables[0].0 % tables[1].0, tables[1].0 - 2, tables[1].0));
 
     let mut entries: HashMap<u128, Vec<u64>> = HashMap::new();
     for w in 1..=wmax {
@@ -200,15 +269,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
             .map(|chunk| {
                 let mut local: HashMap<u128, u64> = HashMap::new();
                 for sup in chunk {
-                    // Embedding-exponent fold, hoisted out of the pattern
-                    // loop: folds[j][i] = (index, sign) of `zeta^{sup_i k_j}`
-                    // on the half-basis, `k_j` the j-th odd exponent —
-                    // [`crate::ring::fold`] is the one authority for this
-                    // reduction (conventions: [`crate::ring`]).
-                    let folds: Vec<Vec<(usize, i64)>> = (1..s)
-                        .step_by(2)
-                        .map(|k| sup.iter().map(|&si| fold(half, si as usize * k)).collect())
-                        .collect();
+                    let folds = engine.folds(sup);
                     for pat in 0..npat {
                         // decode coefficient pattern
                         let mut cvec = [0i64; 32];
@@ -217,37 +278,7 @@ pub fn norm_table(s: usize, wmax: usize, cmax: i64) -> Result<NormTable> {
                             *slot = coefs[(t % ncoef as u64) as usize];
                             t /= ncoef as u64;
                         }
-                        // norm via CRT
-                        let mut residues = [0u64; 2];
-                        for (ti, (q, pw)) in tables.iter().enumerate() {
-                            let mut prod: u64 = 1;
-                            for fk in &folds {
-                                // Lazy accumulation: terms |c|*pw < 2^64 and
-                                // at most 32 of them fit a u128 sum, so the
-                                // mod drops from per-term to per-embedding.
-                                let mut acc: u128 = 0;
-                                for (&(idx, sgn), &cv) in fk.iter().zip(cvec.iter()) {
-                                    let c = cv * sgn;
-                                    acc += if c >= 0 {
-                                        (c as u128) * (pw[idx] as u128)
-                                    } else {
-                                        ((-c) as u128) * ((q - pw[idx]) as u128)
-                                    };
-                                }
-                                prod = mulmod(prod, (acc % (*q as u128)) as u64, *q);
-                            }
-                            residues[ti] = prod;
-                        }
-                        let n: u128 = if tables.len() == 1 {
-                            residues[0] as u128
-                        } else {
-                            // CRT for two primes
-                            let (q1, q2) = (tables[0].0, tables[1].0);
-                            let inv = crt_inv
-                                .expect("crt_inv precomputed whenever the schedule has two primes");
-                            let diff = (residues[1] + q2 - residues[0] % q2) % q2;
-                            residues[0] as u128 + (q1 as u128) * (mulmod(diff, inv, q2) as u128)
-                        };
+                        let n = engine.norm(&folds, &cvec);
                         *local.entry(n).or_insert(0) += 1;
                     }
                 }

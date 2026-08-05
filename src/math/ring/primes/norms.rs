@@ -1,11 +1,28 @@
-//! Cyclotomic norms and bad-set enumeration — the machinery that closes
-//! middle-regime instances by exhaustion.
+//! Cyclotomic norms and the accident inventory — the arithmetic half of
+//! the shadow view.
+//!
+//! The program's domains are shadows: at a prime `p = 1 (mod s)` the
+//! ring `Z[zeta_s]` splits completely, and reduction projects its unit
+//! circle onto the order-`s` subgroup of `F_p^*`. Everything the census
+//! measures is fiber statistics of that projection. An *accident* is an
+//! extra zero of the shadow — a small vector `v` with `p | N(v)`, hence
+//! in the kernel of some embedding `Z[zeta_s] -> F_p` — collapsing
+//! values the generic picture keeps apart. Divisibility of bounded-height
+//! norms is therefore the entire criterion, and this module runs it in
+//! both directions: forward from vectors to the primes they can visit,
+//! and inverted to the per-prime inventory. The largest prime in the
+//! inventory is the level's die-out scale — above it, no vector of the
+//! enumerated height class misbehaves anywhere.
 //!
 //! Pipeline: enumerate coefficient vectors (weight-capped, entries in
 //! `[-cmax, cmax]`) -> exact norms `N(v) = prod_k v(zeta^k)` -> factor the
 //! (heavily degenerate) unique norm values -> invert to the *bad set*: every
 //! prime `p = 1 mod s` that any weight-`w` kernel vector can ever visit, with
-//! Galois-normalized per-weight counts.
+//! Galois-normalized per-weight counts. The submodules carry the
+//! inventory beyond counting: [`events`] holds one row per (prime,
+//! orbit) incidence with the witness vector in hand, and [`ingest`]
+//! streams externally computed tables (the `s = 64` arm) through the
+//! same accumulation skeleton.
 //!
 //! Exactness: norms are computed by CRT over 61-bit split primes (never
 //! floating point — at `s = 64` norms exceed the f64 mantissa). The Parseval

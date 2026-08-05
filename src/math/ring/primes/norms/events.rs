@@ -216,7 +216,7 @@ pub(crate) fn event_row(
 /// The complete accident inventory of a norm table, one row per
 /// (prime, orbit) incidence: factor the table's norms, re-enumerate the
 /// vectors behind the accident-bearing ones through the shared
-/// [`NormEngine`], and decompose them into symmetry orbits.
+/// `NormEngine`, and decompose them into symmetry orbits.
 ///
 /// Exhaustive and certified: per (norm, weight), the emitted orbit
 /// sizes must sum to the table's count — a mismatch (which would mean

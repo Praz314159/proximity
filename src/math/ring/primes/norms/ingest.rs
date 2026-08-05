@@ -1,11 +1,13 @@
-//! Ingestion of externally computed norm tables (e.g. the GPU campaign's
-//! JSON output) into bad sets — the s = 64 pipeline.
+//! Ingestion of externally computed norm tables (the GPU campaign's
+//! output) into bad sets and accident events — the s = 64 pipeline.
 //!
-//! The GPU sweep emits `{"<norm>": {"<w>": count, ...}, ...}` per shard
-//! (shards partition supports, so the same norm may appear in several
-//! shards; counts add). Files are gigabytes, so parsing is streaming: a
-//! hand-rolled scanner over the byte buffer feeds (norm, counts) entries
-//! straight into parallel factoring without materializing the table.
+//! Two dump formats: JSON shards
+//! (`{"<norm>": {"<w>": count, ...}, ...}`; shards partition supports,
+//! so the same norm may appear in several shards and counts add) and
+//! per-weight binary dumps (norms + counts, optionally + exemplar
+//! vectors). Files are gigabytes, so parsing is streaming: entries feed
+//! straight into parallel factoring without materializing the table,
+//! checkpointed at shard granularity.
 //!
 //! Normalization follows `norms::bad_set` exactly (valuation / (s/2);
 //! per-weight censuses are Galois-invariant), except that primes where the
@@ -13,6 +15,12 @@
 //! s/2) are *flagged* rather than census-corrected — at s = 64 the direct
 //! census fallback is not yet feasible, and the flags mark exactly the
 //! rows a downstream analysis must treat as approximate.
+//!
+//! Events change that calculus where they exist: an
+//! [`AccidentEvent`] row holds the witness vector itself, so its
+//! valuation needs no split assumption at all — the same factoring pass
+//! that builds the bad set retains, for filtered primes, the identity
+//! of each accident ([`badset_and_events_from_gpu_bin`]).
 
 use super::events::{
     event_row, orbit, AccidentEvent, CoeffVec, EventFilter, EventProvenance, EventSource,
@@ -567,7 +575,7 @@ pub fn badset_from_gpu_json(
 ///
 /// Binary dumps only — the JSON shard format carries no vectors. Every
 /// exemplar whose norm admits a filtered prime is validated by
-/// recomputing its norm through the shared [`NormEngine`] (`cmax` sizes
+/// recomputing its norm through the shared `NormEngine` (`cmax` sizes
 /// the schedule and bounds the coefficients), then reduced to canonical
 /// orbit form; rows carry [`EventProvenance::ExemplarOnly`] because
 /// sibling orbits at the same (norm, weight) may not have been retained

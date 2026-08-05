@@ -156,7 +156,12 @@ impl<'a> DecodeOracle<'a> {
     }
 
     /// Exact distinct list sizes for a batch of words in one sweep
-    /// (issue #45). The barycentric coefficient table of each
+    /// (issue #45). Routing note: three exact paths exist — [`Self::list`]
+    /// (single word, returns members, any domain, t >= k), this method
+    /// (batch sizes, any domain, t >= k), and
+    /// [`crate::rs::vs::VsSpace::list_sizes_cut`] (batch sizes on
+    /// subgroup domains at t >= k + 1, an order of magnitude faster via
+    /// the ownership identity — prefer it whenever it applies). The barycentric coefficient table of each
     /// information set is word-independent, so it is built once and
     /// every word evaluates against it as a `k`-term dot product per
     /// point. Codewords are counted at exactly the information set

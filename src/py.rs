@@ -345,6 +345,120 @@ fn norms_n_max(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec
         .map_err(to_py)
 }
 
+/// An accident-event row in the ratified field order: (level, p, weight,
+/// norm, valuation, cofactor, orbit_rep, orbit_size, height, max_coeff,
+/// provenance, source); provenance 0 = exhaustive orbits, 1 = exemplar
+/// only; source 0 = CPU norm table, 1 = GPU ingest.
+type EventRow = (
+    usize,
+    u64,
+    usize,
+    u128,
+    u64,
+    u128,
+    Vec<i64>,
+    u64,
+    u64,
+    i64,
+    u8,
+    u8,
+);
+
+fn event_rows(events: Vec<crate::smooth::norms::events::AccidentEvent>) -> Vec<EventRow> {
+    use crate::smooth::norms::events::{EventProvenance, EventSource};
+    events
+        .into_iter()
+        .map(|e| {
+            (
+                e.level,
+                e.p,
+                e.weight,
+                e.norm,
+                e.valuation,
+                e.cofactor,
+                e.orbit_rep,
+                e.orbit_size,
+                e.height,
+                e.max_coeff,
+                u8::from(e.provenance == EventProvenance::ExemplarOnly),
+                u8::from(e.source == EventSource::GpuIngest),
+            )
+        })
+        .collect()
+}
+
+/// The complete accident inventory of the (s, wmax, cmax) enumeration:
+/// one [`EventRow`] per (prime, symmetry orbit) incidence, exhaustive
+/// and occupancy-certified (norms::events::accident_events).
+#[pyfunction]
+fn accident_events(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult<Vec<EventRow>> {
+    py.allow_threads(|| {
+        let table = crate::smooth::norms::norm_table(s, wmax, cmax)?;
+        crate::smooth::norms::events::accident_events(&table)
+    })
+    .map(event_rows)
+    .map_err(to_py)
+}
+
+/// The events-retaining ingest: [`badset_from_gpu_json`]'s outputs plus
+/// accident-event rows for retained primes (listed in `event_primes`, or
+/// at/above `event_min_p`), built from binary dumps with row-aligned
+/// `.exemplars.bin` files. Returns
+/// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed, events).
+#[pyfunction]
+fn badset_and_events_from_gpu_bin(
+    py: Python<'_>,
+    paths: Vec<String>,
+    s: usize,
+    wmax: usize,
+    cmax: i64,
+    out_prefix: String,
+    event_primes: Vec<u64>,
+    event_min_p: u64,
+) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64, Vec<EventRow>)> {
+    use crate::smooth::norms::events::EventFilter;
+    let filter = EventFilter {
+        primes: event_primes,
+        min_p: event_min_p,
+    };
+    let (rows, events, stats) = py
+        .allow_threads(|| {
+            crate::smooth::norms::ingest::badset_and_events_from_gpu_bin(
+                &paths,
+                s,
+                wmax,
+                cmax,
+                Some(&out_prefix),
+                filter,
+            )
+        })
+        .map_err(to_py)?;
+    let n = rows.len() as u64;
+    let werr = |e: std::io::Error| PyIOError::new_err(e.to_string());
+    let mut pb = Vec::with_capacity(rows.len() * 8);
+    let mut cb = Vec::with_capacity(rows.len() * (wmax + 1) * 8);
+    let mut fb = Vec::with_capacity(rows.len());
+    for e in &rows {
+        pb.extend_from_slice(&e.p.to_le_bytes());
+        for &c in &e.counts {
+            cb.extend_from_slice(&c.to_le_bytes());
+        }
+        fb.push(u8::from(!e.provenance.is_exact()));
+    }
+    std::fs::write(format!("{out_prefix}.primes.bin"), pb).map_err(werr)?;
+    std::fs::write(format!("{out_prefix}.counts.bin"), cb).map_err(werr)?;
+    std::fs::write(format!("{out_prefix}.flags.bin"), fb).map_err(werr)?;
+    // outputs are durable: the crash-recovery checkpoint has served its purpose
+    crate::smooth::norms::ingest::clear_checkpoint(&out_prefix);
+    Ok((
+        n,
+        stats.mass_by_weight,
+        stats.n_max_by_weight,
+        stats.entries_parsed,
+        event_rows(events),
+    ))
+}
+
 /// Ingest GPU-campaign norm-table JSON shards into the s-64-scale bad set.
 /// Writes <out_prefix>.primes.bin (u64 le), .counts.bin (u64 le, row-major
 /// n x (wmax+1)), .flags.bin (u8) and returns
@@ -1469,5 +1583,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(norms_bad_set, m)?)?;
     m.add_function(wrap_pyfunction!(badset_from_gpu_json, m)?)?;
     m.add_function(wrap_pyfunction!(norms_n_max, m)?)?;
+    m.add_function(wrap_pyfunction!(accident_events, m)?)?;
+    m.add_function(wrap_pyfunction!(badset_and_events_from_gpu_bin, m)?)?;
     Ok(())
 }

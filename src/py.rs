@@ -1259,6 +1259,12 @@ impl PyVsSpace {
     fn cut_counts(&self, py: Python<'_>, bs: Vec<Vec<u64>>) -> PyResult<Vec<u64>> {
         err(py.allow_threads(|| self.inner.cut_counts(&bs)))
     }
+    /// Cut-driven exact list sizes for a batch of words at agreement
+    /// `t >= r` — the ownership identity as an algorithm (issue #48);
+    /// GIL released.
+    fn list_sizes_cut(&self, py: Python<'_>, words: Vec<Vec<u64>>, t: usize) -> PyResult<Vec<u64>> {
+        err(py.allow_threads(|| self.inner.list_sizes_cut(&words, t)))
+    }
     fn cut_max_sparse(&self, py: Python<'_>, support: Vec<usize>) -> PyResult<(u64, Vec<u64>)> {
         err(py.allow_threads(|| self.inner.cut_max_sparse(&support)))
     }

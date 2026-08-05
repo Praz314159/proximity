@@ -43,7 +43,7 @@ use crate::domain::MultiplicativeSubgroup;
 use crate::error::{Error, Result};
 use crate::field::{checked_binom, mulmod, powmod};
 use crate::rs::code::ReedSolomon;
-use crate::rs::decode::for_each_combination;
+use crate::rs::decode::{self, for_each_combination};
 use crate::rs::descent::Descent;
 use crate::rs::linalg::dd;
 use crate::rs::moments;
@@ -444,6 +444,111 @@ impl VsSpace {
         Ok(counts)
     }
 
+    /// Cut-driven exact list sizes for a batch of words (issue #48):
+    /// the ownership identity `|Z(b)| = sum_f C(a_f, r)` run as an
+    /// algorithm. Every codeword at agreement `>= t >= r` contributes
+    /// all of its `r`-subsets to the cut, so the list is found by
+    /// interpolating only the cut elements, counting each codeword at
+    /// the lexicographically first `r`-subset of its agreement set.
+    /// One subset stream serves the whole batch (the e-vector is
+    /// shared; the pairing is `s - k` multiplies per word), and the
+    /// interpolation table of a hit subset builds lazily once. Per
+    /// word the `C(s, k)`-enumeration of the oracle collapses to
+    /// `|Z(b)|` interpolations — 1–2 orders of magnitude on the
+    /// campaign confirm workloads, worst case the extremal cuts.
+    pub fn list_sizes_cut(&self, words: &[Vec<u64>], t: usize) -> Result<Vec<u64>> {
+        let (p, s, r, k) = (self.p(), self.s(), self.r(), self.k);
+        if t < r {
+            return Err(Error::Unsupported(
+                "cut-driven decode needs agreement t >= r = k + 1".into(),
+            ));
+        }
+        if words.iter().any(|w| w.len() != s) {
+            return Err(Error::OutOfRange("word length != s".into()));
+        }
+        let bs: Vec<Vec<u64>> = words
+            .iter()
+            .map(|w| self.syndrome(w))
+            .collect::<Result<_>>()?;
+        let elements = self.sg.elements().to_vec();
+        let counts = (0..=s - r)
+            .into_par_iter()
+            .map(|i0| {
+                let mut local = vec![0u64; words.len()];
+                let mut idx = Vec::with_capacity(r);
+                let mut in_set = vec![false; s];
+                let mut xs = vec![0u64; k];
+                let mut ys = vec![0u64; k];
+                let mut cw: Vec<u64> = Vec::with_capacity(s);
+                for_each_combination(s - i0 - 1, r - 1, |rest| {
+                    idx.clear();
+                    idx.push(i0);
+                    for &rr in rest {
+                        idx.push(i0 + 1 + rr);
+                    }
+                    in_set.fill(false);
+                    for &i in &idx {
+                        in_set[i] = true;
+                    }
+                    let comp: Vec<u64> = (0..s)
+                        .filter(|&i| !in_set[i])
+                        .map(|i| elements[i])
+                        .collect();
+                    let ev = moments::e_vec(&comp, p);
+                    // the subset's interpolation table is word-independent:
+                    // build it on the first hitting word only
+                    let mut table = None;
+                    for (wi, b) in bs.iter().enumerate() {
+                        let mut acc = 0u64;
+                        for (&bc, &ec) in b.iter().zip(&ev) {
+                            acc = (acc + mulmod(bc % p, ec, p)) % p;
+                        }
+                        if acc != 0 {
+                            continue;
+                        }
+                        // hit: interpolate on the first k points of S (the
+                        // r-th agrees automatically — that is what the
+                        // vanished pairing says), then count the codeword
+                        // iff S is the lex-first r-subset of its agreement
+                        // set
+                        let w = &words[wi];
+                        for (slot, &i) in idx[..k].iter().enumerate() {
+                            xs[slot] = elements[i];
+                            ys[slot] = w[i];
+                        }
+                        let tab =
+                            table.get_or_insert_with(|| decode::bary_table(&xs, &elements, p));
+                        decode::bary_eval(tab, &ys, p, &mut cw);
+                        let mut agree = 0usize;
+                        let mut canonical = true;
+                        for i in 0..s {
+                            if cw[i] == w[i] % p {
+                                if agree < r && idx[agree] != i {
+                                    canonical = false;
+                                    break;
+                                }
+                                agree += 1;
+                            }
+                        }
+                        if canonical && agree >= t {
+                            local[wi] += 1;
+                        }
+                    }
+                });
+                local
+            })
+            .reduce(
+                || vec![0u64; words.len()],
+                |mut a, bvec| {
+                    for (x, y) in a.iter_mut().zip(bvec) {
+                        *x += y;
+                    }
+                    a
+                },
+            );
+        Ok(counts)
+    }
+
     // ---------------------------------------------------------------------
     // theorems as constructors
     // ---------------------------------------------------------------------
@@ -618,6 +723,55 @@ mod tests {
     fn space(p: u64, s: usize, k: usize) -> VsSpace {
         let sg = MultiplicativeSubgroup::new(p, s).unwrap();
         VsSpace::new(&sg, k).unwrap()
+    }
+
+    /// The cut-driven decoder equals the enumeration oracle on every
+    /// word class: the sign-flip extremizer (18), the inverse-law
+    /// family peak (10), the top word at the rung edge t = r (810,
+    /// where the canonical r-subset is the whole agreement set),
+    /// random words, and the t < r guard.
+    #[test]
+    fn cut_driven_sizes_match_the_oracle() {
+        let p = 65537u64;
+        let sg = MultiplicativeSubgroup::new(p, 16).unwrap();
+        let vs = VsSpace::new(&sg, 7).unwrap();
+        let rs = ReedSolomon::on_subgroup(&sg, 7).unwrap();
+        let oracle = DecodeOracle::new(&rs);
+        let dom = sg.elements().to_vec();
+        let mut flip: Vec<u64> = dom
+            .iter()
+            .map(|&x| (powmod(x, 7, p) + powmod(x, 15, p)) % p)
+            .collect();
+        flip[0] = (flip[0] + p - 4) % p;
+        flip[8] = (flip[8] + 4) % p;
+        let inv = |x: u64| powmod(x, p - 2, p);
+        let mut invlaw: Vec<u64> = dom
+            .iter()
+            .map(|&x| (powmod(x, 7, p) + powmod(x, 15, p)) % p)
+            .collect();
+        invlaw[0] = (invlaw[0] + p - mulmod(4, inv(dom[0]), p)) % p;
+        invlaw[2] = (invlaw[2] + p - mulmod(4, inv(dom[2]), p)) % p;
+        let mut seedw = 0x9e3779b97f4a7c15u64;
+        let mut next = move || {
+            seedw = seedw.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seedw >> 33
+        };
+        let randoms: Vec<Vec<u64>> = (0..3)
+            .map(|_| (0..16).map(|_| next() % p).collect())
+            .collect();
+        let mut words = vec![flip, invlaw];
+        words.extend(randoms);
+        let got = vs.list_sizes_cut(&words, 9).unwrap();
+        assert_eq!(got[0], 18, "sign-flip tier");
+        assert_eq!(got[1], 10, "inverse-law family peak");
+        let want = oracle.list_sizes(&words, Radius::agreement(9)).unwrap();
+        assert_eq!(got, want, "cut-driven vs oracle at t = 9");
+        // the rung edge t = r: the top word's full class
+        let top = vs.top_word(12).unwrap();
+        let got8 = vs.list_sizes_cut(std::slice::from_ref(&top), 8).unwrap();
+        assert_eq!(got8, vec![810], "top word at the rung");
+        // guard: below r the cut cannot index the list
+        assert!(vs.list_sizes_cut(&words, 7).is_err());
     }
 
     /// Rank/unrank roundtrip, and agreement with the moment-cloud row order.

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **vs: cut-driven exact list sizes (issue #48)**: `list_sizes_cut`
+  — the ownership identity run as an algorithm. Every codeword at
+  agreement `t >= r` contributes all of its `r`-subsets to the cut,
+  so the list is found by interpolating only the cut elements
+  (counting each codeword at the lex-first `r`-subset of its
+  agreement set); one subset stream serves the whole batch and a hit
+  subset's interpolation table builds lazily once. The oracle's
+  `C(s, k)` enumeration collapses to `|Z(b)|` interpolations per word
+  — measured ~10^3x on random words and ~40x on extremal words at the
+  base cell against the batch oracle. Python binding on `VsSpace`,
+  GIL released.
+
 - **decode: batched exact list sizes (issue #45)**: `list_sizes` —
   one sweep for a batch of words, the barycentric coefficient table of
   each information set built once and shared (the word-independent

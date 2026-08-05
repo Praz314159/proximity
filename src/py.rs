@@ -400,12 +400,16 @@ fn accident_events(py: Python<'_>, s: usize, wmax: usize, cmax: i64) -> PyResult
     .map_err(to_py)
 }
 
+/// The ingest summary returned to Python:
+/// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed, events).
+type IngestSummary = (u64, Vec<u64>, Vec<u64>, u64, Vec<EventRow>);
+
 /// The events-retaining ingest: [`badset_from_gpu_json`]'s outputs plus
 /// accident-event rows for retained primes (listed in `event_primes`, or
 /// at/above `event_min_p`), built from binary dumps with row-aligned
-/// `.exemplars.bin` files. Returns
-/// (n_rows, mass_by_weight, n_max_by_weight, entries_parsed, events).
+/// `.exemplars.bin` files. Returns an [`IngestSummary`].
 #[pyfunction]
+#[allow(clippy::too_many_arguments)] // the Python API's parameter list
 fn badset_and_events_from_gpu_bin(
     py: Python<'_>,
     paths: Vec<String>,
@@ -415,7 +419,7 @@ fn badset_and_events_from_gpu_bin(
     out_prefix: String,
     event_primes: Vec<u64>,
     event_min_p: u64,
-) -> PyResult<(u64, Vec<u64>, Vec<u64>, u64, Vec<EventRow>)> {
+) -> PyResult<IngestSummary> {
     use crate::smooth::norms::events::EventFilter;
     let filter = EventFilter {
         primes: event_primes,

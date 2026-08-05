@@ -25,6 +25,7 @@
 //! (multiplicity may sit inside one embedding), so such primes are flagged and
 //! their counts replaced by a direct census where available.
 
+pub mod events;
 pub mod ingest;
 
 use crate::census::kernel as census;

@@ -340,16 +340,21 @@ impl ListOracle for DecodeOracle<'_> {
 /// `~(n-k)(k+1)`): this is the hot kernel under every decode/search flip.
 /// Shared with [`crate::rs::cluster`] for building codewords from a pencil.
 /// The word-independent half of barycentric interpolation on a fixed
-/// node set: for each domain point either its node index or a folded
-/// coefficient row, so that evaluating any word is one `k`-term dot
-/// product per off-node point. Built once per information set and
-/// shared across a batch (issue #45).
+/// node set: for each domain point either its node index or a raw
+/// term row with its inverted row sum, so that evaluating any word is
+/// a `k`-term dot product and one multiply per off-node point. Built
+/// once per information set and shared across a batch (issue #45);
+/// the terms stay unfolded so the single-word path pays exactly what
+/// it always did.
 pub(crate) struct BaryTable {
     /// Node index of each domain point (`usize::MAX` off the nodes).
     node_of: Vec<usize>,
-    /// Folded coefficients, one `k`-row per off-node point in domain
-    /// order: `cw[i] = sum_j coef[row][j] * ys[j]`.
-    coef: Vec<u64>,
+    /// Raw barycentric terms, one `k`-row per off-node point in
+    /// domain order.
+    terms: Vec<u64>,
+    /// Inverted row sums, one per off-node point:
+    /// `cw[i] = (sum_j terms[row][j] * ys[j]) * dens_inv[row]`.
+    dens_inv: Vec<u64>,
     k: usize,
 }
 
@@ -383,27 +388,28 @@ pub(crate) fn bary_table(xs: &[u64], domain: &[u64], p: u64) -> BaryTable {
     batch_inv(&mut to_inv, p);
     let (wts, diffs) = to_inv.split_at(k);
     // Raw terms and their row sums; the sums invert in one tiny batch
-    // and fold into the rows, leaving pure dot-product coefficients.
-    let mut coef = vec![0u64; n_off * k];
-    let mut dens = Vec::with_capacity(n_off);
+    // and stay separate (folding them into the rows would charge an
+    // extra n_off * k multiplies to the single-word path).
+    let mut terms = vec![0u64; n_off * k];
+    let mut dens_inv = Vec::with_capacity(n_off);
     for off in 0..n_off {
         let row_in = &diffs[off * k..(off + 1) * k];
-        let row_out = &mut coef[off * k..(off + 1) * k];
+        let row_out = &mut terms[off * k..(off + 1) * k];
         let mut den = 0u64;
         for j in 0..k {
             let term = mulmod(wts[j], row_in[j], p);
             row_out[j] = term;
             den = (den + term) % p;
         }
-        dens.push(den);
+        dens_inv.push(den);
     }
-    batch_inv(&mut dens, p);
-    for (off, &d) in dens.iter().enumerate() {
-        for c in &mut coef[off * k..(off + 1) * k] {
-            *c = mulmod(*c, d, p);
-        }
+    batch_inv(&mut dens_inv, p);
+    BaryTable {
+        node_of,
+        terms,
+        dens_inv,
+        k,
     }
-    BaryTable { node_of, coef, k }
 }
 
 pub(crate) fn bary_eval(table: &BaryTable, ys: &[u64], p: u64, out: &mut Vec<u64>) {
@@ -413,12 +419,12 @@ pub(crate) fn bary_eval(table: &BaryTable, ys: &[u64], p: u64, out: &mut Vec<u64
         if nd != usize::MAX {
             out.push(ys[nd]);
         } else {
-            let row = &table.coef[off * table.k..(off + 1) * table.k];
+            let row = &table.terms[off * table.k..(off + 1) * table.k];
             let mut v = 0u64;
             for (c, &y) in row.iter().zip(ys) {
                 v = (v + mulmod(*c, y, p)) % p;
             }
-            out.push(v);
+            out.push(mulmod(v, table.dens_inv[off], p));
             off += 1;
         }
     }

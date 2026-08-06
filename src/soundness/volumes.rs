@@ -11,18 +11,26 @@ use rug::float::Round;
 use rug::ops::SubAssignRound;
 use rug::{Float, Integer};
 
-/// Validate an alphabet size and return the log2 enclosures of `Q` and
-/// `Q - 1`. Sizes come from the caller — named fields live in
-/// [`crate::field::named`], extension sizes are `Integer::pow` at the
-/// call site; this module models none of them.
-pub(crate) fn lg_q_pair(q: &Integer) -> Result<(Lg, Lg)> {
+/// Validate an alphabet size (sizes come from the caller — named
+/// fields live in [`crate::field::named`], extension sizes are
+/// `Integer::pow` at the call site; this module models none of them).
+fn check_q(q: &Integer) -> Result<()> {
     if *q < 3 {
         return Err(Error::OutOfRange("alphabet size must be >= 3".into()));
     }
-    Ok((
-        Lg::from_integer(q),
-        Lg::from_integer(&Integer::from(q - 1u32)),
-    ))
+    Ok(())
+}
+
+/// Certified log2 enclosure of the alphabet size `Q`.
+pub(crate) fn lg_q(q: &Integer) -> Result<Lg> {
+    check_q(q)?;
+    Ok(Lg::from_integer(q))
+}
+
+/// Certified log2 enclosure of `Q - 1` (the ball volumes' base).
+pub(crate) fn lg_q1(q: &Integer) -> Result<Lg> {
+    check_q(q)?;
+    Ok(Lg::from_integer(&Integer::from(q - 1u32)))
 }
 
 /// Certified enclosure of log2 V(n, z) with V the Hamming ball volume
@@ -30,7 +38,7 @@ pub(crate) fn lg_q_pair(q: &Integer) -> Result<(Lg, Lg)> {
 /// (Q - 1) > z / (n - z + 1), i.e. terms strictly increase in j so the top
 /// term dominates and the rest is a certified geometric tail.
 pub fn lg_ball(n: u64, z: u64, q: &Integer) -> Result<Lg> {
-    let (_, lg_q1) = lg_q_pair(q)?;
+    let lg_q1 = lg_q1(q)?;
     if z == 0 {
         return Ok(Lg::zero());
     }
@@ -60,7 +68,7 @@ pub fn lg_ball(n: u64, z: u64, q: &Integer) -> Result<Lg> {
 /// the exact expected number of codewords of ANY [n, k] code over the
 /// alphabet within radius z of a uniformly random word.
 pub fn lg_expected_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
-    let (lg_q, _) = lg_q_pair(q)?;
+    let lg_q = lg_q(q)?;
     if k >= n {
         return Err(Error::OutOfRange("need k < n".into()));
     }
@@ -71,7 +79,7 @@ pub fn lg_expected_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
 /// (ABF26 Lemma 3.7, no MS77 approximation): |Λ(C, z/n)| >= V(n, z) / Q^(n-k)
 /// for ANY code C: Σ^k -> Σ^n over an alphabet of size Q.
 pub fn lg_elias_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
-    let (lg_q, _) = lg_q_pair(q)?;
+    let lg_q = lg_q(q)?;
     if k >= n {
         return Err(Error::OutOfRange("need k < n".into()));
     }
@@ -91,4 +99,54 @@ pub fn ball_exact(n: u64, z: u64, q: &Integer) -> Integer {
         v += &term;
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rug::float::Round;
+    use rug::ops::Pow;
+
+    fn assert_encloses(lg: &Lg, exact: &Integer) {
+        let e = Lg::from_integer(exact);
+        assert!(
+            lg.lo <= e.lo && e.hi <= lg.hi,
+            "enclosure violated: [{}, {}] vs exact log2 ~ {}",
+            lg.lo.to_f64_round(Round::Down),
+            lg.hi.to_f64_round(Round::Up),
+            e.lo.to_f64_round(Round::Down),
+        );
+    }
+
+    #[test]
+    fn ball_encloses_exact() {
+        let cases: &[(u64, u64, u64)] = &[
+            (10, 4, 97),
+            (24, 11, 257),
+            (64, 31, 65537),
+            (200, 99, 1_000_003),
+        ];
+        for &(n, z, q) in cases {
+            let q = Integer::from(q);
+            let exact = ball_exact(n, z, &q);
+            let lg = lg_ball(n, z, &q).unwrap();
+            assert_encloses(&lg, &exact);
+            let width = lg.hi.to_f64_round(Round::Up) - lg.lo.to_f64_round(Round::Down);
+            assert!(width < 0.01, "bracket too wide: {width}");
+        }
+    }
+
+    #[test]
+    fn expected_list_is_exact_identity_small() {
+        let (n, k, z, q) = (16u64, 8u64, 7u64, 97u64);
+        let q = Integer::from(q);
+        let v = ball_exact(n, z, &q);
+        let num = q.clone().pow(k as u32) * &v;
+        let den = q.clone().pow(n as u32);
+        let lg = lg_expected_list(n, k, z, &q).unwrap();
+        let ln = Lg::from_integer(&num);
+        let ld = Lg::from_integer(&den);
+        let exact = ln.div(&ld);
+        assert!(lg.lo <= exact.lo && exact.hi <= lg.hi);
+    }
 }

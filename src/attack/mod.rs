@@ -9,6 +9,6 @@
 //! the ladder, cite from the certified tier.
 
 #[cfg(feature = "certified")]
-pub mod certified;
+pub use crate::soundness as certified;
 pub mod ladder;
 pub use ladder::*;

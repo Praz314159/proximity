@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **soundness: the chain restructured — one spine, two faces**: the
+  certified tier moves from `attack::certified` to a `soundness`
+  module layered as `volumes` (balls, expected lists, the exact Elias
+  count — where issue #37's Diamond-Gruen upgrades land once for both
+  faces), `chain` (the Lemma 6.12 map + crossing reports), and
+  `floor` (elias_row, first_moment_crossing — what attacks achieve).
+  The forthcoming `ceiling` consumes the master theorem's list
+  envelope through the identical chain; the prize's pinch becomes one
+  testable assertion (floor z* == ceiling z*). Flat namespace and
+  `attack::certified` preserved as re-exports; Table-4 golden pins
+  unchanged. Review pass: `first_moment_crossing`'s search directions
+  were inverted (it returned the range endpoints, not a straddle —
+  untested, latent since the Table-4 session; now fixed with an
+  exact-rational bracket test); the module's four hand-rolled binary
+  searches collapse into one certified `partition_point`
+  (`chain::certified_first`); `lg_q_pair` split into single-purpose
+  accessors; tests relocated to their subjects; `elias_row` gains the
+  divisibility check and loses its stale KoalaBear-specific doc.
+
 - **norms: accident events (data canon R1)**: `AccidentEvent` — the
   atomic row of the accidents table, one row per (prime, symmetry
   orbit) incidence carrying the witness vector: (level, p, weight,

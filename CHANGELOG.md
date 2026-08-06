@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **soundness: the ceiling face** — `envelope_row` runs a certified
+  list envelope through the same Lemma 6.12 map and lattice search as
+  the floor, reporting the largest radius certified sound under the
+  target (domain-capped by `z_max`; saturation reported unpinned).
+  Built-in `lg_cut_envelope`: the master theorem's dominant cut-strata
+  term in certified term-by-term enclosures (empty stratum = the L <= 1
+  high-agreement regime), labeled average-form pending the sup-form
+  supplement. Tests: exact-rational enclosure at the record cell,
+  pinned/monotone/saturated crossings, and the two-face consistency
+  law (ceiling strictly below floor) at a reduced box.
+
 - **soundness: the chain restructured — one spine, two faces**: the
   certified tier moves from `attack::certified` to a `soundness`
   module layered as `volumes` (balls, expected lists, the exact Elias

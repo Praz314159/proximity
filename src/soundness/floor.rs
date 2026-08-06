@@ -12,7 +12,9 @@ use crate::math::enclosure::Lg;
 use rug::float::Round;
 use rug::Integer;
 
-use super::chain::{certified_first, lg_soundness, Crossing, CrossingRow};
+use super::chain::{
+    certified_first, lg_list_threshold, lg_soundness, Crossing, CrossingRow, ListRow,
+};
 use super::volumes::{lg_elias_list, lg_expected_list};
 
 /// The certified first-moment crossing of log2 E\[list\] against
@@ -116,6 +118,44 @@ pub fn elias_row(
     })
 }
 
+/// The floor in the challenge's own currency: the smallest radius at
+/// which the exact Elias count (ABF26 Lemma 3.7) is certified to
+/// EXCEED `eps* |F|` — above it no list bound can meet the challenge,
+/// so it bounds `delta*` from above. Equivalent to the soundness route
+/// of [`elias_row`] up to the negligible `2x` term of the Lemma 6.12
+/// map; the two are cross-pinned in the tests.
+pub fn elias_list_row(
+    s: u64,
+    total_len: u64,
+    base_q: &Integer,
+    ext_q: &Integer,
+    eps_bits: f64,
+) -> Result<ListRow> {
+    if s == 0 || total_len % s != 0 {
+        return Err(Error::OutOfRange(
+            "interleaving width must divide the total length".into(),
+        ));
+    }
+    let (n, thr) = (total_len / s, lg_list_threshold(ext_q, eps_bits)?);
+    let k = n / 2;
+    let list_at = |z: u64| lg_elias_list(n, k, z, base_q);
+    // certified above: the whole list bracket clears the whole threshold
+    let z_star = certified_first(1, n - 1, |z| Ok(list_at(z)?.lo > thr.hi))?.ok_or_else(|| {
+        Error::Unsupported("no radius certifies a list above the threshold".into())
+    })?;
+    let at = list_at(z_star)?;
+    let pinned = z_star == 1 || list_at(z_star - 1)?.hi <= thr.lo;
+    Ok(ListRow {
+        s,
+        n,
+        z_star,
+        delta_star: z_star as f64 / n as f64,
+        lg_list_lo: at.lo.to_f64_round(Round::Down),
+        lg_list_hi: at.hi.to_f64_round(Round::Up),
+        crossing_pinned: pinned,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +188,26 @@ mod tests {
         assert_eq!(above.z, exact, "smallest certified-above");
         assert_eq!(below.z, exact - 1, "largest certified-below");
         assert!(above.lg_e_lo >= 0.0 && below.lg_e_hi < 0.0);
+    }
+
+    /// The two routes to the floor agree on every Table-4 row: the
+    /// soundness crossing of [`elias_row`] and the list crossing of
+    /// [`elias_list_row`] pick the same lattice point. The equivalence
+    /// is algebraic (x/(|F|+2x) >= eps* iff x >= eps*|F|/(1-2eps*)),
+    /// which is exactly the kind of "should" worth testing.
+    #[test]
+    fn list_and_soundness_floors_agree() {
+        let base = Integer::from(crate::field::named::KOALABEAR);
+        let ext = base.clone().pow(6);
+        for s in [1u64, 1 << 4, 1 << 8, 1 << 12] {
+            let sound = elias_row(s, 1 << 21, &base, &ext, -128.0).unwrap();
+            let list = elias_list_row(s, 1 << 21, &base, &ext, -128.0).unwrap();
+            assert_eq!(list.z_star, sound.z_star, "row s = {s}");
+            assert!(list.crossing_pinned);
+            // and the list bracket at the crossing straddles eps*|F|
+            let thr = super::super::chain::lg_list_threshold(&ext, -128.0).unwrap();
+            assert!(list.lg_list_lo > thr.hi.to_f64_round(Round::Up));
+        }
     }
 
     #[test]

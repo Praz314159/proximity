@@ -1,48 +1,32 @@
-// scratch: the first pinch at the box (not committed)
+// scratch: the pinch at the box, in the challenge's own currency
 use rug::ops::Pow;
 use rug::Integer;
-use vanish::soundness::{elias_row, envelope_row, lg_cut_envelope};
+use vanish::soundness::{elias_list_row, lg_cut_envelope, list_ceiling_row};
 
 fn main() {
     let base = Integer::from(vanish::field::named::KOALABEAR);
     let ext = base.clone().pow(6);
     let total = 1u64 << 21;
     let k = total / 2 - 1;
+    // the challenge: largest delta with |Lambda| <= eps* |F|
     let t0 = std::time::Instant::now();
-    let floor = elias_row(1, total, &base, &ext, -128.0).unwrap();
+    let floor = elias_list_row(1, total, &base, &ext, -128.0).unwrap();
     println!(
-        "floor:   z* = {} (delta {:.5}) in {:?}",
-        floor.z_star,
-        floor.delta_star,
-        t0.elapsed()
+        "floor   (Elias count crosses eps*|F|): delta = {:.5}  z = {}  [{:.1}, {:.1}] bits  in {:?}",
+        floor.delta_star, floor.z_star, floor.lg_list_lo, floor.lg_list_hi, t0.elapsed()
     );
     let t1 = std::time::Instant::now();
-    let ceil = envelope_row(1, total, total - k - 1, &ext, -128.0, |z| {
+    let ceil = list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
         lg_cut_envelope(total, k, z)
     })
     .unwrap();
     println!(
-        "ceiling: z* = {} (delta {:.5}, avg-form cut term) in {:?}",
-        ceil.z_star,
-        ceil.delta_star,
-        t1.elapsed()
+        "ceiling (SCAFFOLD envelope under eps*|F|): delta = {:.5}  z = {}  [{:.1}, {:.1}] bits  in {:?}",
+        ceil.delta_star, ceil.z_star, ceil.lg_list_lo, ceil.lg_list_hi, t1.elapsed()
     );
     println!(
-        "gap: {} z-steps ({:.5} in delta)",
-        floor.z_star as i64 - ceil.z_star as i64,
+        "gap: {:.5} in delta — the ceiling is a plumbing reading (the scaffold\n\
+         uses the trivial stratum bound); real rows need interface data + the recursion",
         floor.delta_star - ceil.delta_star
-    );
-    // pinch v2: the theorem-backed generic ceiling (ABF26 Thm 5.1 map)
-    let t2 = std::time::Instant::now();
-    let ca =
-        vanish::soundness::ca_ceiling_row(1, total, total - k - 1, 1 << 20, &ext, -128.0, |z| {
-            lg_cut_envelope(total, k, z)
-        })
-        .unwrap();
-    println!(
-        "CA ceiling (Thm 5.1 map): delta_ca = {:.5} (z_ca = {}) in {:?}",
-        ca.delta_star,
-        ca.z_star,
-        t2.elapsed()
     );
 }

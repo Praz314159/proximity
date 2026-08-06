@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **soundness: the challenge's own currency**: the grand list-decoding
+  challenge asks for the largest radius with `|Lambda(C, delta)| <=
+  eps* |F|`, so both faces now test against that threshold directly —
+  `chain::lg_list_threshold` plus `floor::elias_list_row` and
+  `ceiling::list_ceiling_row`, reporting a shared `ListRow`. No
+  soundness or MCA conversion enters the comparison. Cross-pinned:
+  the list crossing and the Lemma 6.12 soundness crossing pick the
+  same lattice point on the Table-4 rows (the equivalence is
+  algebraic, and now tested). The soundness map remains the floor's
+  own chain; the MCA conversion serves the paper's sibling challenge.
+
 - **soundness: the ceiling face** — `envelope_row` runs a certified
   list envelope through the same Lemma 6.12 map and lattice search as
   the floor, reporting the largest radius certified sound under the

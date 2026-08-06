@@ -22,7 +22,7 @@ use crate::math::enclosure::{lg_binom, Lg};
 use rug::float::Round;
 use rug::Integer;
 
-use super::chain::{certified_first, lg_soundness};
+use super::chain::{certified_first, lg_list_threshold, lg_soundness, ListRow};
 
 /// One certified ceiling row: the largest radius at which the envelope,
 /// pushed through the soundness map, is certified under the target.
@@ -235,6 +235,58 @@ pub fn ca_ceiling_row(
     })
 }
 
+/// The ceiling in the challenge's own currency: the largest radius at
+/// which the envelope is certified to hold the list AT OR BELOW
+/// `eps* |F|`. This is the challenge's own question — no soundness or
+/// MCA conversion enters — and it is directly comparable to
+/// [`super::floor::elias_list_row`]: the challenge is resolved at a
+/// radius where the two meet.
+pub fn list_ceiling_row(
+    s: u64,
+    total_len: u64,
+    z_max: u64,
+    ext_q: &Integer,
+    eps_bits: f64,
+    mut envelope: impl FnMut(u64) -> Result<Lg>,
+) -> Result<ListRow> {
+    if s == 0 || total_len % s != 0 {
+        return Err(Error::OutOfRange(
+            "interleaving width must divide the total length".into(),
+        ));
+    }
+    let n = total_len / s;
+    if z_max >= n {
+        return Err(Error::OutOfRange("need z_max < n".into()));
+    }
+    let thr = lg_list_threshold(ext_q, eps_bits)?;
+    // certified at or below: the whole bracket sits under the threshold
+    let first_over = certified_first(1, z_max, |z| Ok(envelope(z)?.hi > thr.lo))?;
+    let z_star = match first_over {
+        Some(1) => {
+            return Err(Error::Unsupported(
+                "no radius certifies a list under the threshold".into(),
+            ))
+        }
+        Some(z) => z - 1,
+        None => z_max,
+    };
+    let at = envelope(z_star)?;
+    // pinned when the next radius is certified strictly above
+    let pinned = match first_over {
+        Some(z) => envelope(z)?.lo > thr.hi,
+        None => false,
+    };
+    Ok(ListRow {
+        s,
+        n,
+        z_star,
+        delta_star: z_star as f64 / n as f64,
+        lg_list_lo: at.lo.to_f64_round(Round::Down),
+        lg_list_hi: at.hi.to_f64_round(Round::Up),
+        crossing_pinned: pinned,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +403,35 @@ mod ca_tests {
         .unwrap();
         assert!(ceil.z_star < floor.z_star);
         assert!(ceil.z_star > 0, "nontrivial CA radius");
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use rug::ops::Pow;
+
+    /// The two faces in one currency: the certified ceiling sits below
+    /// the certified floor, and the challenge would be resolved where
+    /// they meet. With the scaffold envelope the gap is enormous (the
+    /// scaffold is binary at z/n = 1/4) — the test pins the ordering,
+    /// which is the structural law, not the numbers.
+    #[test]
+    fn faces_are_ordered_in_list_currency() {
+        let base = Integer::from(crate::field::named::KOALABEAR);
+        let ext = base.clone().pow(6);
+        let total = 1u64 << 12;
+        let k = total / 2 - 1;
+        let floor = super::super::floor::elias_list_row(1, total, &base, &ext, -128.0).unwrap();
+        let ceil = list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            lg_cut_envelope(total, k, z)
+        })
+        .unwrap();
+        assert!(
+            ceil.z_star < floor.z_star,
+            "ceiling {} must sit below floor {}",
+            ceil.z_star,
+            floor.z_star
+        );
     }
 }

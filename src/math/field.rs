@@ -377,6 +377,12 @@ pub mod named {
     /// (`2^27 | p - 1`); quartic and quintic extensions appear in
     /// deployments.
     pub const BABYBEAR: u64 = (1 << 31) - (1 << 27) + 1;
+    /// Goldilocks: `2^64 - 2^32 + 1`. Smooth through `s = 2^32`
+    /// (`2^32 | p - 1`); the 64-bit deployment field (Plonky2-era
+    /// stacks). The one named prime whose taxonomy is height-split:
+    /// provably clean by the Parseval ceiling at every level `<= 32`,
+    /// live at level 64 only from weight `p^{1/16} ~ 16` up.
+    pub const GOLDILOCKS: u64 = 0xFFFF_FFFF_0000_0001;
 }
 
 #[cfg(test)]
@@ -389,9 +395,12 @@ mod tests {
     fn named_primes() {
         assert_eq!(named::KOALABEAR, 2_130_706_433);
         assert_eq!(named::BABYBEAR, 2_013_265_921);
+        assert_eq!(named::GOLDILOCKS, 18_446_744_069_414_584_321);
         assert!(is_prime(named::KOALABEAR) && is_prime(named::BABYBEAR));
+        assert!(is_prime(named::GOLDILOCKS));
         assert_eq!((named::KOALABEAR - 1) % (1 << 24), 0);
         assert_eq!((named::BABYBEAR - 1) % (1 << 27), 0);
+        assert_eq!((named::GOLDILOCKS - 1) % (1 << 32), 0);
     }
 
     #[test]

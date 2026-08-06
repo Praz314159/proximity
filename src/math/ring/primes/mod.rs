@@ -197,6 +197,12 @@ mod tests {
         // a strictly clean prime just above 2^31: fully certified
         let clean = certify_clean(2_147_489_441, 32, 4).unwrap();
         assert!(clean.fully_certified(), "{clean:?}");
+        // Goldilocks sits above the Parseval ceiling at every level
+        // <= 32 ((cmax^2 * s/2)^{s/4} <= 2^48 < p), so the height law
+        // says fully certified — and the census, running live at a
+        // 64-bit prime, must confirm it
+        let g = certify_clean(named::GOLDILOCKS, 32, 4).unwrap();
+        assert!(g.fully_certified(), "{g:?}");
         // 77569: the bad-set poster prime — zero-class dirty at 32
         let bad = certify_clean(77_569, 32, 4).unwrap();
         assert!(!bad.clean_as_checked());

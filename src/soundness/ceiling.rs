@@ -241,6 +241,17 @@ pub fn ca_ceiling_row(
 /// MCA conversion enters — and it is directly comparable to
 /// [`super::floor::elias_list_row`]: the challenge is resolved at a
 /// radius where the two meet.
+///
+/// Scope. The challenge is stated for the m-way interleaved code and
+/// the envelope bounds the base code, so the two coincide exactly at
+/// `m = 1` (ABF26 Definition 2.9: `C^(=1) = C`), which is the plain
+/// Reed--Solomon setting this crate's machinery is about and the row
+/// the wall value comes from. For `m > 1` the base bound must first be
+/// carried to the interleaved code by ABF26 Lemma 2.10 — a binomial
+/// prefactor and an `r`-th power with `r = ceil(log(dmin/(dmin - d)))`,
+/// independent of `m` but growing as the radius approaches capacity —
+/// which this row does not apply. The floor needs no such conversion
+/// at any `m`: a large base list is already a large interleaved list.
 pub fn list_ceiling_row(
     s: u64,
     total_len: u64,

@@ -99,12 +99,24 @@ pub fn envelope_row(
     })
 }
 
-/// The master theorem's dominant term as a certified envelope: the
-/// cut-strata sum at cell `(n, k, t)` with `t = n - z`,
-/// `sum over l < (k-1)/2 of C(n/2, l) / C(t - 2l, k + 1 - 2l)`,
-/// enclosed term by term (`Lg` addition is certified log-sum). The
-/// average-form dominant of the measured composition; monotone in z
-/// because each term is.
+/// A SCAFFOLD envelope: the master theorem's cut-strata sum with the
+/// *trivial* stratum bound `D_c(l) = C(n/2, l)` — the whole stratum —
+/// in place of interface data, `sum over l < (k-1)/2 of
+/// C(n/2, l) / C(t - 2l, k + 1 - 2l)` at `t = n - z`, enclosed term
+/// by term.
+///
+/// What it is and is not. At the base cell `(32, 15, 17)` the trivial
+/// choice lands within 7% of the measured record (2489 vs 2674), which
+/// is a small-parameter coincidence, not a validation. At challenge
+/// scale it is binary: the stratum range is empty for `z/n <= 1/4`
+/// (the envelope returns the `L <= 1` bound) and the first nonempty
+/// range carries terms of order `2^(n/2)`, so no radius above a
+/// quarter is priced at all. Real rows need real interface data —
+/// `D_c` from the per-prime envelope and `D_b` from the engine, and
+/// the recursion down the tower rather than one application at the
+/// top. That instantiation is the compilation chapter's arithmetic;
+/// this function exists so the plumbing above it can be tested and
+/// timed against a known input.
 pub fn lg_cut_envelope(n: u64, k: u64, z: u64) -> Result<Lg> {
     if z >= n || k + 1 > n {
         return Err(Error::OutOfRange("need z < n and k < n".into()));
@@ -131,6 +143,96 @@ pub fn lg_cut_envelope(n: u64, k: u64, z: u64) -> Result<Lg> {
     // an empty stratum range is the high-agreement regime where the
     // cut term contributes nothing: the sum bounds the class by 1
     Ok(total.unwrap_or_else(Lg::zero))
+}
+
+/// The generic list-to-MCA conversion (GCXK25, ABF26 Theorem 5.1):
+/// a certified list bound `L` at radius `z/n` yields certified mutual
+/// correlated agreement at the square-root-loss radius
+/// `1 - sqrt(1 - z/n + eta)` with error `(L^2 (z/n) n + 1/eta)/|F|`
+/// — i.e. `(L^2 z + 1/eta)/|F|` on the lattice. The proximity loss is
+/// intrinsic to the generic conversion (ABF26 Theorem 5.4's
+/// counterexample); closing it for smooth-domain RS is the program's
+/// open target, so rows through this map are the certified GENERIC
+/// ceiling.
+pub fn lg_mca_error(lg_list: &Lg, z: u64, inv_eta: u64, ext_q: &Integer) -> Result<Lg> {
+    let numerator = lg_list
+        .pow(2)
+        .mul(&Lg::from_u64(z))
+        .add(&Lg::from_u64(inv_eta));
+    Ok(numerator.div(&super::volumes::lg_q(ext_q)?))
+}
+
+/// The CA radius of the conversion at list radius `z`, on the target
+/// lattice, rounded DOWN (a conservative claim): the largest `z_ca`
+/// with `z_ca/n <= 1 - sqrt(1 - z/n + eta)`, computed with directed
+/// rounding (the sqrt argument and the sqrt both rounded up).
+pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
+    use rug::Float;
+    let prec = 128;
+    let mut arg = Float::with_val(prec, n - z);
+    arg /= n as f64;
+    let mut eta = Float::with_val(prec, 1.0);
+    eta /= inv_eta as f64;
+    let mut s = Float::with_val_round(prec, arg + eta, Round::Up).0;
+    s.sqrt_round(Round::Up);
+    let mut frac = Float::with_val(prec, 1.0) - s;
+    frac *= n as f64;
+    frac.floor_mut();
+    frac.to_f64().max(0.0) as u64
+}
+
+/// The generic-map ceiling row: the largest certified MCA radius at
+/// the target, obtained by pushing the list envelope through the
+/// Theorem 5.1 conversion and searching the list-radius lattice. Both
+/// the CA radius and the error grow with the list radius, so the
+/// certified predicate is monotone.
+#[allow(clippy::too_many_arguments)] // the row's parameter list
+pub fn ca_ceiling_row(
+    s: u64,
+    total_len: u64,
+    z_max: u64,
+    inv_eta: u64,
+    ext_q: &Integer,
+    target_bits: f64,
+    mut envelope: impl FnMut(u64) -> Result<Lg>,
+) -> Result<CeilingRow> {
+    if s == 0 || total_len % s != 0 {
+        return Err(Error::OutOfRange(
+            "interleaving width must divide the total length".into(),
+        ));
+    }
+    let n = total_len / s;
+    if z_max >= n {
+        return Err(Error::OutOfRange("need z_max < n".into()));
+    }
+    let mut err_at = |z: u64| -> Result<Lg> { lg_mca_error(&envelope(z)?, z, inv_eta, ext_q) };
+    let first_bad = certified_first(1, z_max, |z| {
+        Ok(err_at(z)?.hi.to_f64_round(Round::Up) >= target_bits)
+    })?;
+    let z_list = match first_bad {
+        Some(1) => {
+            return Err(Error::Unsupported(
+                "no list radius certifies the target through the conversion".into(),
+            ))
+        }
+        Some(z) => z - 1,
+        None => z_max,
+    };
+    let sd = err_at(z_list)?;
+    let z_ca = ca_radius(n, z_list, inv_eta);
+    let pinned = match first_bad {
+        Some(z) => err_at(z)?.lo.to_f64_round(Round::Down) >= target_bits,
+        None => false,
+    };
+    Ok(CeilingRow {
+        s,
+        n,
+        z_star: z_ca,
+        delta_star: z_ca as f64 / n as f64,
+        lg_sound_lo: sd.lo.to_f64_round(Round::Down),
+        lg_sound_hi: sd.hi.to_f64_round(Round::Up),
+        crossing_pinned: pinned,
+    })
 }
 
 #[cfg(test)]
@@ -208,5 +310,46 @@ mod tests {
             ceil.z_star,
             floor.z_star
         );
+    }
+}
+
+#[cfg(test)]
+mod ca_tests {
+    use super::*;
+    use rug::ops::Pow;
+
+    /// The conversion's radius is conservative and its error formula
+    /// encloses the exact integer arithmetic at small parameters.
+    #[test]
+    fn ca_conversion_is_conservative_and_encloses() {
+        let (n, z, inv_eta) = (1u64 << 12, 1u64 << 10, 1u64 << 10);
+        let zc = ca_radius(n, z, inv_eta);
+        let lhs = (zc as f64) / (n as f64);
+        let rhs = 1.0 - ((n - z) as f64 / n as f64 + 1.0 / inv_eta as f64).sqrt();
+        assert!(lhs <= rhs + 1e-12, "{lhs} vs {rhs}");
+        assert!(rhs - lhs < 2.0 / n as f64, "not tight on the lattice");
+        let ext = Integer::from(65537u64).pow(4);
+        let lg_list = Lg::from_u64(1000);
+        let e = lg_mca_error(&lg_list, z, inv_eta, &ext).unwrap();
+        let exact = Integer::from(1000u64 * 1000 * z + inv_eta);
+        let ex = Lg::from_integer(&exact).div(&Lg::from_integer(&ext));
+        assert!(e.lo <= ex.lo && ex.hi <= e.hi);
+    }
+
+    /// End to end at a reduced box: the generic-map ceiling exists and
+    /// sits below the floor.
+    #[test]
+    fn ca_ceiling_below_floor_at_reduced_box() {
+        let base = Integer::from(crate::field::named::KOALABEAR);
+        let ext = base.clone().pow(6);
+        let total = 1u64 << 12;
+        let k = total / 2 - 1;
+        let floor = super::super::floor::elias_row(1, total, &base, &ext, -128.0).unwrap();
+        let ceil = ca_ceiling_row(1, total, total - k - 1, 1 << 20, &ext, -128.0, |z| {
+            lg_cut_envelope(total, k, z)
+        })
+        .unwrap();
+        assert!(ceil.z_star < floor.z_star);
+        assert!(ceil.z_star > 0, "nontrivial CA radius");
     }
 }

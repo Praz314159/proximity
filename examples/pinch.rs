@@ -10,16 +10,39 @@ fn main() {
     let k = total / 2 - 1;
     let t0 = std::time::Instant::now();
     let floor = elias_row(1, total, &base, &ext, -128.0).unwrap();
-    println!("floor:   z* = {} (delta {:.5}) in {:?}",
-             floor.z_star, floor.delta_star, t0.elapsed());
+    println!(
+        "floor:   z* = {} (delta {:.5}) in {:?}",
+        floor.z_star,
+        floor.delta_star,
+        t0.elapsed()
+    );
     let t1 = std::time::Instant::now();
     let ceil = envelope_row(1, total, total - k - 1, &ext, -128.0, |z| {
         lg_cut_envelope(total, k, z)
     })
     .unwrap();
-    println!("ceiling: z* = {} (delta {:.5}, avg-form cut term) in {:?}",
-             ceil.z_star, ceil.delta_star, t1.elapsed());
-    println!("gap: {} z-steps ({:.5} in delta)",
-             floor.z_star as i64 - ceil.z_star as i64,
-             floor.delta_star - ceil.delta_star);
+    println!(
+        "ceiling: z* = {} (delta {:.5}, avg-form cut term) in {:?}",
+        ceil.z_star,
+        ceil.delta_star,
+        t1.elapsed()
+    );
+    println!(
+        "gap: {} z-steps ({:.5} in delta)",
+        floor.z_star as i64 - ceil.z_star as i64,
+        floor.delta_star - ceil.delta_star
+    );
+    // pinch v2: the theorem-backed generic ceiling (ABF26 Thm 5.1 map)
+    let t2 = std::time::Instant::now();
+    let ca =
+        vanish::soundness::ca_ceiling_row(1, total, total - k - 1, 1 << 20, &ext, -128.0, |z| {
+            lg_cut_envelope(total, k, z)
+        })
+        .unwrap();
+    println!(
+        "CA ceiling (Thm 5.1 map): delta_ca = {:.5} (z_ca = {}) in {:?}",
+        ca.delta_star,
+        ca.z_star,
+        t2.elapsed()
+    );
 }

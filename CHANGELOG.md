@@ -6,10 +6,13 @@
   list envelope through the same Lemma 6.12 map and lattice search as
   the floor, reporting the largest radius certified sound under the
   target (domain-capped by `z_max`; saturation reported unpinned).
-  Built-in `lg_cut_envelope`: the master theorem's dominant cut-strata
-  term in certified term-by-term enclosures (empty stratum = the L <= 1
-  high-agreement regime), labeled average-form pending the sup-form
-  supplement. Tests: exact-rational enclosure at the record cell,
+  Two maps: the floor's Lemma 6.12 form and the generic list-to-MCA
+  conversion (`lg_mca_error` / `ca_ceiling_row`, ABF26 Thm 5.1) whose
+  square-root proximity loss is intrinsic. `lg_cut_envelope` is an
+  explicit SCAFFOLD (trivial stratum bound in place of interface
+  data — binary at challenge scale, empty below z/n = 1/4 and
+  2^(n/2) above), present so the plumbing can be tested against a
+  known input; real rows await the compilation's instantiation. Tests: exact-rational enclosure at the record cell,
   pinned/monotone/saturated crossings, and the two-face consistency
   law (ceiling strictly below floor) at a reduced box.
 

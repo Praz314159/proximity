@@ -97,6 +97,8 @@ pub mod smooth;
 
 // Applications.
 pub mod attack;
+#[cfg(feature = "certified")]
+pub mod soundness;
 pub mod toy;
 
 pub use error::{Error, Result};

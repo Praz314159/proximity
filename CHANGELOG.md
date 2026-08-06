@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **soundness: the chain restructured — one spine, two faces**: the
+  certified tier moves from `attack::certified` to a `soundness`
+  module layered as `volumes` (balls, expected lists, the exact Elias
+  count — where issue #37's Diamond-Gruen upgrades land once for both
+  faces), `chain` (the Lemma 6.12 map + crossing reports), and
+  `floor` (elias_row, first_moment_crossing — what attacks achieve).
+  The forthcoming `ceiling` consumes the master theorem's list
+  envelope through the identical chain; the prize's pinch becomes one
+  testable assertion (floor z* == ceiling z*). Flat namespace and
+  `attack::certified` preserved as re-exports; Table-4 golden pins
+  unchanged.
+
 - **norms: accident events (data canon R1)**: `AccidentEvent` — the
   atomic row of the accidents table, one row per (prime, symmetry
   orbit) incidence carrying the witness vector: (level, p, weight,

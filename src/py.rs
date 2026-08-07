@@ -227,24 +227,24 @@ type AttackRow = (f64, f64, u32, u64, u64, f64);
 /// Best ladder attack: (delta_star, deficit, t, s_g, r, log2_list), or None.
 #[pyfunction]
 fn attack_best(n: u64, k: u64, list_bits: f64) -> PyResult<Option<AttackRow>> {
-    let p = crate::attack::AttackParams { n, k, list_bits };
-    let a = err(crate::attack::best_attack(&p))?;
+    let p = crate::soundness::AttackParams { n, k, list_bits };
+    let a = err(crate::soundness::best_attack(&p))?;
     Ok(a.map(|a| (a.delta_star, a.deficit, a.t, a.s_g, a.r, a.log2_list)))
 }
 
 /// Antipodal (survey Table-5) baseline attack, same tuple shape as attack_best.
 #[pyfunction]
 fn attack_antipodal(n: u64, k: u64, list_bits: f64) -> PyResult<Option<AttackRow>> {
-    let p = crate::attack::AttackParams { n, k, list_bits };
-    let a = err(crate::attack::antipodal_attack(&p))?;
+    let p = crate::soundness::AttackParams { n, k, list_bits };
+    let a = err(crate::soundness::antipodal_attack(&p))?;
     Ok(a.map(|a| (a.delta_star, a.deficit, a.t, a.s_g, a.r, a.log2_list)))
 }
 
 /// Structural-framework ceiling delta_min - H2(rate)/list_bits.
 #[pyfunction]
 fn attack_ceiling(n: u64, k: u64, list_bits: f64) -> PyResult<f64> {
-    err(crate::attack::hyperbola_ceiling(
-        &crate::attack::AttackParams { n, k, list_bits },
+    err(crate::soundness::hyperbola_ceiling(
+        &crate::soundness::AttackParams { n, k, list_bits },
     ))
 }
 
@@ -1162,9 +1162,10 @@ fn elias_row(
     use rug::ops::Pow;
     let base = rug::Integer::from(base_q);
     let ext = base.clone().pow(ext_degree);
-    let r = err(py.allow_threads(|| {
-        crate::attack::certified::elias_row(s, total_len, &base, &ext, target_bits)
-    }))?;
+    let r =
+        err(py.allow_threads(|| {
+            crate::soundness::elias_row(s, total_len, &base, &ext, target_bits)
+        }))?;
     Ok((
         r.z_star,
         r.n,

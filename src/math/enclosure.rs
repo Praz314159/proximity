@@ -13,7 +13,7 @@
 //! of [`field::binom`](crate::field::binom), via directed log-gamma) and
 //! [`lg_sub_lower`] (a certified lower bound on a difference, `None`
 //! when the bracket cannot certify positivity). Consumed by
-//! [`attack::certified`](crate::attack::certified); exact-bignum
+//! the certified [`soundness`](crate::soundness) rows; exact-bignum
 //! cross-checks at small parameters pin the enclosures in tests.
 
 use rug::float::{Constant, Round};

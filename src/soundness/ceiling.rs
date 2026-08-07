@@ -13,11 +13,16 @@
 //! coincides with the list row's on the lattice.
 //!
 //! The envelope parameter is a closure because which envelope is
-//! admissible is the compilation chapter's decision; the built-in
-//! [`lg_cut_envelope`] is an explicit scaffold (see its doc).
+//! admissible is the compilation chapter's decision; the real object
+//! is assembled by [`super::envelope::assemble`] (the tower of the
+//! conditional corollary) and read here through
+//! `Profile::lg_at_disagreement`. An earlier scaffold
+//! (`lg_cut_envelope`, the trivial one-shot stratum sum) was removed
+//! when the tower landed; its exact-rational pin lives on as the
+//! envelope module's oracle gate.
 
 use crate::error::{Error, Result};
-use crate::math::enclosure::{lg_binom, Lg};
+use crate::math::enclosure::Lg;
 use rug::float::Round;
 use rug::Integer;
 
@@ -45,52 +50,6 @@ pub struct CeilingRow {
     /// True if the next list radius is certified on the other side of
     /// the target: the crossing is pinned to one lattice step.
     pub crossing_pinned: bool,
-}
-
-/// A SCAFFOLD envelope: the master theorem's cut-strata sum with the
-/// *trivial* stratum bound `D_c(l) = C(n/2, l)` — the whole stratum —
-/// in place of interface data, `sum over l < (k-1)/2 of
-/// C(n/2, l) / C(t - 2l, k + 1 - 2l)` at `t = n - z`, enclosed term
-/// by term.
-///
-/// What it is and is not. At the base cell `(32, 15, 17)` the trivial
-/// choice lands within 7% of the measured record (2489 vs 2674), which
-/// is a small-parameter coincidence, not a validation. At challenge
-/// scale it is binary: the stratum range is empty for `z/n <= 1/4`
-/// (the envelope returns the `L <= 1` bound) and the first nonempty
-/// range carries terms of order `2^(n/2)`, so no radius above a
-/// quarter is priced at all. Real rows need real interface data —
-/// `D_c` from the per-prime envelope and `D_b` from the engine, and
-/// the recursion down the tower rather than one application at the
-/// top. That instantiation is the compilation chapter's arithmetic;
-/// this function exists so the plumbing above it can be tested and
-/// timed against a known input.
-pub fn lg_cut_envelope(n: u64, k: u64, z: u64) -> Result<Lg> {
-    if z >= n || k + 1 > n {
-        return Err(Error::OutOfRange("need z < n and k < n".into()));
-    }
-    let t = n - z;
-    let (r, kap, half) = (k + 1, (k - 1) / 2, n / 2);
-    if t < r {
-        return Err(Error::OutOfRange(
-            "agreement below the interpolation threshold".into(),
-        ));
-    }
-    let l_min = t.saturating_sub(half);
-    let mut total: Option<Lg> = None;
-    for l in l_min..kap {
-        if t < 2 * l + (r - 2 * l) {
-            break;
-        }
-        let term = lg_binom(half, l).div(&lg_binom(t - 2 * l, r - 2 * l));
-        total = Some(match total {
-            Some(acc) => acc.add(&term),
-            None => term,
-        });
-    }
-    // an empty stratum range is the high-agreement regime where the
-    // cut term contributes nothing: the sum bounds the class by 1
-    Ok(total.unwrap_or_else(Lg::zero))
 }
 
 /// The generic list-to-MCA conversion (GCXK25, ABF26 Theorem 5.1):
@@ -250,38 +209,6 @@ pub fn list_ceiling_row(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rug::Rational;
-
-    /// The certified cut envelope encloses the exact rational sum at
-    /// the record cell (the 2489.03 of the first envelope evaluation).
-    #[test]
-    fn cut_envelope_encloses_exact_rational() {
-        let (n, k, t) = (32u64, 15u64, 17u64);
-        let binom = |a: u64, b: u64| -> Integer {
-            let mut v = Integer::from(1);
-            for i in 0..b {
-                v *= a - i;
-                v /= i + 1;
-            }
-            v
-        };
-        let mut exact = Rational::new();
-        for l in (t - n / 2)..(k - 1) / 2 {
-            exact += Rational::from((binom(n / 2, l), binom(t - 2 * l, k + 1 - 2 * l)));
-        }
-        let lg = lg_cut_envelope(n, k, n - t).unwrap();
-        let approx = exact.to_f64().log2();
-        let lo = lg.lo.to_f64_round(Round::Down);
-        let hi = lg.hi.to_f64_round(Round::Up);
-        assert!(lo <= approx && approx <= hi, "[{lo}, {hi}] vs {approx}");
-        assert!(hi - lo < 0.01, "bracket too wide");
-        assert!((exact.to_f64() - 2489.03).abs() < 0.5);
-    }
-}
-
-#[cfg(test)]
 mod ca_tests {
     use super::*;
     use rug::ops::Pow;
@@ -305,16 +232,18 @@ mod ca_tests {
     }
 
     /// End to end at a reduced box: the generic-map ceiling exists and
-    /// sits below the floor.
+    /// sits below the floor, fed by the assembled tower envelope.
     #[test]
     fn ca_ceiling_below_floor_at_reduced_box() {
+        use super::super::envelope::{assemble, TrivialInterface, DEFAULT_RESOLUTION};
         let base = Integer::from(crate::field::named::KOALABEAR);
         let ext = base.clone().pow(6);
         let total = 1u64 << 12;
         let k = total / 2 - 1;
         let floor = super::super::floor::elias_row(1, total, &base, &ext, -128.0).unwrap();
+        let prof = assemble(total, k, 8, &TrivialInterface, DEFAULT_RESOLUTION).unwrap();
         let ceil = ca_ceiling_row(1, total, total - k - 1, 1 << 20, &ext, -128.0, |z| {
-            lg_cut_envelope(total, k, z)
+            prof.lg_at_disagreement(k, z)
         })
         .unwrap();
         assert!(ceil.z_star < floor.z_star);
@@ -329,37 +258,44 @@ mod list_tests {
 
     /// Crossing behavior on the list lattice: pinned where the
     /// threshold cuts through the envelope's range, monotone in the
-    /// target, and saturation at z_max reported unpinned. (Ported from
-    /// the removed soundness-map row: same lattice arithmetic, honest
-    /// currency.)
+    /// target, and saturation at z_max reported unpinned. The envelope
+    /// is the assembled (32, 15) tower, whose values run 7.7 to 17.0
+    /// bits over z in [1, 16].
     #[test]
     fn list_ceiling_is_pinned_monotone_and_saturates() {
+        use super::super::envelope::{assemble, TrivialInterface, DEFAULT_RESOLUTION};
         let ext = Integer::from(65537u64).pow(4); // log2|F| ~ 64
+        let prof = assemble(32, 15, 8, &TrivialInterface, DEFAULT_RESOLUTION).unwrap();
         let row = |eps_bits: f64| {
-            list_ceiling_row(1, 32, 16, &ext, eps_bits, |z| lg_cut_envelope(32, 15, z)).unwrap()
+            list_ceiling_row(1, 32, 16, &ext, eps_bits, |z| {
+                prof.lg_at_disagreement(15, z)
+            })
+            .unwrap()
         };
-        let strict = row(-55.0); // threshold ~ 9 bits: crossing inside
-        let loose = row(-52.0); // threshold ~ 12 bits: crossing inside
+        let strict = row(-54.0); // threshold ~ 10 bits: crossing inside
+        let loose = row(-50.0); // threshold ~ 14 bits: crossing inside
         assert!(strict.crossing_pinned && loose.crossing_pinned);
         assert!(strict.z_star <= loose.z_star, "monotone in the target");
-        let saturated = row(-40.0); // threshold ~ 24 bits: never exceeded
+        let saturated = row(-45.0); // threshold ~ 19 bits: never exceeded
         assert!(saturated.z_star == 16 && !saturated.crossing_pinned);
     }
 
     /// The two faces in one currency: the certified ceiling sits below
     /// the certified floor, and the challenge would be resolved where
-    /// they meet. With the scaffold envelope the gap is enormous (the
-    /// scaffold is binary at z/n = 1/4) — the test pins the ordering,
-    /// which is the structural law, not the numbers.
+    /// they meet. With trivial interface data the gap is enormous —
+    /// the test pins the ordering, which is the structural law, not
+    /// the numbers.
     #[test]
     fn faces_are_ordered_in_list_currency() {
+        use super::super::envelope::{assemble, TrivialInterface, DEFAULT_RESOLUTION};
         let base = Integer::from(crate::field::named::KOALABEAR);
         let ext = base.clone().pow(6);
         let total = 1u64 << 12;
         let k = total / 2 - 1;
         let floor = super::super::floor::elias_list_row(1, total, &base, &ext, -128.0).unwrap();
+        let prof = assemble(total, k, 8, &TrivialInterface, DEFAULT_RESOLUTION).unwrap();
         let ceil = list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            lg_cut_envelope(total, k, z)
+            prof.lg_at_disagreement(k, z)
         })
         .unwrap();
         assert!(

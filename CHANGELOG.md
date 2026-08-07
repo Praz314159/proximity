@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **soundness: the attack directory folds in**: `attack/` is removed
+  from the crate root — it had become one subject split across two
+  directories by history. Its float threshold explorer moves to
+  `soundness::explore`, documented as what it is: the uncertified
+  tier of the same threshold calculus (explore there, cite from the
+  rows). The `soundness` module is now always compiled, with the
+  certified tier (`volumes`/`chain`/`floor`/`ceiling`) gated inside
+  it by the `certified` feature — the feature buys the rigor tier,
+  not the subject. All `attack::*` paths are gone (internal callers
+  updated; python function names unchanged); `tests/attack.rs` is
+  now `tests/explore.rs`.
+
+- **soundness: certified construction rows**: `floor::rung_floor_row`
+  — the Theorem-A rung families gain a citable twin. The exactness
+  window is enumerated once in exact integer arithmetic
+  (`explore::rung_families`, shared by both tiers), and each family's
+  exact count `C(avail, b)` is bracketed with `lg_binom` against the
+  `eps* |F|` budget; fractions compare exactly in integers, and the
+  certified bound `C(avail, b) <= 2^avail` prunes hopeless families.
+  At the box the row lands on the explorer's golden family (t = 15,
+  delta ~ 0.4844) and the tests pin the ordering against the Elias
+  wall (0.46783): counting owns the floor there, construction rows
+  carry the explicit witnesses.
+
 - **soundness: theorem-rule prune**: `envelope_row` (the soundness-map
   ceiling) is removed — Lemma 6.12 is an attack-side lower-bound tool
   and no theorem backs running it backwards on an envelope; its

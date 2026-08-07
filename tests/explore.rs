@@ -4,7 +4,7 @@
 //! antipodal method reproduces 0.492188 at rate 1/2 before any improvement is
 //! claimed).
 
-use vanish::attack::{
+use vanish::soundness::{
     antipodal_attack, best_attack, elias_delta_star, hyperbola_ceiling, AttackParams,
 };
 

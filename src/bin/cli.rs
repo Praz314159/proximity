@@ -230,7 +230,7 @@ fn main() {
             }
         }
         "attack" => {
-            use vanish::attack::*;
+            use vanish::soundness::*;
             let params = AttackParams {
                 n: req(&m, "n"),
                 k: req(&m, "k"),

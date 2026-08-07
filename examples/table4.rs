@@ -9,8 +9,8 @@
 
 use rug::ops::Pow;
 use rug::Integer;
-use vanish::attack::certified::elias_row;
 use vanish::field::named::KOALABEAR;
+use vanish::soundness::elias_row;
 
 fn main() {
     let base = Integer::from(KOALABEAR);

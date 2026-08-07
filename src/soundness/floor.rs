@@ -1,20 +1,24 @@
-//! The floor face: what attacks certifiably achieve. Table-4-style
-//! Elias rows (the certified wall floor delta* = 0.46783 at the box)
-//! and the first-moment (Diamond--Gruen random words) crossing. The
-//! ceiling face — envelope rows consuming the master theorem's list
-//! envelope through the same chain — is the module's forthcoming
-//! second half; the prize's pinch is floor z* == ceiling z*. The
-//! uncertified float twin of this file is `attack::ladder`: explore
-//! with the ladder, cite from here.
+//! The floor face: what attacks certifiably achieve. Two row species,
+//! by the theorem behind them. **Counting rows**: Table-4-style Elias
+//! rows (ABF26 Lemma 3.7 pigeonhole — some word has the list; the
+//! certified wall floor delta* = 0.46783 at the box) and the
+//! first-moment (Diamond--Gruen random words) crossing.
+//! **Construction rows**: [`rung_floor_row`] certifies the Theorem-A
+//! rung families — here is the word, and its list is the exact
+//! binomial `C(avail, b)` (exact at every prime by Theorem B_mult).
+//! The prize's pinch is floor z* == ceiling z*
+//! ([`super::ceiling`]). The uncertified float twin of this file is
+//! [`super::explore`]: explore there, cite from here.
 
 use crate::error::{Error, Result};
-use crate::math::enclosure::Lg;
+use crate::math::enclosure::{lg_binom, Lg};
 use rug::float::Round;
 use rug::Integer;
 
 use super::chain::{
     certified_first, lg_list_threshold, lg_soundness, Crossing, CrossingRow, ListRow,
 };
+use super::explore::rung_families;
 use super::volumes::{lg_elias_list, lg_expected_list};
 
 /// The certified first-moment crossing of log2 E\[list\] against
@@ -156,6 +160,75 @@ pub fn elias_list_row(
     })
 }
 
+/// One certified construction-floor row: a Theorem-A rung family whose
+/// exact member count `C(avail, b)` certifiably exceeds the
+/// `eps* |F|` budget, at the best (largest) agreement fraction the
+/// certificate reaches.
+#[derive(Debug, Clone, Copy)]
+pub struct RungFloorRow {
+    /// MultiplicativeSubgroup order.
+    pub s_g: u64,
+    /// Rung level (`q = 2^t - 1` symmetric functions pinned).
+    pub t: u32,
+    /// Agreement-set size; the exact radius is the rational `1 - r/s_g`.
+    pub r: u64,
+    /// `delta* = 1 - r/s_g` as a float, for display.
+    pub delta_star: f64,
+    /// Certified lower endpoint of log2 of the exact count `C(avail, b)`.
+    pub lg_list_lo: f64,
+    /// Certified upper endpoint of log2 of the exact count `C(avail, b)`.
+    pub lg_list_hi: f64,
+}
+
+/// The construction floor at `(n, k)`: among all rung families in the
+/// exactness window ([`rung_families`]), the largest agreement
+/// fraction `r/s_g` whose exact count `C(avail, b)` is certified to
+/// EXCEED `eps* |F|` — the family's radius `1 - r/s_g` bounds the
+/// challenge answer from above, and unlike the counting rows the
+/// witness is explicit: Theorem A's rung construction attains the
+/// count in the window, exactly at every prime by Theorem B_mult.
+/// There is no lattice walk here: a family is accepted only when its
+/// whole count bracket clears the whole threshold bracket
+/// (straddling candidates are conservatively dropped), fractions are
+/// compared exactly in integers, and families with `avail` below the
+/// threshold's bit budget are pruned by the certified bound
+/// `C(avail, b) <= 2^avail`. Returns `None` when no family certifies.
+/// The float twin is [`best_attack`](super::explore::best_attack).
+pub fn rung_floor_row(
+    n: u64,
+    k: u64,
+    ext_q: &Integer,
+    eps_bits: f64,
+) -> Result<Option<RungFloorRow>> {
+    let thr = lg_list_threshold(ext_q, eps_bits)?;
+    let thr_hi = thr.hi.to_f64_round(Round::Up);
+    let mut best: Option<RungFloorRow> = None;
+    rung_families(n, k, u32::MAX, |f| {
+        // certified prune: lg C(avail, b) <= avail <= thr.hi fails the test
+        if (f.avail as f64) <= thr_hi {
+            return;
+        }
+        // exact-fraction improvement check before the bracket work
+        if let Some(cur) = best {
+            if u128::from(f.r) * u128::from(cur.s_g) <= u128::from(cur.r) * u128::from(f.s_g) {
+                return;
+            }
+        }
+        let lg = lg_binom(f.avail, f.b);
+        if lg.lo > thr.hi {
+            best = Some(RungFloorRow {
+                s_g: f.s_g,
+                t: f.t,
+                r: f.r,
+                delta_star: f.delta(),
+                lg_list_lo: lg.lo.to_f64_round(Round::Down),
+                lg_list_hi: lg.hi.to_f64_round(Round::Up),
+            });
+        }
+    })?;
+    Ok(best)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +310,48 @@ mod tests {
                 assert!((r.delta_star * 1e5).round() / 1e5 == 0.46783);
             }
         }
+    }
+
+    /// The certified construction row lands on the float explorer's
+    /// golden family at the box (t = 15 on the full 2^21 subgroup) and
+    /// its bracket encloses the exact bignum count C(63, 32).
+    #[test]
+    fn rung_floor_certifies_the_explorer_family_at_the_box() {
+        use super::super::explore::{best_attack, AttackParams};
+        let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+        let (n, k) = (1u64 << 21, 1u64 << 20);
+        let row = rung_floor_row(n, k, &ext, -128.0).unwrap().unwrap();
+        assert_eq!((row.t, row.s_g), (15, 1 << 21));
+        assert_eq!(row.r, (1 << 20) + (1 << 15) - 1);
+        assert_eq!(row.delta_star, 1.0 - row.r as f64 / row.s_g as f64);
+        let float = best_attack(&AttackParams {
+            n,
+            k,
+            list_bits: 6.0 * f64::from(crate::field::named::KOALABEAR as u32).log2() - 128.0,
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!((float.t, float.s_g, float.r), (row.t, row.s_g, row.r));
+        let exact = Lg::from_integer(&Integer::from(Integer::binomial_u(63, 32)));
+        assert!(row.lg_list_lo <= exact.lo.to_f64_round(Round::Down));
+        assert!(row.lg_list_hi >= exact.hi.to_f64_round(Round::Up));
+        assert!((row.lg_list_lo - 59.67).abs() < 0.1);
+    }
+
+    /// Counting owns the wall at the box: the construction floor
+    /// (explicit witnesses, delta ~ 0.4844) sits strictly above the
+    /// Elias floor (pigeonhole, delta* = 0.46783) — the counting row
+    /// is the binding face of the attack side there.
+    #[test]
+    fn counting_owns_the_wall_at_the_box() {
+        let base = Integer::from(crate::field::named::KOALABEAR);
+        let ext = base.clone().pow(6);
+        let elias = elias_list_row(1, 1 << 21, &base, &ext, -128.0).unwrap();
+        let rung = rung_floor_row(1 << 21, 1 << 20, &ext, -128.0)
+            .unwrap()
+            .unwrap();
+        assert!((elias.delta_star - 0.46783).abs() < 5e-4);
+        assert!((rung.delta_star - 0.484375).abs() < 1e-4);
+        assert!(rung.delta_star > elias.delta_star);
     }
 }

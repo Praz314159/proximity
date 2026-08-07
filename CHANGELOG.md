@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- **soundness: theorem-rule prune**: `envelope_row` (the soundness-map
+  ceiling) is removed — Lemma 6.12 is an attack-side lower-bound tool
+  and no theorem backs running it backwards on an envelope; its
+  crossing coincides with `list_ceiling_row`'s on the lattice, so
+  nothing is lost. The module rule is now stated on both faces: every
+  row cites the named statement backing its comparison (Lemma 3.7 +
+  6.12 for the floor, the challenge statement for the list rows,
+  Theorem 5.1 for the MCA baseline row, which is kept as the certified
+  delimiter of what generic conversions achieve). `ca_radius` gains
+  directed rounding on its remaining steps; the crossing-behavior test
+  is ported to the list row.
+
+- **soundness: the challenge's own currency**: the grand list-decoding
+  challenge asks for the largest radius with `|Lambda(C, delta)| <=
+  eps* |F|`, so both faces now test against that threshold directly —
+  `chain::lg_list_threshold` plus `floor::elias_list_row` and
+  `ceiling::list_ceiling_row`, reporting a shared `ListRow`. No
+  soundness or MCA conversion enters the comparison. Cross-pinned:
+  the list crossing and the Lemma 6.12 soundness crossing pick the
+  same lattice point on the Table-4 rows (the equivalence is
+  algebraic, and now tested). The soundness map remains the floor's
+  own chain; the MCA conversion serves the paper's sibling challenge.
+
+- **soundness: the ceiling face** — `envelope_row` runs a certified
+  list envelope through the same Lemma 6.12 map and lattice search as
+  the floor, reporting the largest radius certified sound under the
+  target (domain-capped by `z_max`; saturation reported unpinned).
+  Two maps: the floor's Lemma 6.12 form and the generic list-to-MCA
+  conversion (`lg_mca_error` / `ca_ceiling_row`, ABF26 Thm 5.1) whose
+  square-root proximity loss is intrinsic. `lg_cut_envelope` is an
+  explicit SCAFFOLD (trivial stratum bound in place of interface
+  data — binary at challenge scale, empty below z/n = 1/4 and
+  2^(n/2) above), present so the plumbing can be tested against a
+  known input; real rows await the compilation's instantiation. Tests: exact-rational enclosure at the record cell,
+  pinned/monotone/saturated crossings, and the two-face consistency
+  law (ceiling strictly below floor) at a reduced box.
+
 - **soundness: the chain restructured — one spine, two faces**: the
   certified tier moves from `attack::certified` to a `soundness`
   module layered as `volumes` (balls, expected lists, the exact Elias

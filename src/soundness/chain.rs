@@ -7,7 +7,9 @@
 
 use crate::error::Result;
 use crate::math::enclosure::Lg;
-use rug::Integer;
+use rug::float::Round;
+use rug::ops::AddAssignRound;
+use rug::{Float, Integer};
 
 use super::volumes::lg_q;
 
@@ -67,4 +69,46 @@ pub fn certified_first(
         }
     }
     Ok((a <= hi).then_some(a))
+}
+
+/// The list-decoding challenge's threshold `eps* |F|` as a certified
+/// log2 bracket, for `eps* = 2^eps_bits`. This is the quantity both
+/// faces are tested against: the challenge asks for the largest radius
+/// with `|Lambda(C, delta)| <= eps* |F|`, so no soundness conversion
+/// enters — the comparison is in list size throughout. (The soundness
+/// map above is the floor's own chain, and the reason the threshold
+/// takes this value; the MCA conversion in `ceiling` serves the
+/// sibling challenge.)
+pub fn lg_list_threshold(ext_q: &Integer, eps_bits: f64) -> Result<Lg> {
+    let q = super::volumes::lg_q(ext_q)?;
+    let eps = |r: Round, x: &Float| {
+        let mut v = x.clone();
+        v.add_assign_round(&Float::with_val(x.prec(), eps_bits), r);
+        v
+    };
+    Ok(Lg {
+        lo: eps(Round::Down, &q.lo),
+        hi: eps(Round::Up, &q.hi),
+    })
+}
+
+/// One row in the challenge's own currency: a radius on the z-lattice
+/// together with the certified list bracket there.
+#[derive(Debug, Clone)]
+pub struct ListRow {
+    /// Interleaving width (the challenge's `m`).
+    pub s: u64,
+    /// Base-code block length.
+    pub n: u64,
+    /// The crossing radius.
+    pub z_star: u64,
+    /// `z_star / n`.
+    pub delta_star: f64,
+    /// Certified lower endpoint of log2 of the list bound at `z_star`.
+    pub lg_list_lo: f64,
+    /// Certified upper endpoint of log2 of the list bound at `z_star`.
+    pub lg_list_hi: f64,
+    /// Whether the neighbouring radius is certified on the other side:
+    /// the crossing is pinned to a single lattice step.
+    pub crossing_pinned: bool,
 }

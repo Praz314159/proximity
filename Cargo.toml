@@ -53,3 +53,7 @@ name = "bench_sweep"
 [[example]]
 name = "table4"
 required-features = ["certified"]
+
+[[example]]
+name = "pinch"
+required-features = ["certified"]

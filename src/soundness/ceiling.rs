@@ -1,102 +1,50 @@
-//! The ceiling face: what the defense certifiably bounds. An envelope
-//! row runs a certified list envelope through the same soundness map
-//! and lattice search as the floor, and reports the largest radius at
-//! which soundness is certified under the target — the prize's pinch
-//! is this row's `z_star` landing one step under the floor's.
+//! The ceiling face: certified upper bounds, consumed only the way a
+//! named theorem allows. The module rule, shared with the floor:
+//! every row cites the statement backing its comparison.
+//! [`list_ceiling_row`] is the challenge's own question — the list
+//! envelope against `eps* |F|`, no conversion (the grand list-decoding
+//! challenge at `m = 1`; see its scope note). [`ca_ceiling_row`] is
+//! the generic list-to-MCA conversion (ABF26 Theorem 5.1), kept as
+//! the certified BASELINE for the sibling MCA challenge: it delimits
+//! what generic methods achieve, and anything beyond it requires
+//! RS-specific structure — the program's open target. A soundness-map
+//! ceiling (Lemma 6.12 run backwards on an envelope) was removed
+//! 2026-08-07: no theorem backs that direction, and its crossing
+//! coincides with the list row's on the lattice.
 //!
-//! Two things are parameters by design, stated rather than assumed.
-//! The envelope itself is a closure, because which envelope is
+//! The envelope parameter is a closure because which envelope is
 //! admissible is the compilation chapter's decision; the built-in
-//! [`lg_cut_envelope`] is the master theorem's dominant (cut-strata)
-//! term in certified arithmetic — the average-form workhorse that
-//! carries ~93% of the measured lists — and rows built on it alone are
-//! labeled average-form: the sup-form supplement (the classified
-//! families' tail mass) must be added before a row is a worst-case
-//! theorem. And the soundness map is the floor's Lemma 6.12 form,
-//! pending the compilation's defense-side derivation; the pinch
-//! comparison is meaningful under a common map, which is exactly how
-//! it is consumed.
+//! [`lg_cut_envelope`] is an explicit scaffold (see its doc).
 
 use crate::error::{Error, Result};
 use crate::math::enclosure::{lg_binom, Lg};
 use rug::float::Round;
 use rug::Integer;
 
-use super::chain::{certified_first, lg_list_threshold, lg_soundness, ListRow};
+use super::chain::{certified_first, lg_list_threshold, ListRow};
 
-/// One certified ceiling row: the largest radius at which the envelope,
-/// pushed through the soundness map, is certified under the target.
+/// One certified conversion-row report (used by [`ca_ceiling_row`]):
+/// the radius claimed through the conversion, with the certified
+/// error endpoints at the list radius that produced it.
 #[derive(Debug, Clone)]
 pub struct CeilingRow {
     /// Interleaving width s (the table index).
     pub s: u64,
     /// Base-code block length n = total_len / s.
     pub n: u64,
-    /// Largest z whose soundness upper endpoint is under the target.
+    /// The claimed radius (for the MCA row: the converted CA radius,
+    /// conservatively rounded down on the lattice).
     pub z_star: u64,
     /// delta* = z_star / n.
     pub delta_star: f64,
-    /// Certified lower endpoint of log2 soundness at z_star.
+    /// Certified lower endpoint of log2 of the row's error quantity,
+    /// evaluated at the list radius the search selected.
     pub lg_sound_lo: f64,
-    /// Certified upper endpoint of log2 soundness at z_star.
+    /// Certified upper endpoint of the same.
     pub lg_sound_hi: f64,
-    /// True if at z_star + 1 the soundness lower endpoint clears the
-    /// target: the crossing is pinned to one z.
+    /// True if the next list radius is certified on the other side of
+    /// the target: the crossing is pinned to one lattice step.
     pub crossing_pinned: bool,
-}
-
-/// The largest radius z in `[1, n - 1]` at which the envelope's
-/// soundness is certified under `2^target_bits`. The envelope maps a
-/// radius to a certified log2 list bound; soundness is monotone
-/// increasing in the list, and the envelope is required monotone in z,
-/// so the lattice search is sound.
-pub fn envelope_row(
-    s: u64,
-    total_len: u64,
-    z_max: u64,
-    ext_q: &Integer,
-    target_bits: f64,
-    mut envelope: impl FnMut(u64) -> Result<Lg>,
-) -> Result<CeilingRow> {
-    if s == 0 || total_len % s != 0 {
-        return Err(Error::OutOfRange(
-            "interleaving width must divide the total length".into(),
-        ));
-    }
-    let n = total_len / s;
-    if z_max >= n {
-        return Err(Error::OutOfRange("need z_max < n".into()));
-    }
-    let mut sound_at = |z: u64| -> Result<Lg> { lg_soundness(&envelope(z)?, ext_q) };
-    // smallest z NOT certified sound within the envelope's domain; the
-    // ceiling sits one below (beyond z_max the envelope says nothing,
-    // so the row never claims past it)
-    let first_unsound = certified_first(1, z_max, |z| {
-        Ok(sound_at(z)?.hi.to_f64_round(Round::Up) >= target_bits)
-    })?;
-    let z_star = match first_unsound {
-        Some(1) => {
-            return Err(Error::Unsupported(
-                "no radius certifies soundness under the target".into(),
-            ))
-        }
-        Some(z) => z - 1,
-        None => z_max,
-    };
-    let sd = sound_at(z_star)?;
-    let pinned = match first_unsound {
-        Some(z) => sound_at(z)?.lo.to_f64_round(Round::Down) >= target_bits,
-        None => false,
-    };
-    Ok(CeilingRow {
-        s,
-        n,
-        z_star,
-        delta_star: z_star as f64 / n as f64,
-        lg_sound_lo: sd.lo.to_f64_round(Round::Down),
-        lg_sound_hi: sd.hi.to_f64_round(Round::Up),
-        crossing_pinned: pinned,
-    })
 }
 
 /// A SCAFFOLD envelope: the master theorem's cut-strata sum with the
@@ -167,6 +115,7 @@ pub fn lg_mca_error(lg_list: &Lg, z: u64, inv_eta: u64, ext_q: &Integer) -> Resu
 /// with `z_ca/n <= 1 - sqrt(1 - z/n + eta)`, computed with directed
 /// rounding (the sqrt argument and the sqrt both rounded up).
 pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
+    use rug::ops::{MulAssignRound, SubAssignRound};
     use rug::Float;
     let prec = 128;
     let mut arg = Float::with_val(prec, n - z);
@@ -175,8 +124,10 @@ pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
     eta /= inv_eta as f64;
     let mut s = Float::with_val_round(prec, arg + eta, Round::Up).0;
     s.sqrt_round(Round::Up);
-    let mut frac = Float::with_val(prec, 1.0) - s;
-    frac *= n as f64;
+    // remaining steps rounded DOWN so the claimed radius never overshoots
+    let mut frac = Float::with_val(prec, 1u32);
+    frac.sub_assign_round(&s, Round::Down);
+    frac.mul_assign_round(&Float::with_val(prec, n), Round::Down);
     frac.floor_mut();
     frac.to_f64().max(0.0) as u64
 }
@@ -301,7 +252,6 @@ pub fn list_ceiling_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rug::ops::Pow;
     use rug::Rational;
 
     /// The certified cut envelope encloses the exact rational sum at
@@ -328,51 +278,6 @@ mod tests {
         assert!(lo <= approx && approx <= hi, "[{lo}, {hi}] vs {approx}");
         assert!(hi - lo < 0.01, "bracket too wide");
         assert!((exact.to_f64() - 2489.03).abs() < 0.5);
-    }
-
-    /// End-to-end at small parameters: the ceiling row exists, is
-    /// pinned, and moves monotonically with the target.
-    #[test]
-    fn ceiling_row_is_pinned_and_monotone() {
-        let ext = Integer::from(65537u64).pow(4);
-        let row = |target: f64| {
-            envelope_row(1, 32, 16, &ext, target, |z| lg_cut_envelope(32, 15, z)).unwrap()
-        };
-        // targets chosen inside the range's soundness span (the
-        // in-domain maximum is ~ -49.7 bits at z_max), so both rows
-        // have genuine crossings
-        let strict = row(-55.0);
-        let loose = row(-52.0);
-        assert!(strict.crossing_pinned && loose.crossing_pinned);
-        assert!(strict.z_star <= loose.z_star, "monotone in the target");
-        assert!(strict.lg_sound_hi < -55.0);
-        // and a target below the whole span saturates at z_max, unpinned
-        let saturated = row(-40.0);
-        assert!(saturated.z_star == 16 && !saturated.crossing_pinned);
-    }
-
-    /// The consistency law of the two faces: under a common soundness
-    /// map, the certified-sound ceiling must sit strictly below the
-    /// certified-broken floor. Run at a reduced box (total length
-    /// 2^12, KoalaBear sextic) so the test stays fast; the full-box
-    /// pinch is the compilation's number.
-    #[test]
-    fn ceiling_sits_below_floor_at_reduced_box() {
-        let base = Integer::from(crate::field::named::KOALABEAR);
-        let ext = base.clone().pow(6);
-        let total = 1u64 << 12;
-        let floor = super::super::floor::elias_row(1, total, &base, &ext, -128.0).unwrap();
-        let k = total / 2 - 1;
-        let ceil = envelope_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            lg_cut_envelope(total, k, z)
-        })
-        .unwrap();
-        assert!(
-            ceil.z_star < floor.z_star,
-            "faces overlap: ceiling {} vs floor {}",
-            ceil.z_star,
-            floor.z_star
-        );
     }
 }
 
@@ -421,6 +326,25 @@ mod ca_tests {
 mod list_tests {
     use super::*;
     use rug::ops::Pow;
+
+    /// Crossing behavior on the list lattice: pinned where the
+    /// threshold cuts through the envelope's range, monotone in the
+    /// target, and saturation at z_max reported unpinned. (Ported from
+    /// the removed soundness-map row: same lattice arithmetic, honest
+    /// currency.)
+    #[test]
+    fn list_ceiling_is_pinned_monotone_and_saturates() {
+        let ext = Integer::from(65537u64).pow(4); // log2|F| ~ 64
+        let row = |eps_bits: f64| {
+            list_ceiling_row(1, 32, 16, &ext, eps_bits, |z| lg_cut_envelope(32, 15, z)).unwrap()
+        };
+        let strict = row(-55.0); // threshold ~ 9 bits: crossing inside
+        let loose = row(-52.0); // threshold ~ 12 bits: crossing inside
+        assert!(strict.crossing_pinned && loose.crossing_pinned);
+        assert!(strict.z_star <= loose.z_star, "monotone in the target");
+        let saturated = row(-40.0); // threshold ~ 24 bits: never exceeded
+        assert!(saturated.z_star == 16 && !saturated.crossing_pinned);
+    }
 
     /// The two faces in one currency: the certified ceiling sits below
     /// the certified floor, and the challenge would be resolved where

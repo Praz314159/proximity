@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **soundness: theorem-rule prune**: `envelope_row` (the soundness-map
+  ceiling) is removed — Lemma 6.12 is an attack-side lower-bound tool
+  and no theorem backs running it backwards on an envelope; its
+  crossing coincides with `list_ceiling_row`'s on the lattice, so
+  nothing is lost. The module rule is now stated on both faces: every
+  row cites the named statement backing its comparison (Lemma 3.7 +
+  6.12 for the floor, the challenge statement for the list rows,
+  Theorem 5.1 for the MCA baseline row, which is kept as the certified
+  delimiter of what generic conversions achieve). `ca_radius` gains
+  directed rounding on its remaining steps; the crossing-behavior test
+  is ported to the list row.
+
 - **soundness: the challenge's own currency**: the grand list-decoding
   challenge asks for the largest radius with `|Lambda(C, delta)| <=
   eps* |F|`, so both faces now test against that threshold directly —

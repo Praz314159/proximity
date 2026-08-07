@@ -8,9 +8,11 @@
 //! the z-lattice crossing reports); [`floor`] consumes counts on the
 //! attack side — what adversaries certifiably achieve. [`ceiling`]
 //! consumes the master theorem's list envelope through the
-//! identical chain ([`ceiling`]), and the prize's pinch is one
-//! testable assertion: the floor's certified crossing lands one step
-//! above the ceiling's.
+//! identical currency ([`ceiling`]): the challenge is resolved at a
+//! radius where the floor's certified list crossing and the ceiling's
+//! meet on the lattice. The module rule: every row cites the named
+//! theorem (or the challenge statement itself) backing its
+//! comparison.
 //!
 //! The flat namespace is preserved: every item re-exports here, and
 //! `attack::certified` remains an alias of this module.

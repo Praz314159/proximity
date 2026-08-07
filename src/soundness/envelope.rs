@@ -59,12 +59,12 @@ use rug::{Float, Integer};
 /// module's own).
 const PREC: u32 = 192;
 
-/// Fold a term into an optional accumulator (empty sums stay empty).
-fn acc_add(acc: Option<Lg>, term: &Lg) -> Option<Lg> {
-    Some(match acc {
-        Some(a) => a.add(term),
-        None => term.clone(),
-    })
+/// Fold a term into a possibly-empty running sum.
+fn add_to(acc: Option<Lg>, term: Lg) -> Lg {
+    match acc {
+        Some(a) => a.add(&term),
+        None => term,
+    }
 }
 
 /// Default grid resolution: levels whose threshold range fits are
@@ -126,6 +126,9 @@ impl Interface for TrivialInterface {
         } else {
             1
         };
+        // a surplus larger than the available points admits no
+        // members, but the log bracket cannot say zero; one is still
+        // a valid (and immaterial) upper bound there
         lg_binom(s / 2, kod).mul(&Lg::from_u64(per_core.max(1)))
     }
 
@@ -138,6 +141,15 @@ impl Interface for TrivialInterface {
     fn d_c_sup(&self, s: u64, _k: u64, l: u64) -> Lg {
         lg_binom(s / 2, l.min(s / 4))
     }
+}
+
+/// A stored bracket together with the smallest threshold it remains
+/// an enclosure at (by the profile's monotonicity in `t`).
+#[derive(Clone, Copy)]
+struct BlockBracket {
+    lo: f64,
+    hi: f64,
+    valid_from: u64,
 }
 
 /// One dimension's slice of a profile: brackets at an explicit grid
@@ -173,13 +185,22 @@ impl Row {
     /// the tight bracket, valid only at `t`; off-grid thresholds
     /// return the monotone block enclosure, valid from the grid
     /// point below.
-    fn bracket(&self, t: u64) -> ((f64, f64), u64) {
+    fn bracket(&self, t: u64) -> BlockBracket {
         let i = self.idx_below(t);
         if self.grid[i] == t {
-            (self.vals[i], t)
+            let (lo, hi) = self.vals[i];
+            BlockBracket {
+                lo,
+                hi,
+                valid_from: t,
+            }
         } else {
             let j = (i + 1).min(self.vals.len() - 1);
-            ((self.vals[j].0, self.vals[i].1), self.grid[i])
+            BlockBracket {
+                lo: self.vals[j].0,
+                hi: self.vals[i].1,
+                valid_from: self.grid[i],
+            }
         }
     }
 }
@@ -204,7 +225,7 @@ impl Profile {
 
     /// The threshold curve at dimension `k` (smallest asserted `t`).
     pub fn t_min(&self, k: u64) -> Option<u64> {
-        self.rows.get(&k).map(|r| r.t_min())
+        self.rows.get(&k).map(Row::t_min)
     }
 
     /// The envelope value at `(k, t)`; an error outside the domain
@@ -223,10 +244,10 @@ impl Profile {
                 self.n
             )));
         }
-        let ((lo, hi), _) = row.bracket(t);
+        let b = row.bracket(t);
         Ok(Lg {
-            lo: Float::with_val(PREC, lo),
-            hi: Float::with_val(PREC, hi),
+            lo: Float::with_val(PREC, b.lo),
+            hi: Float::with_val(PREC, b.hi),
         })
     }
 
@@ -264,6 +285,7 @@ fn build_grid(t_min: u64, t_max: u64, res: u64) -> Vec<u64> {
     g
 }
 
+/// A bracket as its stored form: `f64` endpoints, rounded outward.
 fn store(lg: &Lg) -> (f64, f64) {
     (
         lg.lo.to_f64_round(Round::Down),
@@ -275,9 +297,21 @@ fn store(lg: &Lg) -> (f64, f64) {
 /// — a member agreeing on at least the rung is the interpolant of `w`
 /// on any `k`-subset of its agreement set, so the map to that subset
 /// is injective and the list is at most the number of subsets. The
-/// crudest citable base; the base chapter's classical seeding will
-/// replace it through the same type.
+/// crudest citable base, kept as the reference floor;
+/// [`classical_base`] dominates it pointwise and is [`assemble`]'s
+/// default.
 pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
+    base_from_counts(n0, dims, |_, _, interp| interp.clone())
+}
+
+/// Shared base construction: validate each dimension, then fill its
+/// stride-1 row from an exact per-threshold count
+/// `(k, t, interpolation count) -> count`, stored as a tight bracket.
+fn base_from_counts(
+    n0: u64,
+    dims: &BTreeSet<u64>,
+    count: impl Fn(u64, u64, &Integer) -> Integer,
+) -> Result<Profile> {
     let mut prof = Profile {
         n: n0,
         rows: BTreeMap::new(),
@@ -288,16 +322,22 @@ pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
                 "base dimension {k} needs 1 <= k < n0 = {n0}"
             )));
         }
-        let val = store(&lg_binom(n0, k));
-        prof.insert(k, (k + 1..=n0).collect(), vec![val; (n0 - k) as usize]);
+        let interp = Integer::from(Integer::binomial_u(n0 as u32, k as u32));
+        let vals = (k + 1..=n0)
+            .map(|t| {
+                store(&Lg::from_integer(
+                    &count(k, t, &interp).max(Integer::from(1)),
+                ))
+            })
+            .collect();
+        prof.insert(k, (k + 1..=n0).collect(), vals);
     }
     Ok(prof)
 }
 
 /// The classical base: at each threshold the smaller of the
 /// interpolation bound `C(n0, k)` and the agreement-form Johnson
-/// bound
-/// `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`, valid once
+/// bound `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`, valid once
 /// `t^2 > n (k - 1)` — the quadratic argument: `m` members agreeing
 /// on `>= t` points each, pairwise on `<= k - 1`, force
 /// `m t (m t - n) / n <= m (m - 1)(k - 1)` by convexity, and solving
@@ -312,292 +352,389 @@ pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
 /// base statements' remaining content, not a defect of this
 /// constructor.
 pub fn classical_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
-    let mut prof = Profile {
-        n: n0,
-        rows: BTreeMap::new(),
-    };
-    for &k in dims {
-        if k == 0 || k + 1 > n0 {
-            return Err(Error::OutOfRange(format!(
-                "base dimension {k} needs 1 <= k < n0 = {n0}"
-            )));
+    base_from_counts(n0, dims, |k, t, interp| {
+        let mut best = interp.clone();
+        if t * t > n0 * (k - 1) {
+            let johnson = Integer::from(n0 * (t - k + 1) / (t * t - n0 * (k - 1)));
+            if johnson < best {
+                best = johnson;
+            }
         }
-        let interp = Integer::from(Integer::binomial_u(n0 as u32, k as u32));
-        let vals: Vec<(f64, f64)> = (k + 1..=n0)
-            .map(|t| {
-                let mut best = interp.clone();
-                if t * t > n0 * (k - 1) {
-                    let johnson = Integer::from(n0 * (t - k + 1) / (t * t - n0 * (k - 1)));
-                    if johnson < best {
-                        best = johnson;
-                    }
-                }
-                store(&Lg::from_integer(&best.max(Integer::from(1))))
-            })
-            .collect();
-        prof.insert(k, (k + 1..=n0).collect(), vals);
-    }
-    Ok(prof)
+        best
+    })
 }
 
 /// The channel dimensions of `k`: the fold splits degree-below-`k`
 /// polynomials into even and odd parts of dimensions `ceil(k/2)` and
 /// `floor(k/2)`.
+#[must_use]
 pub fn channel_dims(k: u64) -> (u64, u64) {
     (k.div_ceil(2), k / 2)
 }
 
+/// The cell geometry one step application works in: level `s = 2n`,
+/// dimension `k`, and the derived quantities every charge reads —
+/// channel dimensions, rung, coverage threshold.
+#[derive(Clone, Copy)]
+struct Cell {
+    n: u64,
+    s: u64,
+    k: u64,
+    kev: u64,
+    kod: u64,
+    r: u64,
+    lstar: u64,
+}
+
+impl Cell {
+    fn new(n: u64, k: u64) -> Self {
+        let (kev, kod) = channel_dims(k);
+        Cell {
+            n,
+            s: 2 * n,
+            k,
+            kev,
+            kod,
+            r: k + 1,
+            lstar: (n + k - 1).div_ceil(3),
+        }
+    }
+}
+
+/// Charge 1 — deep strata (`l >= l*`): the descent injection places
+/// the class in the joint list, anti-squaring collapses it to the
+/// larger channel list, and the level-below profile prices it. The
+/// profile is block-constant on its grid, so the suffix over
+/// `[l*, n]` compresses to runs — stretches where both channel
+/// brackets are constant — each contributing width times its max,
+/// with the sum strictly above each run precomputed so any lower
+/// limit is answered with one partial-width multiply.
+struct DeepCharge {
+    /// Runs in descending `l` order (built from `l = n` down).
+    runs: Vec<DeepRun>,
+}
+
+struct DeepRun {
+    lo: u64,
+    hi: u64,
+    max: Lg,
+    sum_above: Option<Lg>,
+}
+
+impl DeepCharge {
+    fn build(prev: &Profile, cell: &Cell) -> Self {
+        let mut runs = Vec::new();
+        if cell.lstar > cell.n {
+            return DeepCharge { runs };
+        }
+        let row_e = &prev.rows[&cell.kev];
+        let row_o = &prev.rows[&cell.kod];
+        let mut hi = cell.n;
+        let mut sum_above: Option<Lg> = None;
+        loop {
+            // each channel's bracket comes with the lowest threshold
+            // it stays valid at; the run is their meet
+            let e = row_e.bracket(hi);
+            let o = row_o.bracket(hi);
+            let max = Lg {
+                lo: Float::with_val(PREC, e.lo.max(o.lo)),
+                hi: Float::with_val(PREC, e.hi.max(o.hi)),
+            };
+            let lo = e.valid_from.max(o.valid_from).max(cell.lstar);
+            let contribution = Lg::from_u64(hi - lo + 1).mul(&max);
+            let next_above = Some(add_to(sum_above.clone(), contribution));
+            runs.push(DeepRun {
+                lo,
+                hi,
+                max,
+                sum_above,
+            });
+            sum_above = next_above;
+            if lo == cell.lstar {
+                break;
+            }
+            hi = lo - 1;
+        }
+        DeepCharge { runs }
+    }
+
+    /// The charge at threshold `t`: the profile suffix from
+    /// `max(l*, t - n)`, or `None` when the stratum range is empty.
+    fn at(&self, cell: &Cell, t: u64) -> Option<Lg> {
+        let l0 = t.saturating_sub(cell.n).max(cell.lstar);
+        if l0 > cell.n || self.runs.is_empty() {
+            return None;
+        }
+        let j = self.runs.partition_point(|run| run.lo > l0);
+        let run = &self.runs[j];
+        debug_assert!(run.lo <= l0 && l0 <= run.hi);
+        let partial = Lg::from_u64(run.hi - l0 + 1).mul(&run.max);
+        Some(match &run.sum_above {
+            Some(above) => above.add(&partial),
+            None => partial,
+        })
+    }
+}
+
+/// Charge 2 — the middle band (`kod <= l < l*`): the core charge
+/// prices the class by `D_b` against the suffix of `1/C(l, kod)`.
+/// Small ranges get the exact term-by-term array; large ones the
+/// telescoping identity `sum over l >= l0 of 1/C(l, m) =
+/// m/((m - 1) C(l0 - 1, m - 1))`, enclosed as [first term, closed
+/// form] — width `lg(l0/(m - 1))`, a fraction of a bit at rate 1/2,
+/// for two binomials per query instead of a level-length
+/// precomputation. The identity needs `m >= 2`, so `kod = 1` always
+/// takes the exact route (the closed form would divide by zero).
+enum MidSuffix {
+    Exact(Vec<Lg>),
+    Telescoped,
+}
+
+impl MidSuffix {
+    const EXACT_LIMIT: usize = 1 << 12;
+
+    fn build(cell: &Cell) -> Self {
+        let len = cell.lstar.saturating_sub(cell.kod) as usize;
+        if len > Self::EXACT_LIMIT && cell.kod >= 2 {
+            return MidSuffix::Telescoped;
+        }
+        let mut suffix: Vec<Lg> = Vec::with_capacity(len);
+        for i in 0..len {
+            let l = cell.lstar - 1 - i as u64;
+            let inv = Lg::zero().div(&lg_binom(l, cell.kod));
+            suffix.push(match suffix.last() {
+                Some(acc) => acc.add(&inv),
+                None => inv,
+            });
+        }
+        MidSuffix::Exact(suffix)
+    }
+
+    fn suffix_from(&self, cell: &Cell, l0: u64) -> Lg {
+        match self {
+            MidSuffix::Exact(suffix) => suffix[(cell.lstar - 1 - l0) as usize].clone(),
+            MidSuffix::Telescoped => {
+                let hi = Lg::from_u64(cell.kod)
+                    .div(&Lg::from_u64(cell.kod - 1))
+                    .div(&lg_binom(l0 - 1, cell.kod - 1));
+                let lo = Lg::zero().div(&lg_binom(l0, cell.kod));
+                Lg {
+                    lo: lo.lo,
+                    hi: hi.hi,
+                }
+            }
+        }
+    }
+}
+
+/// Charge 3 — small strata (`l < kod`): canonical subsets to the cut,
+/// priced by `D_c` over divisors `C(t - 2l, r - 2l)`, summed downward
+/// with a certified tail bound: count times the worst remaining
+/// numerator over the smallest remaining divisor (divisors grow as
+/// `l` falls). The sum closes either when the tail is provably
+/// negligible or at the term cap — near `t = r` the divisors grow
+/// slowly and the cap bites, but there the remaining terms are
+/// near-equal and the bound is tight; everywhere else the terms decay
+/// fast and the tail is dust. Cost per threshold stays O(cap). The
+/// `D_c` values of the capped window are threshold-independent, so
+/// they are fetched once.
+struct CutCharge {
+    /// `(d_c, d_c_sup)` for `l` in `[window_lo, kod)`.
+    window: Vec<(Lg, Lg)>,
+    window_lo: u64,
+}
+
+impl CutCharge {
+    const CAP: u64 = 16;
+    const NEGLIGIBLE_BITS: u32 = 80;
+
+    fn build(cell: &Cell, data: &dyn Interface) -> Self {
+        let window_lo = cell.kod.saturating_sub(Self::CAP + 2);
+        let window = (window_lo..cell.kod)
+            .map(|l| (data.d_c(cell.s, cell.k, l), data.d_c_sup(cell.s, cell.k, l)))
+            .collect();
+        CutCharge { window, window_lo }
+    }
+
+    fn dc(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Lg {
+        if l >= self.window_lo {
+            self.window[(l - self.window_lo) as usize].0.clone()
+        } else {
+            data.d_c(cell.s, cell.k, l)
+        }
+    }
+
+    fn dc_sup(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Lg {
+        if l >= self.window_lo {
+            self.window[(l - self.window_lo) as usize].1.clone()
+        } else {
+            data.d_c_sup(cell.s, cell.k, l)
+        }
+    }
+
+    fn at(&self, cell: &Cell, data: &dyn Interface, t: u64) -> Option<Lg> {
+        let lmin = t.saturating_sub(cell.n);
+        if lmin >= cell.kod {
+            return None;
+        }
+        let (r, kod) = (cell.r, cell.kod);
+        let mut acc: Option<Lg> = None;
+        let mut l = kod - 1;
+        loop {
+            let term = self.dc(cell, data, l).div(&lg_binom(t - 2 * l, r - 2 * l));
+            acc = Some(add_to(acc, term));
+            if l == lmin {
+                break;
+            }
+            let count = l - lmin;
+            let cur = acc.as_ref().expect("nonempty");
+            let mut tail_hi = Lg::from_u64(count).hi;
+            tail_hi.add_assign_round(&self.dc_sup(cell, data, l - 1).hi, Round::Up);
+            tail_hi.sub_assign_round(&lg_binom(t - 2 * (l - 1), r - 2 * (l - 1)).lo, Round::Up);
+            let mut margin = cur.hi.clone();
+            margin -= Self::NEGLIGIBLE_BITS;
+            if tail_hi <= margin || kod - 1 - l >= Self::CAP {
+                let tail = Lg {
+                    lo: Float::with_val(PREC, f64::NEG_INFINITY),
+                    hi: tail_hi,
+                };
+                let bounded = cur.add(&tail);
+                acc = Some(Lg {
+                    lo: cur.lo.clone(),
+                    hi: bounded.hi,
+                });
+                break;
+            }
+            l -= 1;
+        }
+        acc
+    }
+}
+
+/// The master inequality's machinery for one `(level, dimension)`:
+/// the three charges with their precomputed structures, evaluated
+/// per threshold by [`Charges::rhs`]. Construction performs the
+/// dimension-range check and the compatibility clause — a violation
+/// is an error naming the cell, never a silent assumption.
+struct Charges<'a> {
+    cell: Cell,
+    data: &'a dyn Interface,
+    deep: DeepCharge,
+    mid: MidSuffix,
+    cut: CutCharge,
+}
+
+impl<'a> Charges<'a> {
+    fn build(prev: &Profile, k: u64, data: &'a dyn Interface) -> Result<Self> {
+        let cell = Cell::new(prev.n, k);
+        if k < 2 || k > cell.s - 2 {
+            return Err(Error::OutOfRange(format!(
+                "step dimension {k} needs 2 <= k <= s - 2 at s = {}",
+                cell.s
+            )));
+        }
+        // the compatibility clause of the master theorem
+        for kc in [cell.kev, cell.kod] {
+            match prev.t_min(kc) {
+                None => {
+                    return Err(Error::Unsupported(format!(
+                        "compatibility: dimension {kc} missing from the level-{} window",
+                        cell.n
+                    )))
+                }
+                Some(curve) if curve > cell.lstar => {
+                    return Err(Error::Unsupported(format!(
+                        "compatibility: curve {curve} at dimension {kc} does not reach \
+                         the coverage threshold {} of level {}, dimension {k}",
+                        cell.lstar, cell.s
+                    )))
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(Charges {
+            deep: DeepCharge::build(prev, &cell),
+            mid: MidSuffix::build(&cell),
+            cut: CutCharge::build(&cell, data),
+            cell,
+            data,
+        })
+    }
+
+    /// Charge 2 at threshold `t`, `None` when the band is empty.
+    fn mid_at(&self, t: u64) -> Option<Lg> {
+        let cell = &self.cell;
+        let l0 = t.saturating_sub(cell.n).max(cell.kod);
+        if l0 >= cell.lstar {
+            return None;
+        }
+        let a = t - 2 * cell.kod;
+        Some(
+            self.data
+                .d_b(cell.s, cell.k, a)
+                .mul(&self.mid.suffix_from(cell, l0)),
+        )
+    }
+
+    /// The master's right-hand side at threshold `t`: the sum of the
+    /// three charges over their (possibly empty) stratum ranges.
+    fn rhs(&self, t: u64) -> Result<Lg> {
+        let cell = &self.cell;
+        [
+            self.deep.at(cell, t),
+            self.mid_at(t),
+            self.cut.at(cell, self.data, t),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| a.add(&b))
+        .ok_or_else(|| {
+            Error::Unsupported(format!(
+                "no charge covers cell ({}, {}, {t})",
+                cell.s, cell.k
+            ))
+        })
+    }
+}
+
 /// The master inequality as an operator: an envelope at level
 /// `prev.n`, plus interface data at level `s = 2 prev.n`, yields an
-/// envelope at level `s` for the given dimensions. The compatibility
-/// clause is enforced, not assumed: the previous window must contain
-/// each dimension's channel pair, and the previous curve must reach
-/// the coverage threshold — a violation is an error naming the cell.
+/// envelope at level `s` for the given dimensions. Per dimension:
+/// build the three charges, evaluate the right-hand
+/// side on the threshold grid in parallel, and refuse if the
+/// computed profile certifiably rises — the grid's enclosure rests
+/// on the exact right-hand side being non-increasing in `t`, and a
+/// rise means the data broke its `d_b` contract.
 pub fn step(
     prev: &Profile,
     dims: &BTreeSet<u64>,
     data: &dyn Interface,
     res: u64,
 ) -> Result<Profile> {
-    let n = prev.n;
-    let s = 2 * n;
     let mut out = Profile {
-        n: s,
+        n: 2 * prev.n,
         rows: BTreeMap::new(),
     };
     for &k in dims {
-        if k < 2 || k > s - 2 {
-            return Err(Error::OutOfRange(format!(
-                "step dimension {k} needs 2 <= k <= s - 2 at s = {s}"
+        let charges = Charges::build(prev, k, data)?;
+        let grid = build_grid(charges.cell.r, charges.cell.s, res);
+        let vals: Vec<(f64, f64)> = grid
+            .par_iter()
+            .map(|&t| charges.rhs(t).map(|v| store(&v)))
+            .collect::<Result<Vec<_>>>()?;
+        if vals.windows(2).any(|w| w[1].0 > w[0].1) {
+            return Err(Error::Unsupported(format!(
+                "interface data violates monotonicity at level {}, dimension {k}",
+                2 * prev.n
             )));
         }
-        let (kev, kod) = channel_dims(k);
-        let r = k + 1;
-        let lstar = (n + k - 1).div_ceil(3);
-        // the compatibility clause of the master theorem
-        for kc in [kev, kod] {
-            match prev.t_min(kc) {
-                None => {
-                    return Err(Error::Unsupported(format!(
-                        "compatibility: dimension {kc} missing from the level-{n} window"
-                    )))
-                }
-                Some(curve) if curve > lstar => {
-                    return Err(Error::Unsupported(format!(
-                        "compatibility: curve {curve} at dimension {kc} does not reach \
-                         the coverage threshold {lstar} of level {s}, dimension {k}"
-                    )))
-                }
-                Some(_) => {}
-            }
-        }
-
-        // deep strata: the level-below profile is block-constant on
-        // its grid, so the suffix over l in [lstar, n] compresses to
-        // runs — stretches where both channel brackets are constant —
-        // each contributing width times its max. A run's record keeps
-        // the sum strictly above it, so any lower limit is answered
-        // with one partial-width multiply.
-        struct DeepRun {
-            lo: u64,
-            hi: u64,
-            m: Lg,
-            above: Option<Lg>,
-        }
-        let mut deep_runs: Vec<DeepRun> = Vec::new();
-        if lstar <= n {
-            let row_e = prev.rows.get(&kev).expect("checked above");
-            let row_o = prev.rows.get(&kod).expect("checked above");
-            let mut hi_l = n;
-            let mut above: Option<Lg> = None;
-            loop {
-                // each channel's bracket comes with the lowest
-                // threshold it stays valid at; the run is their meet
-                let (be, floor_e) = row_e.bracket(hi_l);
-                let (bo, floor_o) = row_o.bracket(hi_l);
-                let m = Lg {
-                    lo: Float::with_val(PREC, be.0.max(bo.0)),
-                    hi: Float::with_val(PREC, be.1.max(bo.1)),
-                };
-                let lo_l = floor_e.max(floor_o).max(lstar);
-                let width = hi_l - lo_l + 1;
-                let contribution = Lg::from_u64(width).mul(&m);
-                let next_above = acc_add(above.clone(), &contribution);
-                deep_runs.push(DeepRun {
-                    lo: lo_l,
-                    hi: hi_l,
-                    m,
-                    above,
-                });
-                above = next_above;
-                if lo_l == lstar {
-                    break;
-                }
-                hi_l = lo_l - 1;
-            }
-        }
-        // runs are built from l = n downward, so they sit in the vec
-        // in descending order; binary-search the one containing l0
-        let deep_at = |l0: u64| -> Lg {
-            let j = deep_runs.partition_point(|run| run.lo > l0);
-            let run = &deep_runs[j];
-            debug_assert!(run.lo <= l0 && l0 <= run.hi);
-            let partial = Lg::from_u64(run.hi - l0 + 1).mul(&run.m);
-            match &run.above {
-                Some(a) => a.add(&partial),
-                None => partial,
-            }
-        };
-
-        // middle band: the suffix of 1/C(l, kod) over l in [lo, lstar).
-        // Small ranges get the exact term-by-term array; large ones
-        // the telescoping identity sum 1/C(l, m) over l >= l0 =
-        // m/((m-1) C(l0-1, m-1)), enclosed as [first term, closed
-        // form] — the width is lg(l0/(m-1)), a fraction of a bit at
-        // rate 1/2, for two binomials per query instead of a
-        // level-length precomputation.
-        let mid_len = lstar.saturating_sub(kod) as usize;
-        let mid_exact: Option<Vec<Lg>> = if mid_len <= 1 << 12 {
-            let mut suffix: Vec<Lg> = Vec::with_capacity(mid_len);
-            for i in 0..mid_len {
-                let l = lstar - 1 - i as u64;
-                let inv = Lg::zero().div(&lg_binom(l, kod));
-                suffix.push(match suffix.last() {
-                    Some(acc) => acc.add(&inv),
-                    None => inv,
-                });
-            }
-            Some(suffix)
-        } else {
-            None
-        };
-        let mid_at = |l0: u64| -> Lg {
-            match &mid_exact {
-                Some(suffix) => suffix[(lstar - 1 - l0) as usize].clone(),
-                None => {
-                    let hi = Lg::from_u64(kod)
-                        .div(&Lg::from_u64(kod - 1))
-                        .div(&lg_binom(l0 - 1, kod - 1));
-                    let lo = Lg::zero().div(&lg_binom(l0, kod));
-                    Lg {
-                        lo: lo.lo,
-                        hi: hi.hi,
-                    }
-                }
-            }
-        };
-
-        // small strata: the cut prices of the term-capped window are
-        // threshold-independent for most cells — cache them
-        const CAP: u64 = 16;
-        let dc_lo = kod.saturating_sub(CAP + 2);
-        let dc_cache: Vec<(Lg, Lg)> = (dc_lo..kod)
-            .map(|l| (data.d_c(s, k, l), data.d_c_sup(s, k, l)))
-            .collect();
-        let dc_at = |l: u64| -> Lg {
-            if l >= dc_lo {
-                dc_cache[(l - dc_lo) as usize].0.clone()
-            } else {
-                data.d_c(s, k, l)
-            }
-        };
-        let dc_sup_at = |l: u64| -> Lg {
-            if l >= dc_lo {
-                dc_cache[(l - dc_lo) as usize].1.clone()
-            } else {
-                data.d_c_sup(s, k, l)
-            }
-        };
-
-        let g = build_grid(r, s, res);
-        let cell = |&t: &u64| -> Result<(f64, f64)> {
-            let lmin = t.saturating_sub(n);
-            let mut total: Option<Lg> = None;
-
-            // charge 1: descent + anti-squaring into the level-n profile
-            let lo1 = lmin.max(lstar);
-            if lo1 <= n {
-                total = acc_add(total, &deep_at(lo1));
-            }
-
-            // charge 2: cores to family members, priced by D_b
-            let lo2 = lmin.max(kod);
-            if lo2 < lstar {
-                let a = t - 2 * kod;
-                let term = data.d_b(s, k, a).mul(&mid_at(lo2));
-                total = acc_add(total, &term);
-            }
-
-            // charge 3: canonical subsets to the cut, priced by D_c,
-            // summed downward with a certified tail bound. The tail —
-            // count times the worst remaining numerator over the
-            // smallest remaining divisor (divisors grow as l falls) —
-            // closes the sum either when it is provably negligible or
-            // at the term cap. Near t = r the divisors grow slowly and
-            // the cap bites, but there the remaining terms are
-            // near-equal and the bound is tight; everywhere else the
-            // terms decay fast and the tail is dust. Cost per
-            // threshold stays O(cap), keeping a level linear in its
-            // length.
-            if lmin < kod {
-                let mut acc: Option<Lg> = None;
-                let mut l = kod - 1;
-                loop {
-                    let term = dc_at(l).div(&lg_binom(t - 2 * l, r - 2 * l));
-                    acc = acc_add(acc, &term);
-                    if l == lmin {
-                        break;
-                    }
-                    let count = l - lmin;
-                    let cur = acc.as_ref().expect("nonempty");
-                    let mut tail_hi = Lg::from_u64(count).hi;
-                    tail_hi.add_assign_round(&dc_sup_at(l - 1).hi, Round::Up);
-                    tail_hi.sub_assign_round(
-                        &lg_binom(t - 2 * (l - 1), r - 2 * (l - 1)).lo,
-                        Round::Up,
-                    );
-                    let mut margin = cur.hi.clone();
-                    margin -= 80u32;
-                    if tail_hi <= margin || kod - 1 - l >= CAP {
-                        let tail = Lg {
-                            lo: Float::with_val(PREC, f64::NEG_INFINITY),
-                            hi: tail_hi,
-                        };
-                        let bounded = cur.add(&tail);
-                        acc = Some(Lg {
-                            lo: cur.lo.clone(),
-                            hi: bounded.hi,
-                        });
-                        break;
-                    }
-                    l -= 1;
-                }
-                total = acc_add(total, &acc.expect("nonempty range"));
-            }
-
-            let total = total.ok_or_else(|| {
-                Error::Unsupported(format!("no charge covers cell ({s}, {k}, {t})"))
-            })?;
-            Ok(store(&total))
-        };
-        let vals: Vec<(f64, f64)> = g.par_iter().map(cell).collect::<Result<Vec<_>>>()?;
-        // the grid's enclosure rests on the exact right-hand side
-        // being non-increasing in t; a bracket that certifiably
-        // rises means the data broke its d_b contract
-        for w in vals.windows(2) {
-            if w[1].0 > w[0].1 {
-                return Err(Error::Unsupported(format!(
-                    "interface data violates monotonicity at level {s}, dimension {k}"
-                )));
-            }
-        }
-        out.insert(k, g, vals);
+        out.insert(k, grid, vals);
     }
     Ok(out)
 }
 
 /// The conditional form of the worst-case bound, as computation: from
-/// the interpolation base at floor level `n0`, apply the step once
+/// the classical base at floor level `n0`, apply the step once
 /// per level up to `s`, evaluating only the dimensions the top
 /// dimension `k` folds down to. The result is the envelope at level
 /// `s`, valid under the interface data supplied — the assumptions of

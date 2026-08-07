@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **soundness: the step, structured**: the envelope step's monolith
+  is broken along the theorem's own joints — `Cell` (the geometry a
+  step application works in), `DeepCharge` (charge 1: the run
+  compression and suffix queries), `MidSuffix` (charge 2: exact
+  array vs telescoped closed form, now guarded against `kod = 1`,
+  where the telescoping identity divides by zero — a latent panic
+  the review caught), `CutCharge` (charge 3: the cached window and
+  certified tail), and `Charges::rhs` (the three-term sum, reading
+  like the master's display). `BlockBracket` names what
+  `Row::bracket` returns; the base constructors share one validated
+  builder (`base_from_counts`); magic numbers became named consts.
+  Behavior-preserving: every gate pin and the box numbers are
+  bit-identical.
+
 - **soundness: the classical base — the ceiling exists**: new
   `envelope::classical_base` (now `assemble`'s default): at each
   floor threshold the smaller of the interpolation bound and the

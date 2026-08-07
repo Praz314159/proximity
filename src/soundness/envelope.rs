@@ -32,11 +32,18 @@
 //! (at most `(s - 2 kod)/a` members per core reach surplus `a`).
 //! Real data — the engine's collision bounds and the per-prime
 //! envelope at a certified prime — drops in by implementing the same
-//! trait; the base is likewise the crudest citable statement (the
-//! interpolation bound `C(n0, k)`) until the base chapter's classical
-//! seeding is ported. The point of running the tower with trivial
-//! data is the loss map: where the assembled number is weak tells the
-//! compilation chapter where sharpness must come from.
+//! trait. Bases likewise: [`classical_base`] (the default — Johnson
+//! above its threshold, interpolation below, exactly 1 at full
+//! agreement) seeds the tower with everything classical coding
+//! theory grants at the floor; [`assemble_levels_from`] is the seam
+//! for sharper bases (the small-level form at a certified prime).
+//! The point of running the tower with placeholder inputs is the
+//! loss map: where the assembled number is weak tells the
+//! compilation chapter where sharpness must come from — with the
+//! classical base the two named walls are the sub-Johnson band at
+//! the floor (nonempty above rate 1/4; the useful radius halves per
+//! level until the band is closed) and the trivial `D_b` flood in
+//! the middle charge.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -46,7 +53,7 @@ use crate::error::{Error, Result};
 use crate::math::enclosure::{lg_binom, Lg};
 use rug::float::Round;
 use rug::ops::{AddAssignRound, SubAssignRound};
-use rug::Float;
+use rug::{Float, Integer};
 
 /// Working precision for rebuilt endpoints (matches the enclosure
 /// module's own).
@@ -133,47 +140,46 @@ impl Interface for TrivialInterface {
     }
 }
 
-/// One dimension's slice of a profile: brackets at the grid points
-/// `t_min, t_min + stride, ...` capped at the level length, stored as
-/// directed-rounded `f64` endpoint pairs (a widening, so still an
-/// enclosure). Off-grid thresholds are enclosed by monotonicity: the
-/// exact profile value is non-increasing in `t`, so
-/// `[lo(next grid point), hi(previous grid point)]` contains it. At
-/// `stride = 1` — every level whose range fits the resolution — the
-/// grid is the lattice and every bracket is the direct computation.
+/// One dimension's slice of a profile: brackets at an explicit grid
+/// of thresholds (sorted, first at the curve, last at the level
+/// length), stored as directed-rounded `f64` endpoint pairs (a
+/// widening, so still an enclosure). Off-grid thresholds are
+/// enclosed by monotonicity: the exact profile value is
+/// non-increasing in `t`, so
+/// `[lo(next grid point), hi(previous grid point)]` contains it.
+/// The grid is dense (stride 1) near full agreement, where the
+/// profile varies fastest per lattice step and where a ceiling
+/// region a few points wide must not be smeared into a coarse
+/// block, and uniform across the body; a level whose whole range
+/// fits the resolution is entirely exact.
 #[derive(Debug)]
 struct Row {
-    t_min: u64,
-    stride: u64,
+    grid: Vec<u64>,
     vals: Vec<(f64, f64)>,
 }
 
 impl Row {
-    /// The threshold of grid index `i` (the last point is capped).
-    fn t_of(&self, i: usize, n: u64) -> u64 {
-        (self.t_min + i as u64 * self.stride).min(n)
+    fn t_min(&self) -> u64 {
+        self.grid[0]
     }
 
     /// The grid index at or below `t`.
     fn idx_below(&self, t: u64) -> usize {
-        (((t - self.t_min) / self.stride) as usize).min(self.vals.len() - 1)
+        self.grid.partition_point(|&g| g <= t) - 1
     }
 
     /// The bracket for `t` together with the smallest threshold the
-    /// same bracket is valid at (the run floor). On-grid hits —
-    /// including the capped last point, which the plain index
-    /// arithmetic misses — return the tight bracket, valid only at
-    /// `t`; off-grid thresholds return the monotone block enclosure,
-    /// valid from the grid point below.
-    fn bracket(&self, t: u64, n: u64) -> ((f64, f64), u64) {
+    /// same bracket is valid at (the run floor). On-grid hits return
+    /// the tight bracket, valid only at `t`; off-grid thresholds
+    /// return the monotone block enclosure, valid from the grid
+    /// point below.
+    fn bracket(&self, t: u64) -> ((f64, f64), u64) {
         let i = self.idx_below(t);
-        let j = (i + 1).min(self.vals.len() - 1);
-        if self.t_of(i, n) == t {
+        if self.grid[i] == t {
             (self.vals[i], t)
-        } else if self.t_of(j, n) == t {
-            (self.vals[j], t)
         } else {
-            ((self.vals[j].0, self.vals[i].1), self.t_of(i, n))
+            let j = (i + 1).min(self.vals.len() - 1);
+            ((self.vals[j].0, self.vals[i].1), self.grid[i])
         }
     }
 }
@@ -198,7 +204,7 @@ impl Profile {
 
     /// The threshold curve at dimension `k` (smallest asserted `t`).
     pub fn t_min(&self, k: u64) -> Option<u64> {
-        self.rows.get(&k).map(|r| r.t_min)
+        self.rows.get(&k).map(|r| r.t_min())
     }
 
     /// The envelope value at `(k, t)`; an error outside the domain
@@ -210,13 +216,14 @@ impl Profile {
             .rows
             .get(&k)
             .ok_or_else(|| Error::OutOfRange(format!("dimension {k} outside the window")))?;
-        if t < row.t_min || t > self.n {
+        if t < row.t_min() || t > self.n {
             return Err(Error::OutOfRange(format!(
                 "threshold {t} outside [{}, {}]",
-                row.t_min, self.n
+                row.t_min(),
+                self.n
             )));
         }
-        let ((lo, hi), _) = row.bracket(t, self.n);
+        let ((lo, hi), _) = row.bracket(t);
         Ok(Lg {
             lo: Float::with_val(PREC, lo),
             hi: Float::with_val(PREC, hi),
@@ -232,31 +239,29 @@ impl Profile {
         self.eval(k, self.n - z)
     }
 
-    fn insert(&mut self, k: u64, t_min: u64, stride: u64, vals: Vec<(f64, f64)>) {
-        self.rows.insert(
-            k,
-            Row {
-                t_min,
-                stride,
-                vals,
-            },
-        );
+    fn insert(&mut self, k: u64, grid: Vec<u64>, vals: Vec<(f64, f64)>) {
+        debug_assert_eq!(grid.len(), vals.len());
+        self.rows.insert(k, Row { grid, vals });
     }
 }
 
-/// The stride and grid-point count for a range of `len` thresholds
-/// at the given resolution: `stride = ceil(len/res)`, points at every
-/// stride with the range's endpoint always included (capped there
-/// when the stride does not divide the range).
-fn grid(len: u64, res: u64) -> (u64, usize) {
-    let stride = len.div_ceil(res).max(1);
-    let base = ((len - 1) / stride) as usize + 1;
-    let m = if (len - 1) % stride == 0 {
-        base
-    } else {
-        base + 1
-    };
-    (stride, m)
+/// The threshold grid for `[t_min, t_max]` at the given resolution:
+/// the whole range when it fits, else a uniform coarse body plus a
+/// dense stride-1 tail of `res/2` points ending at `t_max` — full
+/// agreement is where the profile varies fastest per lattice step.
+fn build_grid(t_min: u64, t_max: u64, res: u64) -> Vec<u64> {
+    let len = t_max - t_min + 1;
+    let res = res.max(4);
+    if len <= res {
+        return (t_min..=t_max).collect();
+    }
+    let dense = res / 2;
+    let dense_from = t_max - dense + 1;
+    let body_len = dense_from - t_min;
+    let stride = body_len.div_ceil(res - dense).max(1);
+    let mut g: Vec<u64> = (t_min..dense_from).step_by(stride as usize).collect();
+    g.extend(dense_from..=t_max);
+    g
 }
 
 fn store(lg: &Lg) -> (f64, f64) {
@@ -284,7 +289,53 @@ pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
             )));
         }
         let val = store(&lg_binom(n0, k));
-        prof.insert(k, k + 1, 1, vec![val; (n0 - k) as usize]);
+        prof.insert(k, (k + 1..=n0).collect(), vec![val; (n0 - k) as usize]);
+    }
+    Ok(prof)
+}
+
+/// The classical base: at each threshold the smaller of the
+/// interpolation bound `C(n0, k)` and the agreement-form Johnson
+/// bound
+/// `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`, valid once
+/// `t^2 > n (k - 1)` — the quadratic argument: `m` members agreeing
+/// on `>= t` points each, pairwise on `<= k - 1`, force
+/// `m t (m t - n) / n <= m (m - 1)(k - 1)` by convexity, and solving
+/// for `m` gives the display. At `t = n` it reads exactly 1, so the
+/// tower's loss-free transport carries a one-word list to the top.
+/// This is the ch. 4 base section's classical seeding as code (the
+/// notes' opening chapter recovers the same count as the Corradi
+/// degeneration); what it cannot cover is the band between the
+/// coverage threshold `(1 + 2 rho) / 3` and the Johnson fraction
+/// `sqrt(rho)` — nonempty exactly above rate 1/4 — where the
+/// interpolation fallback still floods. Closing that band is the
+/// base statements' remaining content, not a defect of this
+/// constructor.
+pub fn classical_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
+    let mut prof = Profile {
+        n: n0,
+        rows: BTreeMap::new(),
+    };
+    for &k in dims {
+        if k == 0 || k + 1 > n0 {
+            return Err(Error::OutOfRange(format!(
+                "base dimension {k} needs 1 <= k < n0 = {n0}"
+            )));
+        }
+        let interp = Integer::from(Integer::binomial_u(n0 as u32, k as u32));
+        let vals: Vec<(f64, f64)> = (k + 1..=n0)
+            .map(|t| {
+                let mut best = interp.clone();
+                if t * t > n0 * (k - 1) {
+                    let johnson = Integer::from(n0 * (t - k + 1) / (t * t - n0 * (k - 1)));
+                    if johnson < best {
+                        best = johnson;
+                    }
+                }
+                store(&Lg::from_integer(&best.max(Integer::from(1))))
+            })
+            .collect();
+        prof.insert(k, (k + 1..=n0).collect(), vals);
     }
     Ok(prof)
 }
@@ -362,8 +413,8 @@ pub fn step(
             loop {
                 // each channel's bracket comes with the lowest
                 // threshold it stays valid at; the run is their meet
-                let (be, floor_e) = row_e.bracket(hi_l, n);
-                let (bo, floor_o) = row_o.bracket(hi_l, n);
+                let (be, floor_e) = row_e.bracket(hi_l);
+                let (bo, floor_o) = row_o.bracket(hi_l);
                 let m = Lg {
                     lo: Float::with_val(PREC, be.0.max(bo.0)),
                     hi: Float::with_val(PREC, be.1.max(bo.1)),
@@ -458,9 +509,8 @@ pub fn step(
             }
         };
 
-        let (stride, points) = grid(s - r + 1, res);
-        let cell = |i: usize| -> Result<(f64, f64)> {
-            let t = (r + i as u64 * stride).min(s);
+        let g = build_grid(r, s, res);
+        let cell = |&t: &u64| -> Result<(f64, f64)> {
             let lmin = t.saturating_sub(n);
             let mut total: Option<Lg> = None;
 
@@ -530,10 +580,7 @@ pub fn step(
             })?;
             Ok(store(&total))
         };
-        let vals: Vec<(f64, f64)> = (0..points)
-            .into_par_iter()
-            .map(cell)
-            .collect::<Result<Vec<_>>>()?;
+        let vals: Vec<(f64, f64)> = g.par_iter().map(cell).collect::<Result<Vec<_>>>()?;
         // the grid's enclosure rests on the exact right-hand side
         // being non-increasing in t; a bracket that certifiably
         // rises means the data broke its d_b contract
@@ -544,7 +591,7 @@ pub fn step(
                 )));
             }
         }
-        out.insert(k, r, stride, vals);
+        out.insert(k, g, vals);
     }
     Ok(out)
 }
@@ -563,9 +610,34 @@ pub fn assemble(s: u64, k: u64, n0: u64, data: &dyn Interface, res: u64) -> Resu
         .expect("at least the base level"))
 }
 
+/// The dimension windows of a tower, base level first: each level
+/// needs its dimensions' channel pairs one level below.
+fn windows(s: u64, k: u64, n0: u64) -> Result<Vec<BTreeSet<u64>>> {
+    if !s.is_power_of_two() || !n0.is_power_of_two() || n0 < 4 || s < n0 {
+        return Err(Error::OutOfRange(
+            "need power-of-two levels with 4 <= n0 <= s".into(),
+        ));
+    }
+    let d = (s / n0).ilog2() as usize;
+    let mut down: Vec<BTreeSet<u64>> = vec![BTreeSet::from([k])];
+    for _ in 0..d {
+        let mut below = BTreeSet::new();
+        for &kc in down.last().expect("nonempty") {
+            let (e, o) = channel_dims(kc);
+            below.insert(e);
+            below.insert(o);
+        }
+        down.push(below);
+    }
+    down.reverse();
+    Ok(down)
+}
+
 /// [`assemble`], keeping every intermediate level (base first, top
 /// last) — the loss map's instrument: where the tower's numbers turn
 /// weak locates which input the compilation chapter must sharpen.
+/// Seeds from the classical base; [`assemble_levels_from`] accepts
+/// any base profile.
 pub fn assemble_levels(
     s: u64,
     k: u64,
@@ -573,28 +645,34 @@ pub fn assemble_levels(
     data: &dyn Interface,
     res: u64,
 ) -> Result<Vec<Profile>> {
-    if !s.is_power_of_two() || !n0.is_power_of_two() || n0 < 4 || s < n0 {
-        return Err(Error::OutOfRange(
-            "need power-of-two levels with 4 <= n0 <= s".into(),
-        ));
-    }
-    let d = (s / n0).ilog2() as usize;
-    // dimension windows, top down: each level needs its dimensions'
-    // channel pairs one level below
-    let mut windows: Vec<BTreeSet<u64>> = vec![BTreeSet::from([k])];
-    for _ in 0..d {
-        let mut below = BTreeSet::new();
-        for &kc in windows.last().expect("nonempty") {
-            let (e, o) = channel_dims(kc);
-            below.insert(e);
-            below.insert(o);
+    let w = windows(s, k, n0)?;
+    assemble_levels_from(classical_base(n0, &w[0])?, s, k, data, res)
+}
+
+/// The tower from a caller-supplied base profile — the seam for base
+/// providers beyond the built-in constructors (the small-level form
+/// at a certified prime, when it lands, plugs in here). The base
+/// must sit at a level dividing `s` by a power of two and contain
+/// the bottom window's dimensions; the step's compatibility clause
+/// checks the curves.
+pub fn assemble_levels_from(
+    base: Profile,
+    s: u64,
+    k: u64,
+    data: &dyn Interface,
+    res: u64,
+) -> Result<Vec<Profile>> {
+    let w = windows(s, k, base.n)?;
+    for &kc in &w[0] {
+        if base.t_min(kc).is_none() {
+            return Err(Error::OutOfRange(format!(
+                "base profile is missing dimension {kc}"
+            )));
         }
-        windows.push(below);
     }
-    windows.reverse();
-    let mut levels = vec![interpolation_base(n0, &windows[0])?];
-    for w in &windows[1..] {
-        let next = step(levels.last().expect("nonempty"), w, data, res)?;
+    let mut levels = vec![base];
+    for win in &w[1..] {
+        let next = step(levels.last().expect("nonempty"), win, data, res)?;
         levels.push(next);
     }
     Ok(levels)
@@ -700,6 +778,68 @@ mod tests {
             let v = prof.eval(15, t).expect("in domain");
             assert!(v.hi.is_finite());
         }
+    }
+
+    /// The classical base pins: at (8, 4) the sharp agreement-form
+    /// Johnson bound n(t - k + 1)/(t^2 - n(k - 1)) reads 16, 2, 1, 1
+    /// across t = 5..8 (all under the interpolation 70), and full
+    /// agreement is exactly one word — zero bits.
+    #[test]
+    fn classical_base_pins() {
+        let base = classical_base(8, &BTreeSet::from([4, 3])).expect("base");
+        let want = [(5u64, 4.0), (6, 1.0), (7, 0.0), (8, 0.0)];
+        for &(t, bits) in &want {
+            let v = base.eval(4, t).expect("in domain");
+            assert!(
+                (v.hi.to_f64() - bits).abs() < 1e-9,
+                "t = {t}: {} vs {bits}",
+                v.hi.to_f64()
+            );
+        }
+        // dimension 3: interpolation at t = 4, Johnson from t = 5
+        assert!((base.eval(3, 4).unwrap().hi.to_f64() - (56f64).log2()).abs() < 1e-9);
+        assert!((base.eval(3, 5).unwrap().hi.to_f64() - 1.0).abs() < 1e-9);
+    }
+
+    /// Full agreement transports one word: the classical base reads
+    /// exactly 1 at t = n0, and the tower's loss-free deep charge
+    /// carries zero bits to the top unchanged.
+    #[test]
+    fn full_agreement_transports_one_word() {
+        let prof = assemble(
+            1 << 12,
+            (1 << 11) - 1,
+            64,
+            &TrivialInterface,
+            DEFAULT_RESOLUTION,
+        )
+        .expect("tower");
+        let v = prof.eval((1 << 11) - 1, 1 << 12).expect("in domain");
+        assert!(v.hi.to_f64() < 1e-9, "got {} bits", v.hi.to_f64());
+    }
+
+    /// With the classical base the ceiling exists at the reduced box:
+    /// a positive certified radius under the 2^-128 budget — the
+    /// first nonvacuous ceiling row. The value is tiny (the
+    /// sub-Johnson band halves the useful radius per level); the
+    /// assertion is existence, not strength.
+    #[test]
+    fn classical_ceiling_exists_at_reduced_box() {
+        use rug::ops::Pow;
+        let total = 1u64 << 12;
+        let k = total / 2 - 1;
+        let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+        let prof = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
+        let row = crate::soundness::ceiling::list_ceiling_row(
+            1,
+            total,
+            total - k - 1,
+            &ext,
+            -128.0,
+            |z| prof.lg_at_disagreement(k, z),
+        )
+        .expect("a positive ceiling");
+        assert!(row.z_star >= 5, "z* = {}", row.z_star);
     }
 
     /// The coarse grid encloses the exact computation: a stride-1

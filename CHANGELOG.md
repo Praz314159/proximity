@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **soundness: the classical base — the ceiling exists**: new
+  `envelope::classical_base` (now `assemble`'s default): at each
+  floor threshold the smaller of the interpolation bound and the
+  sharp agreement-form Johnson bound
+  `floor(n(t - k + 1)/(t^2 - n(k - 1)))`, which reads exactly 1 at
+  full agreement — so the tower's loss-free transport carries a
+  one-word list to the top (gated: zero bits at `t = s` through six
+  levels). `assemble_levels_from` is the seam for sharper bases (the
+  small-level form at a certified prime). Profile grids gain a dense
+  stride-1 tail near full agreement — the profile varies fastest
+  there, and the surviving ceiling region is only a few lattice
+  points wide, which a uniform coarse block smears away. First
+  nonvacuous ceiling rows: z* >= 5 at the reduced box (gated), and
+  at the full box the pinch now reads floor delta = 0.46783 against
+  ceiling delta = 0.00001 (z* = 19, 30.8 bits under the 57.9-bit
+  budget) — tiny by design, not by accident: the loss map's two
+  named walls are the sub-Johnson band at the floor (nonempty above
+  rate 1/4, exactly the coverage-vs-Johnson crossing; the useful
+  radius halves per level until base statements close the band) and
+  the trivial `D_b` flood in the middle charge.
+
 - **soundness: the envelope, real**: new `soundness::envelope` — the
   ceiling face's data layer, replacing the `lg_cut_envelope` scaffold
   (deleted). `Profile` is the descent hypothesis as an object

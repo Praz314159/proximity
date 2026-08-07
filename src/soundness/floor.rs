@@ -16,7 +16,8 @@ use rug::float::Round;
 use rug::Integer;
 
 use super::chain::{
-    certified_first, lg_list_threshold, lg_soundness, Crossing, CrossingRow, ListRow,
+    certified_first, interleaved_block_len, lg_list_threshold, lg_soundness, Crossing, CrossingRow,
+    ListRow,
 };
 use super::explore::rung_families;
 use super::volumes::{lg_elias_list, lg_expected_list};
@@ -93,12 +94,7 @@ pub fn elias_row(
     ext_q: &Integer,
     target_bits: f64,
 ) -> Result<EliasRow> {
-    if s == 0 || total_len % s != 0 {
-        return Err(Error::OutOfRange(
-            "interleaving width must divide the total length".into(),
-        ));
-    }
-    let n = total_len / s;
+    let n = interleaved_block_len(s, total_len)?;
     let k = n / 2;
     let sound_at = |z: u64| -> Result<Lg> { lg_soundness(&lg_elias_list(n, k, z, base_q)?, ext_q) };
     let z_star = certified_first(1, n - 1, |z| {
@@ -135,12 +131,10 @@ pub fn elias_list_row(
     ext_q: &Integer,
     eps_bits: f64,
 ) -> Result<ListRow> {
-    if s == 0 || total_len % s != 0 {
-        return Err(Error::OutOfRange(
-            "interleaving width must divide the total length".into(),
-        ));
-    }
-    let (n, thr) = (total_len / s, lg_list_threshold(ext_q, eps_bits)?);
+    let (n, thr) = (
+        interleaved_block_len(s, total_len)?,
+        lg_list_threshold(ext_q, eps_bits)?,
+    );
     let k = n / 2;
     let list_at = |z: u64| lg_elias_list(n, k, z, base_q);
     // certified above: the whole list bracket clears the whole threshold

@@ -55,14 +55,20 @@ pub struct RungAttack {
 }
 
 fn validate(p: &AttackParams) -> Result<()> {
-    if !p.n.is_power_of_two() || p.n < 8 {
-        return Err(Error::OutOfRange("n must be a power of two >= 8".into()));
-    }
-    if p.k == 0 || p.k >= p.n {
-        return Err(Error::OutOfRange("need 1 <= k < n".into()));
-    }
+    check_domain(p.n, p.k)?;
     if !p.list_bits.is_finite() || p.list_bits <= 0.0 {
         return Err(Error::OutOfRange("list_bits must be positive".into()));
+    }
+    Ok(())
+}
+
+/// The shared `(n, k)` domain check of the attack calculators.
+fn check_domain(n: u64, k: u64) -> Result<()> {
+    if !n.is_power_of_two() || n < 8 {
+        return Err(Error::OutOfRange("n must be a power of two >= 8".into()));
+    }
+    if k == 0 || k >= n {
+        return Err(Error::OutOfRange("need 1 <= k < n".into()));
     }
     Ok(())
 }
@@ -132,12 +138,7 @@ impl RungFamily {
 /// (`floor::rung_floor_row`) scores it with
 /// bracketed binomials.
 pub fn rung_families(n: u64, k: u64, t_max: u32, mut visit: impl FnMut(RungFamily)) -> Result<()> {
-    if !n.is_power_of_two() || n < 8 {
-        return Err(Error::OutOfRange("n must be a power of two >= 8".into()));
-    }
-    if k == 0 || k >= n {
-        return Err(Error::OutOfRange("need 1 <= k < n".into()));
-    }
+    check_domain(n, k)?;
     let mut s_g = 4u64;
     while s_g <= n {
         let m = n / s_g;

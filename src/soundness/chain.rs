@@ -1,9 +1,9 @@
 //! The soundness map and the lattice-crossing report types: the ABF26
 //! Lemma 6.12 conversion from a certified list count to a certified
-//! soundness bracket, and the row/crossing structures every consumer
-//! reports in. Both faces of the chain run through this file: the
-//! floor feeds it attack counts, the ceiling will feed it envelope
-//! rates.
+//! soundness bracket, the challenge threshold, and the row/crossing
+//! structures every consumer reports in. The soundness map is the
+//! floor's own chain; the ceiling never touches it — both faces meet
+//! only in the list currency of [`lg_list_threshold`].
 
 use crate::error::Result;
 use crate::math::enclosure::Lg;
@@ -41,6 +41,7 @@ pub struct CrossingRow {
 /// endpoint under it). Between the two the brackets straddle the
 /// target — a gap of at most a few z-values at challenge scale, where
 /// one z step moves the log by ~log2 Q.
+#[derive(Debug)]
 pub struct Crossing {
     /// Smallest z whose lower endpoint clears the target.
     pub certified_at_or_above: Option<CrossingRow>,
@@ -69,6 +70,29 @@ pub fn certified_first(
         }
     }
     Ok((a <= hi).then_some(a))
+}
+
+/// The block length of an interleaved row: `s` must divide the total.
+pub(crate) fn interleaved_block_len(s: u64, total_len: u64) -> Result<u64> {
+    if s == 0 || total_len % s != 0 {
+        return Err(crate::error::Error::OutOfRange(
+            "interleaving width must divide the total length".into(),
+        ));
+    }
+    Ok(total_len / s)
+}
+
+/// The largest radius certified under a monotone "first over"
+/// crossing: `first_over` from [`certified_first`], capped at
+/// `z_max`; an error when even the smallest radius is over.
+pub(crate) fn largest_under(first_over: Option<u64>, z_max: u64, what: &str) -> Result<u64> {
+    match first_over {
+        Some(1) => Err(crate::error::Error::Unsupported(format!(
+            "no radius certifies {what}"
+        ))),
+        Some(z) => Ok(z - 1),
+        None => Ok(z_max),
+    }
 }
 
 /// The list-decoding challenge's threshold `eps* |F|` as a certified

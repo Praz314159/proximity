@@ -26,7 +26,9 @@ use crate::math::enclosure::Lg;
 use rug::float::Round;
 use rug::Integer;
 
-use super::chain::{certified_first, lg_list_threshold, ListRow};
+use super::chain::{
+    certified_first, interleaved_block_len, largest_under, lg_list_threshold, ListRow,
+};
 
 /// One certified conversion-row report (used by [`ca_ceiling_row`]):
 /// the radius claimed through the conversion, with the certified
@@ -106,12 +108,7 @@ pub fn ca_ceiling_row(
     target_bits: f64,
     mut envelope: impl FnMut(u64) -> Result<Lg>,
 ) -> Result<CeilingRow> {
-    if s == 0 || total_len % s != 0 {
-        return Err(Error::OutOfRange(
-            "interleaving width must divide the total length".into(),
-        ));
-    }
-    let n = total_len / s;
+    let n = interleaved_block_len(s, total_len)?;
     if z_max >= n {
         return Err(Error::OutOfRange("need z_max < n".into()));
     }
@@ -119,15 +116,7 @@ pub fn ca_ceiling_row(
     let first_bad = certified_first(1, z_max, |z| {
         Ok(err_at(z)?.hi.to_f64_round(Round::Up) >= target_bits)
     })?;
-    let z_list = match first_bad {
-        Some(1) => {
-            return Err(Error::Unsupported(
-                "no list radius certifies the target through the conversion".into(),
-            ))
-        }
-        Some(z) => z - 1,
-        None => z_max,
-    };
+    let z_list = largest_under(first_bad, z_max, "the target through the conversion")?;
     let sd = err_at(z_list)?;
     let z_ca = ca_radius(n, z_list, inv_eta);
     let pinned = match first_bad {
@@ -170,27 +159,14 @@ pub fn list_ceiling_row(
     eps_bits: f64,
     mut envelope: impl FnMut(u64) -> Result<Lg>,
 ) -> Result<ListRow> {
-    if s == 0 || total_len % s != 0 {
-        return Err(Error::OutOfRange(
-            "interleaving width must divide the total length".into(),
-        ));
-    }
-    let n = total_len / s;
+    let n = interleaved_block_len(s, total_len)?;
     if z_max >= n {
         return Err(Error::OutOfRange("need z_max < n".into()));
     }
     let thr = lg_list_threshold(ext_q, eps_bits)?;
     // certified at or below: the whole bracket sits under the threshold
     let first_over = certified_first(1, z_max, |z| Ok(envelope(z)?.hi > thr.lo))?;
-    let z_star = match first_over {
-        Some(1) => {
-            return Err(Error::Unsupported(
-                "no radius certifies a list under the threshold".into(),
-            ))
-        }
-        Some(z) => z - 1,
-        None => z_max,
-    };
+    let z_star = largest_under(first_over, z_max, "a list under the threshold")?;
     let at = envelope(z_star)?;
     // pinned when the next radius is certified strictly above
     let pinned = match first_over {

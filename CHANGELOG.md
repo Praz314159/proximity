@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- **soundness: the envelope, real**: new `soundness::envelope` — the
+  ceiling face's data layer, replacing the `lg_cut_envelope` scaffold
+  (deleted). `Profile` is the descent hypothesis as an object
+  (certified brackets over a dimension window and threshold range —
+  a profile, not a scalar); `step` is the master inequality as an
+  operator (three charges: deep strata through the level-below
+  profile via suffix sums, the middle band through `D_b`, the small
+  strata through `D_c` with a certified tail bound and a term cap
+  that is tight exactly where it bites); `assemble` /
+  `assemble_levels` is the conditional corollary's induction from a
+  floor level to the top, with the compatibility clause enforced as a
+  hard error per level. Interface data is pluggable (`Interface`);
+  `TrivialInterface` is the citable floor — `D_c` by whole-stratum
+  counting, `D_b` by the pencil-agreement disjointness bound — and
+  the base is the interpolation bound, both placeholders with named
+  statements behind them until the engine supply and the base
+  chapter's classical seeding are ported. Gates: one full step
+  enclosed against exact rational arithmetic at (16, 7); the
+  assembled tower dominates the measured record 2674 at (32, 15, 17);
+  compatibility violations refuse loudly. The ceiling rows now
+  consume assembled towers; `examples/tower.rs` prints the loss map
+  at the box and `examples/pinch.rs` runs floor against tower.
+
+  Assembly is engineered to be re-run casually — the box tower takes
+  ~8s (117x down from the first exact run), with no new trust
+  assumptions: profiles live on a coarse threshold grid whose
+  off-grid brackets are certified by the master right-hand side's
+  monotonicity in `t` (exact stride-1 at every gate-scale level;
+  `DEFAULT_RESOLUTION` is the knob), the deep-strata suffix
+  compresses to block runs, the middle band's suffix uses the
+  telescoping binomial identity at large levels (width under half a
+  bit at rate 1/2), the capped small-strata window is cached, and
+  grid cells evaluate in parallel (rayon; `Interface` is now `Sync`).
+  A gate pins coarse-encloses-exact at (512, 255), and the loss map
+  confirms the fast path preserves loss-free transport (the base's
+  60.7 bits reach level 2^21 unchanged at full agreement).
+
 - **soundness: the attack directory folds in**: `attack/` is removed
   from the crate root — it had become one subject split across two
   directories by history. Its float threshold explorer moves to

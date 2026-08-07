@@ -31,6 +31,8 @@ pub mod ceiling;
 #[cfg(feature = "certified")]
 pub mod chain;
 #[cfg(feature = "certified")]
+pub mod envelope;
+#[cfg(feature = "certified")]
 pub mod floor;
 #[cfg(feature = "certified")]
 pub mod volumes;
@@ -39,6 +41,8 @@ pub mod volumes;
 pub use ceiling::*;
 #[cfg(feature = "certified")]
 pub use chain::*;
+#[cfg(feature = "certified")]
+pub use envelope::*;
 #[cfg(feature = "certified")]
 pub use floor::*;
 #[cfg(feature = "certified")]

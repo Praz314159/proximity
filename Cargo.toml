@@ -57,3 +57,7 @@ required-features = ["certified"]
 [[example]]
 name = "pinch"
 required-features = ["certified"]
+
+[[example]]
+name = "tower"
+required-features = ["certified"]

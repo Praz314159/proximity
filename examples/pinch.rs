@@ -1,7 +1,10 @@
-// scratch: the pinch at the box, in the challenge's own currency
+// scratch: the pinch at the box, in the challenge's own currency —
+// the floor row against the assembled tower envelope (trivial
+// interface data; the numbers are the loss map's starting point)
 use rug::ops::Pow;
 use rug::Integer;
-use vanish::soundness::{elias_list_row, lg_cut_envelope, list_ceiling_row};
+use vanish::soundness::envelope::{assemble, TrivialInterface, DEFAULT_RESOLUTION};
+use vanish::soundness::{elias_list_row, list_ceiling_row};
 
 fn main() {
     let base = Integer::from(vanish::field::named::KOALABEAR);
@@ -16,17 +19,27 @@ fn main() {
         floor.delta_star, floor.z_star, floor.lg_list_lo, floor.lg_list_hi, t0.elapsed()
     );
     let t1 = std::time::Instant::now();
-    let ceil = list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-        lg_cut_envelope(total, k, z)
-    })
-    .unwrap();
+    let prof = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).unwrap();
     println!(
-        "ceiling (SCAFFOLD envelope under eps*|F|): delta = {:.5}  z = {}  [{:.1}, {:.1}] bits  in {:?}",
-        ceil.delta_star, ceil.z_star, ceil.lg_list_lo, ceil.lg_list_hi, t1.elapsed()
+        "tower assembled (n0 = 64, trivial data) in {:?}",
+        t1.elapsed()
     );
-    println!(
-        "gap: {:.5} in delta — the ceiling is a plumbing reading (the scaffold\n\
-         uses the trivial stratum bound); real rows need interface data + the recursion",
-        floor.delta_star - ceil.delta_star
-    );
+    let t2 = std::time::Instant::now();
+    match list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+        prof.lg_at_disagreement(k, z)
+    }) {
+        Ok(ceil) => println!(
+            "ceiling (tower envelope under eps*|F|): delta = {:.5}  z = {}  [{:.1}, {:.1}] bits  in {:?}",
+            ceil.delta_star, ceil.z_star, ceil.lg_list_lo, ceil.lg_list_hi, t2.elapsed()
+        ),
+        Err(e) => println!(
+            "ceiling: none — {e}\n\
+             (trivial interface data holds no radius under the budget: even at\n\
+             full agreement the tower reads the base's {:.1} bits against the\n\
+             budget; the loss map (examples/tower.rs) locates where sharpness\n\
+             must come from — D_b and D_c, the engine supply and the per-prime\n\
+             envelope, not the tower plumbing, which is loss-free at t = n)",
+            prof.lg_at_disagreement(k, 0).map(|v| v.hi.to_f64()).unwrap_or(f64::NAN)
+        ),
+    }
 }

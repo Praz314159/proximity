@@ -9,6 +9,11 @@
 //!   vanish toy     --p 5767169 --s 16 --r 8
 //!   vanish certify --p 1568247649 --s 32 --r 16
 //!   vanish attack  --n 2097152 --k 1048576 --list-bits 57.93 [--base-bits 31]
+//!   vanish pinch   [--total 2097152] [--n0 64] [--res 8192] [--eps-bits -128]
+//!   vanish tower   [--total 2097152] [--n0 64] [--res 8192] [--eps-bits -128]
+//!
+//! `pinch` and `tower` (certified feature) are the challenge
+//! instruments: the two faces at the box, and the per-level loss map.
 //!
 //! `sweep` prints, per prime `p = 1 mod s`, the exact max bucket, the
 //! conjecture ratio `max / (M_struct + C(s,r)/p)`, and the occupied-bucket
@@ -62,7 +67,7 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some((cmd, rest)) = argv.split_first() else {
         eprintln!(
-            "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack> --flags ..."
+            "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack|pinch|tower> --flags ..."
         );
         exit(2);
     };
@@ -269,10 +274,94 @@ fn main() {
                 }
             }
         }
+        "pinch" | "tower" => {
+            #[cfg(not(feature = "certified"))]
+            {
+                eprintln!("{cmd} needs the certified tier: rebuild with --features certified");
+                exit(2);
+            }
+            #[cfg(feature = "certified")]
+            {
+                use rug::ops::Pow;
+                use rug::Integer;
+                use vanish::soundness::envelope::{
+                    assemble_levels, TrivialInterface, DEFAULT_RESOLUTION,
+                };
+                use vanish::soundness::{elias_list_row, lg_list_threshold, list_ceiling_row};
+                let total: u64 = opt(&m, "total", 1u64 << 21);
+                let k: u64 = opt(&m, "k", total / 2 - 1);
+                let n0: u64 = opt(&m, "n0", 64);
+                let res: u64 = opt(&m, "res", DEFAULT_RESOLUTION);
+                let eps_bits: f64 = opt(&m, "eps-bits", -128.0);
+                let base = Integer::from(vanish::field::named::KOALABEAR);
+                let ext = base.clone().pow(6);
+                let t0 = std::time::Instant::now();
+                let levels = assemble_levels(total, k, n0, &TrivialInterface, res)
+                    .unwrap_or_else(|e| die(e));
+                let prof = levels.last().expect("nonempty tower");
+                let assembled = t0.elapsed();
+                if cmd == "tower" {
+                    let thr = lg_list_threshold(&ext, eps_bits).unwrap_or_else(|e| die(e));
+                    println!(
+                        "budget eps*|F|: {:.2} bits; assembled {} levels in {assembled:?}\n",
+                        thr.hi.to_f64(),
+                        levels.len()
+                    );
+                    println!(
+                        "{:>9} {:>9} {:>7}   {:>14} {:>14} {:>14}",
+                        "level", "dim", "curve", "E(curve)", "E(3n/4)", "E(n)"
+                    );
+                    for prof in &levels {
+                        let dim = prof.dims().max().expect("nonempty window");
+                        let curve = prof.t_min(dim).expect("in window");
+                        let bits = |t: u64| -> String {
+                            prof.eval(dim, t)
+                                .map_or_else(|_| "-".into(), |v| format!("{:.1}", v.hi.to_f64()))
+                        };
+                        println!(
+                            "{:>9} {:>9} {:>7}   {:>14} {:>14} {:>14}",
+                            prof.n,
+                            dim,
+                            curve,
+                            bits(curve),
+                            bits((3 * prof.n) / 4),
+                            bits(prof.n)
+                        );
+                    }
+                } else {
+                    let t1 = std::time::Instant::now();
+                    let floor =
+                        elias_list_row(1, total, &base, &ext, eps_bits).unwrap_or_else(|e| die(e));
+                    println!(
+                        "floor   (Elias count crosses eps*|F|): delta = {:.5}  z = {}  \
+                         [{:.1}, {:.1}] bits  in {:?}",
+                        floor.delta_star,
+                        floor.z_star,
+                        floor.lg_list_lo,
+                        floor.lg_list_hi,
+                        t1.elapsed()
+                    );
+                    println!("tower assembled (n0 = {n0}, trivial data) in {assembled:?}");
+                    match list_ceiling_row(1, total, total - k - 1, &ext, eps_bits, |z| {
+                        prof.lg_at_disagreement(k, z)
+                    }) {
+                        Ok(ceil) => println!(
+                            "ceiling (tower envelope under eps*|F|): delta = {:.5}  z = {}  \
+                             [{:.1}, {:.1}] bits",
+                            ceil.delta_star, ceil.z_star, ceil.lg_list_lo, ceil.lg_list_hi
+                        ),
+                        Err(e) => println!(
+                            "ceiling: none — {e}\n(the loss map locates where sharpness must \
+                             come from: run `vanish tower`)"
+                        ),
+                    }
+                }
+            }
+        }
         other => {
             eprintln!("unknown subcommand: {other}");
             eprintln!(
-                "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack> --flags ..."
+                "usage: vanish <info|bucket|rung|census|decompose|sweep|toy|certify|attack|pinch|tower> --flags ..."
             );
             exit(2);
         }

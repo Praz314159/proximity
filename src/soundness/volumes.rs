@@ -1,8 +1,8 @@
 //! The counting layer of the soundness chain: certified Hamming-ball
 //! volumes, the exact expected-list identity, and the original Elias
-//! count (ABF26 Lemma 3.7) — shared by both faces of the chain
-//! ([`super::floor`] today, the envelope ceiling next). Upgrades to
-//! the estimates land here once and both faces inherit them
+//! count (ABF26 Lemma 3.7) — the attack side's data layer, consumed
+//! by [`super::floor`]; the defense side's counterpart is
+//! [`super::envelope`]. Upgrades to the estimates land here once
 //! (issue #37: the Diamond--Gruen Thm 3.10 ball estimate).
 
 use crate::error::{Error, Result};

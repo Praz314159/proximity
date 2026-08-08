@@ -14,12 +14,14 @@
 //! tier: fast `f64` scans of the parameter space, always compiled,
 //! nothing citable. The certified tier — behind the `certified`
 //! feature — computes machine-checked interval brackets
-//! (`Lg` enclosures): `volumes` counts
-//! (balls, expected lists, the exact Elias count); `chain` converts
-//! (the Lemma 6.12 soundness map, the budget bracket, and the
-//! z-lattice crossing reports); `floor` and `ceiling` are the two
-//! faces as rows. The module rule: every certified row cites the named
-//! theorem (or the challenge statement itself) backing its comparison.
+//! (`Lg` enclosures): `volumes` counts for the attack side (balls,
+//! expected lists, the exact Elias count); `envelope` assembles the
+//! defense side's object (the profile tower of the conditional
+//! corollary); `chain` converts (the Lemma 6.12 soundness map, the
+//! budget bracket, and the z-lattice crossing reports); `floor` and
+//! `ceiling` are the two faces as rows. The module rule: every
+//! certified row cites the named theorem (or the challenge statement
+//! itself) backing its comparison.
 //!
 //! The namespace is flat: every item re-exports here.
 

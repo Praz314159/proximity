@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **cli: the instruments graduate** — `vanish pinch` and
+  `vanish tower` (certified feature) replace `examples/pinch.rs` and
+  `examples/tower.rs`: the challenge's two faces and the per-level
+  loss map are operational instruments, not API demonstrations, and
+  they now take flags (`--total`, `--k`, `--n0`, `--res`,
+  `--eps-bits`) instead of hardcoded box parameters. `examples/`
+  keeps `table4.rs`, which genuinely is a reproduction.
+
+- **soundness: directory review pass** — the interleaving validation
+  and the largest-radius-under-crossing match, each duplicated across
+  the row functions, live once in `chain`
+  (`interleaved_block_len`, `largest_under`); the explorer's domain
+  check is shared between `validate` and `rung_families`; `Crossing`
+  gains its missing `Debug`; three stale docs corrected (the chain no
+  longer claims the ceiling feeds the soundness map — that direction
+  was pruned; `volumes` names `envelope` as the defense-side
+  counterpart; the module doc lists all five certified layers).
+
 - **soundness: the step, structured**: the envelope step's monolith
   is broken along the theorem's own joints — `Cell` (the geometry a
   step application works in), `DeepCharge` (charge 1: the run

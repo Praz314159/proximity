@@ -9,8 +9,8 @@
 //!   vanish toy     --p 5767169 --s 16 --r 8
 //!   vanish certify --p 1568247649 --s 32 --r 16
 //!   vanish attack  --n 2097152 --k 1048576 --list-bits 57.93 [--base-bits 31]
-//!   vanish pinch   [--total 2097152] [--n0 64] [--res 8192] [--eps-bits -128]
-//!   vanish tower   [--total 2097152] [--n0 64] [--res 8192] [--eps-bits -128]
+//!   vanish pinch   [--total 2097152] [--n0 8] [--res 8192] [--eps-bits -128]
+//!   vanish tower   [--total 2097152] [--n0 8] [--res 8192] [--eps-bits -128]
 //!
 //! `pinch` and `tower` (certified feature) are the challenge
 //! instruments: the two faces at the box, and the per-level loss map.
@@ -290,7 +290,7 @@ fn main() {
                 use vanish::soundness::{elias_list_row, lg_list_threshold, list_ceiling_row};
                 let total: u64 = opt(&m, "total", 1u64 << 21);
                 let k: u64 = opt(&m, "k", total / 2 - 1);
-                let n0: u64 = opt(&m, "n0", 64);
+                let n0: u64 = opt(&m, "n0", 8);
                 let res: u64 = opt(&m, "res", DEFAULT_RESOLUTION);
                 let eps_bits: f64 = opt(&m, "eps-bits", -128.0);
                 let base = Integer::from(vanish::field::named::KOALABEAR);

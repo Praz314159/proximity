@@ -32,18 +32,15 @@
 //! (at most `(s - 2 kod)/a` members per core reach surplus `a`).
 //! Real data — the engine's collision bounds and the per-prime
 //! envelope at a certified prime — drops in by implementing the same
-//! trait. Bases likewise: [`classical_base`] (the default — Johnson
-//! above its threshold, interpolation below, exactly 1 at full
-//! agreement) seeds the tower with everything classical coding
-//! theory grants at the floor; [`assemble_levels_from`] is the seam
-//! for sharper bases (the small-level form at a certified prime).
-//! The point of running the tower with placeholder inputs is the
-//! loss map: where the assembled number is weak tells the
-//! compilation chapter where sharpness must come from — with the
-//! classical base the two named walls are the sub-Johnson band at
-//! the floor (nonempty above rate 1/4; the useful radius halves per
-//! level until the band is closed) and the trivial `D_b` flood in
-//! the middle charge.
+//! trait. Bases likewise: [`analytic_base`] (the default — the ch. 4
+//! base section's unconditional statement: interpolation, sharp
+//! Johnson, and the ownership shower bound, pointwise min) seeds the
+//! tower; [`assemble_levels_from`] is the seam for sharper bases
+//! (the certified floor values of the base section's companion
+//! statement, when the register lands). With the analytic base the
+//! floor holds no flood at small `n0`, and the loss map's one
+//! remaining wall is the trivial `D_b` flood in the middle charge —
+//! beyond-Johnson radii are gated entirely on the engine's supply.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -298,7 +295,7 @@ fn store(lg: &Lg) -> (f64, f64) {
 /// on any `k`-subset of its agreement set, so the map to that subset
 /// is injective and the list is at most the number of subsets. The
 /// crudest citable base, kept as the reference floor;
-/// [`classical_base`] dominates it pointwise and is [`assemble`]'s
+/// [`analytic_base`] dominates it pointwise and is [`assemble`]'s
 /// default.
 pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
     base_from_counts(n0, dims, |_, _, interp| interp.clone())
@@ -335,33 +332,64 @@ fn base_from_counts(
     Ok(prof)
 }
 
-/// The classical base: at each threshold the smaller of the
-/// interpolation bound `C(n0, k)` and the agreement-form Johnson
-/// bound `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`, valid once
-/// `t^2 > n (k - 1)` — the quadratic argument: `m` members agreeing
-/// on `>= t` points each, pairwise on `<= k - 1`, force
-/// `m t (m t - n) / n <= m (m - 1)(k - 1)` by convexity, and solving
-/// for `m` gives the display. At `t = n` it reads exactly 1, so the
-/// tower's loss-free transport carries a one-word list to the top.
-/// This is the ch. 4 base section's classical seeding as code (the
-/// notes' opening chapter recovers the same count as the Corradi
-/// degeneration); what it cannot cover is the band between the
-/// coverage threshold `(1 + 2 rho) / 3` and the Johnson fraction
-/// `sqrt(rho)` — nonempty exactly above rate 1/4 — where the
-/// interpolation fallback still floods. Closing that band is the
-/// base statements' remaining content, not a defect of this
-/// constructor.
-pub fn classical_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
+/// The analytic base (ch. 4, the base of the tower): at each
+/// threshold the smallest of three unconditional, prime-free counts.
+/// **Interpolation**: `C(n0, k)`. **Johnson**, in the sharp
+/// agreement form `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`,
+/// valid once `t^2 > n (k - 1)` — the quadratic argument: `m`
+/// members agreeing on `>= t` points each, pairwise on `<= k - 1`,
+/// force `m t (m t - n) / n <= m (m - 1)(k - 1)` by convexity. At
+/// `t = n` it reads exactly 1, so the tower's loss-free transport
+/// carries a one-word list to the top. **The shower bound**
+/// (dictionary, ownership): the `t`-cliques of the cut decompose
+/// disjointly by list member, so
+/// `|Lam_t(w)| <= |Z(b)| / C(t, k + 1) <= C(n, k + 1) / C(t, k + 1)`
+/// — weak, but it closes the band between the coverage curve and
+/// the Johnson threshold at any floor, and slack at the base
+/// inflates only the final constant, never the induction. On the
+/// integer grid at floors 8 and 16 (rate 1/2) the sharp Johnson
+/// form already covers the coverage curve and the band is empty;
+/// the shower term guards every other configuration. The certified
+/// sharpening — exact floor values as register-backed certificates —
+/// is the base section's companion statement, consumed only where
+/// the compilation chapter wants sharp seeds; the mainline rests on
+/// this analytic statement.
+pub fn analytic_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
     base_from_counts(n0, dims, |k, t, interp| {
         let mut best = interp.clone();
-        if t * t > n0 * (k - 1) {
-            let johnson = Integer::from(n0 * (t - k + 1) / (t * t - n0 * (k - 1)));
-            if johnson < best {
-                best = johnson;
-            }
-        }
+        analytic_refine(n0, k, t, &mut best);
         best
     })
+}
+
+/// Lower `best` to the sharper of the Johnson and shower counts at
+/// `(n, k, t)` where they apply — the analytic statement's two
+/// nontrivial clauses in exact integers, for the base constructor.
+fn analytic_refine(n: u64, k: u64, t: u64, best: &mut Integer) {
+    if t * t > n * (k - 1) {
+        let johnson = Integer::from(n * (t - k + 1) / (t * t - n * (k - 1)));
+        if johnson < *best {
+            *best = johnson;
+        }
+    }
+    let shower = Integer::from(Integer::binomial_u(n as u32, (k + 1) as u32))
+        / Integer::from(Integer::binomial_u(t as u32, (k + 1) as u32));
+    if shower < *best {
+        *best = shower;
+    }
+}
+
+/// The analytic counts at `(n, k, t)` as log brackets — the same
+/// three clauses as [`analytic_refine`] without the floors (a valid
+/// loosening), in log-gamma arithmetic so the per-level clamp costs
+/// microseconds where the exact binomials would cost million-bit
+/// integers.
+fn analytic_brackets(n: u64, k: u64, t: u64) -> Vec<Lg> {
+    let mut out = vec![lg_binom(n, k), lg_binom(n, k + 1).div(&lg_binom(t, k + 1))];
+    if t * t > n * (k - 1) {
+        out.push(Lg::from_u64(n * (t - k + 1)).div(&Lg::from_u64(t * t - n * (k - 1))));
+    }
+    out
 }
 
 /// The channel dimensions of `k`: the fold splits degree-below-`k`
@@ -718,9 +746,29 @@ pub fn step(
     for &k in dims {
         let charges = Charges::build(prev, k, data)?;
         let grid = build_grid(charges.cell.r, charges.cell.s, res);
+        // the envelope is the min of every theorem in hand: the
+        // master's right-hand side, clamped by the analytic counts at
+        // this level (Johnson and the shower bound hold at every
+        // level, not only the floor). Without the clamp the deep
+        // charge compounds near full agreement — at t = s - z it
+        // sums z + 1 classes at unit-or-more each even where the true
+        // classes are empty, and iterated over the tower that phantom
+        // union-bound mass grows like C(z + d, d). A pointwise min of
+        // valid upper bounds is a valid upper bound, and min of
+        // non-increasing functions is non-increasing, so the grid's
+        // enclosure contract survives.
         let vals: Vec<(f64, f64)> = grid
             .par_iter()
-            .map(|&t| charges.rhs(t).map(|v| store(&v)))
+            .map(|&t| {
+                let mut best = charges.rhs(t)?;
+                for a in analytic_brackets(charges.cell.s, k, t) {
+                    best = Lg {
+                        lo: if a.lo < best.lo { a.lo } else { best.lo },
+                        hi: if a.hi < best.hi { a.hi } else { best.hi },
+                    };
+                }
+                Ok(store(&best))
+            })
             .collect::<Result<Vec<_>>>()?;
         if vals.windows(2).any(|w| w[1].0 > w[0].1) {
             return Err(Error::Unsupported(format!(
@@ -734,7 +782,7 @@ pub fn step(
 }
 
 /// The conditional form of the worst-case bound, as computation: from
-/// the classical base at floor level `n0`, apply the step once
+/// the analytic base at floor level `n0`, apply the step once
 /// per level up to `s`, evaluating only the dimensions the top
 /// dimension `k` folds down to. The result is the envelope at level
 /// `s`, valid under the interface data supplied — the assumptions of
@@ -773,7 +821,7 @@ fn windows(s: u64, k: u64, n0: u64) -> Result<Vec<BTreeSet<u64>>> {
 /// [`assemble`], keeping every intermediate level (base first, top
 /// last) — the loss map's instrument: where the tower's numbers turn
 /// weak locates which input the compilation chapter must sharpen.
-/// Seeds from the classical base; [`assemble_levels_from`] accepts
+/// Seeds from the analytic base; [`assemble_levels_from`] accepts
 /// any base profile.
 pub fn assemble_levels(
     s: u64,
@@ -783,7 +831,7 @@ pub fn assemble_levels(
     res: u64,
 ) -> Result<Vec<Profile>> {
     let w = windows(s, k, n0)?;
-    assemble_levels_from(classical_base(n0, &w[0])?, s, k, data, res)
+    assemble_levels_from(analytic_base(n0, &w[0])?, s, k, data, res)
 }
 
 /// The tower from a caller-supplied base profile — the seam for base
@@ -861,12 +909,31 @@ mod tests {
             for l in lmin..kod {
                 exact += Rational::from((binom(n, l), binom(t - 2 * l, r - 2 * l)));
             }
+            // the profile is the master's RHS clamped by the analytic
+            // brackets at this level (unfloored ratios) — mirror them
+            let mut clamps = vec![
+                Rational::from(binom(s, k)),
+                Rational::from((binom(s, k + 1), binom(t, k + 1))),
+            ];
+            if t * t > s * (k - 1) {
+                clamps.push(Rational::from((
+                    Integer::from(s * (t - k + 1)),
+                    Integer::from(t * t - s * (k - 1)),
+                )));
+            }
+            for c in clamps {
+                if c < exact {
+                    exact = c;
+                }
+            }
             let got = prof.eval(k, t).expect("in domain");
             let want = exact.to_f64().log2();
             let lo = got.lo.to_f64_round(Round::Down);
             let hi = got.hi.to_f64_round(Round::Up);
+            // `want` is itself a two-rounding f64 approximation of the
+            // exact rational, so compare with an ulp-scale tolerance
             assert!(
-                lo <= want && want <= hi,
+                lo <= want + 1e-12 && want <= hi + 1e-12,
                 "t = {t}: [{lo}, {hi}] vs exact {want}"
             );
             assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
@@ -917,13 +984,16 @@ mod tests {
         }
     }
 
-    /// The classical base pins: at (8, 4) the sharp agreement-form
+    /// The analytic base pins: at (8, 4) the sharp agreement-form
     /// Johnson bound n(t - k + 1)/(t^2 - n(k - 1)) reads 16, 2, 1, 1
-    /// across t = 5..8 (all under the interpolation 70), and full
-    /// agreement is exactly one word — zero bits.
+    /// across t = 5..8 (all under the interpolation 70 and the
+    /// shower 56), and full agreement is exactly one word — zero
+    /// bits. At (32, 16, 21) — a genuine band point, Johnson invalid
+    /// (441 <= 480) — the shower bound C(32, 17)/C(21, 17) = 94523
+    /// takes over from the interpolation 601080390.
     #[test]
-    fn classical_base_pins() {
-        let base = classical_base(8, &BTreeSet::from([4, 3])).expect("base");
+    fn analytic_base_pins() {
+        let base = analytic_base(8, &BTreeSet::from([4, 3])).expect("base");
         let want = [(5u64, 4.0), (6, 1.0), (7, 0.0), (8, 0.0)];
         for &(t, bits) in &want {
             let v = base.eval(4, t).expect("in domain");
@@ -936,9 +1006,13 @@ mod tests {
         // dimension 3: interpolation at t = 4, Johnson from t = 5
         assert!((base.eval(3, 4).unwrap().hi.to_f64() - (56f64).log2()).abs() < 1e-9);
         assert!((base.eval(3, 5).unwrap().hi.to_f64() - 1.0).abs() < 1e-9);
+        // the band point: shower bound active where Johnson is not
+        let band = analytic_base(32, &BTreeSet::from([16])).expect("base");
+        let v = band.eval(16, 21).unwrap();
+        assert!((v.hi.to_f64() - (94523f64).log2()).abs() < 1e-9);
     }
 
-    /// Full agreement transports one word: the classical base reads
+    /// Full agreement transports one word: the analytic base reads
     /// exactly 1 at t = n0, and the tower's loss-free deep charge
     /// carries zero bits to the top unchanged.
     #[test]

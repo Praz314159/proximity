@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **soundness: the analytic base and the min-of-theorems clamp — the
+  ceiling reaches Johnson**: `classical_base` becomes
+  `analytic_base` (ch. 4's base statement): interpolation, sharp
+  Johnson, and the ownership shower bound
+  `C(n, k+1)/C(t, k+1)` (the cut's t-cliques decompose disjointly by
+  list member), pointwise min — unconditional and prime-free. On the
+  integer grid at floors 8 and 16 the sharp Johnson form already
+  covers the coverage curve, so the floor default drops to `n0 = 8`
+  and the sub-Johnson band is empty at the floor; the shower term
+  guards every other configuration. Separately, every stepped
+  profile is now clamped by the analytic brackets at its own level —
+  the envelope is the min of every theorem in hand. Without the
+  clamp the deep charge compounds near full agreement (at `t = s - z`
+  it sums `z + 1` classes at unit-or-more each even where the true
+  classes are empty; iterated, that phantom union-bound mass grows
+  like `C(z + d, d)` and caps the box ceiling at z ~ 30 regardless of
+  data). With it, the pinch at the box reads **floor 0.46783 vs
+  ceiling 0.29285 = the Johnson radius to four lattice steps** — the
+  instrument recovers classical coding theory end to end, and the
+  window between the two faces is exactly the beyond-Johnson prize,
+  gated on the engine's `D_b`. The clamp runs in log-gamma brackets
+  (unfloored, a valid loosening) so assembly stays ~8s.
 - **cli: the instruments graduate** — `vanish pinch` and
   `vanish tower` (certified feature) replace `examples/pinch.rs` and
   `examples/tower.rs`: the challenge's two faces and the per-level

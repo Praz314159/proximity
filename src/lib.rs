@@ -99,6 +99,7 @@ pub mod smooth;
 // Applications.
 pub mod soundness;
 pub mod toy;
+pub mod valuemap;
 
 pub use error::{Error, Result};
 #[cfg(feature = "certified")]

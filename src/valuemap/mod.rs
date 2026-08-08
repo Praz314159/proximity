@@ -105,7 +105,8 @@ impl ValueMap {
     /// Total semantic evaluation — the definition of the map.
     /// `None` marks a pole (zero denominator), never an error.
     pub fn eval(&self, support: &Support) -> Option<u64> {
-        self.eval_formula(&self.formula, support)
+        let e = self.e_vec(support);
+        self.eval_with(&e, &self.formula, support)
     }
 
     fn e_vec(&self, support: &Support) -> Vec<u64> {
@@ -124,11 +125,15 @@ impl ValueMap {
     }
 
     fn eval_formula(&self, f: &Formula, support: &Support) -> Option<u64> {
+        let e = self.e_vec(support);
+        self.eval_with(&e, f, support)
+    }
+
+    fn eval_with(&self, e: &[u64], f: &Formula, support: &Support) -> Option<u64> {
         let p = self.sg.p();
         match f {
-            Formula::Coord(j) => self.e_vec(support).get(*j).copied(),
+            Formula::Coord(j) => e.get(*j).copied(),
             Formula::Combine(terms) => {
-                let e = self.e_vec(support);
                 let mut acc: i128 = 0;
                 for &(c, j) in terms {
                     acc += c as i128 * *e.get(j)? as i128;
@@ -136,19 +141,19 @@ impl ValueMap {
                 Some(acc.rem_euclid(p as i128) as u64)
             }
             Formula::Ratio(num, den) => {
-                let d = self.eval_formula(den, support)?;
+                let d = self.eval_with(e, den, support)?;
                 if d == 0 {
                     return None;
                 }
-                let n = self.eval_formula(num, support)?;
+                let n = self.eval_with(e, num, support)?;
                 Some(mulmod(n, powmod(d, p - 2, p), p))
             }
             Formula::EvalAt(x0) => Some(support.iter().fold(1u64, |acc, &i| {
                 mulmod(acc, (x0 + p - self.sg.elements()[i] % p) % p, p)
             })),
             Formula::EvalRatio(x0) => {
-                let num = self.eval_formula(&Formula::EvalAt(*x0), support)?;
-                let den = self.eval_formula(&Formula::EvalAt(p - *x0), support)?;
+                let num = self.eval_with(e, &Formula::EvalAt(*x0), support)?;
+                let den = self.eval_with(e, &Formula::EvalAt(p - *x0), support)?;
                 if den == 0 {
                     return None;
                 }
@@ -157,42 +162,45 @@ impl ValueMap {
         }
     }
 
-    /// Every admitted support, lexicographically.
-    pub fn enumerate(&self) -> Vec<Support> {
+    /// Every admitted support, lexicographically — lazily: no
+    /// materialized cloud, ever (an unrestricted s = 64, r = 6
+    /// cloud holds 74M supports).
+    pub fn enumerate(&self) -> impl Iterator<Item = Support> + '_ {
         let (n, r) = (self.cloud.level, self.cloud.r);
-        let mut out = Vec::new();
-        if r > n {
-            return out;
-        }
-        let mut cur: Support = (0..r).collect();
         let cut = self
             .cloud
             .on_cut
             .clone()
             .map(|(t, v)| (Formula::Combine(t), v));
-        loop {
-            if self.cloud.admits(&cur)
-                && cut
-                    .as_ref()
-                    .map_or(true, |(f, v)| self.eval_formula(f, &cur) == Some(*v))
-            {
-                out.push(cur.clone());
-            }
-            let mut i = r;
-            loop {
-                if i == 0 {
-                    return out;
+        let mut cur: Option<Support> = if r <= n { Some((0..r).collect()) } else { None };
+        std::iter::from_fn(move || {
+            while let Some(c) = cur.take() {
+                let mut nxt = c.clone();
+                let mut i = r;
+                loop {
+                    if i == 0 {
+                        break;
+                    }
+                    i -= 1;
+                    if nxt[i] != i + n - r {
+                        nxt[i] += 1;
+                        for j in i + 1..r {
+                            nxt[j] = nxt[j - 1] + 1;
+                        }
+                        cur = Some(nxt);
+                        break;
+                    }
                 }
-                i -= 1;
-                if cur[i] != i + n - r {
-                    break;
+                if self.cloud.admits(&c)
+                    && cut
+                        .as_ref()
+                        .map_or(true, |(f, v)| self.eval_formula(f, &c) == Some(*v))
+                {
+                    return Some(c);
                 }
             }
-            cur[i] += 1;
-            for j in i + 1..r {
-                cur[j] = cur[j - 1] + 1;
-            }
-        }
+            None
+        })
     }
 
     /// Buckets: fiber sizes by value, poles excluded. Defined once,
@@ -273,7 +281,7 @@ mod tests {
             Formula::Ratio(Box::new(Formula::Coord(5)), Box::new(Formula::Coord(1))),
         )
         .unwrap();
-        assert_eq!(vm.enumerate().len(), 1064);
+        assert_eq!(vm.enumerate().count(), 1064);
     }
 
     /// Differential pin: the semantic core agrees with the DP

@@ -25,6 +25,7 @@ pub struct Cloud {
     pub r: usize,
     pair_free: bool,
     avoid: Vec<usize>,
+    on_cut: Option<(Vec<(i64, usize)>, u64)>,
 }
 
 impl Cloud {
@@ -34,11 +35,18 @@ impl Cloud {
             r,
             pair_free: false,
             avoid: Vec::new(),
+            on_cut: None,
         }
     }
     /// Exclude supports containing an antipodal index pair.
     pub fn pair_free(mut self) -> Self {
         self.pair_free = true;
+        self
+    }
+    /// Keep only supports on the cut `sum c_j e_j = value` — the
+    /// fiber of a liftable syndrome, the program's accident loci.
+    pub fn on_cut(mut self, terms: &[(i64, usize)], value: u64) -> Self {
+        self.on_cut = Some((terms.to_vec(), value));
         self
     }
     /// Exclude supports meeting the given indices.
@@ -157,8 +165,17 @@ impl ValueMap {
             return out;
         }
         let mut cur: Support = (0..r).collect();
+        let cut = self
+            .cloud
+            .on_cut
+            .clone()
+            .map(|(t, v)| (Formula::Combine(t), v));
         loop {
-            if self.cloud.admits(&cur) {
+            if self.cloud.admits(&cur)
+                && cut
+                    .as_ref()
+                    .map_or(true, |(f, v)| self.eval_formula(f, &cur) == Some(*v))
+            {
                 out.push(cur.clone());
             }
             let mut i = r;
@@ -202,6 +219,23 @@ impl ValueMap {
     pub fn max_bucket(&self) -> u64 {
         self.buckets().values().copied().max().unwrap_or(0)
     }
+
+    /// The canonical key: one string identifying the map across
+    /// dataset cards, gate rows, and prose.
+    pub fn describe(&self) -> String {
+        let c = &self.cloud;
+        let mut s = format!("s{} r{}", c.level, c.r);
+        if c.pair_free {
+            s.push_str(" pair-free");
+        }
+        if !c.avoid.is_empty() {
+            s.push_str(&format!(" avoid{:?}", c.avoid));
+        }
+        if let Some((t, v)) = &c.on_cut {
+            s.push_str(&format!(" cut{t:?}={v}"));
+        }
+        format!("{s} | {:?}", self.formula)
+    }
 }
 
 #[cfg(test)]
@@ -224,17 +258,35 @@ mod tests {
         }
     }
 
-    /// The master count at s = 64: pair-free 6-subsets avoiding
-    /// {1, -1} on the cut e1 + e3 + e5 = 0 — exactly 1,064
-    /// (frontier 2026-08-08), pinned here from the semantic core.
+    /// The master cloud at s = 64: pair-free 6-subsets avoiding
+    /// {1, -1} on the cut e1 + e3 + e5 = 0 — exactly 1,064 supports
+    /// (frontier 2026-08-08), with the gatekeeper e5/e1 as the
+    /// formula: the week's frontier written in the vocabulary.
     #[test]
-    fn master_count_from_the_core() {
+    fn master_cloud_from_the_core() {
         let vm = ValueMap::new(
             P,
-            Cloud::new(64, 6).pair_free().avoiding(&[0, 32]),
-            Formula::Combine(vec![(1, 1), (1, 3), (1, 5)]),
+            Cloud::new(64, 6)
+                .pair_free()
+                .avoiding(&[0, 32])
+                .on_cut(&[(1, 1), (1, 3), (1, 5)], 0),
+            Formula::Ratio(Box::new(Formula::Coord(5)), Box::new(Formula::Coord(1))),
         )
         .unwrap();
-        assert_eq!(vm.buckets().get(&0).copied().unwrap_or(0), 1064);
+        assert_eq!(vm.enumerate().len(), 1064);
+    }
+
+    /// Differential pin: the semantic core agrees with the DP
+    /// bucket engine on the additive bucket census at (16, 8) —
+    /// the refinement obligation, exercised from day one.
+    #[test]
+    fn additive_buckets_agree_with_dp_engine() {
+        let vm = ValueMap::new(P, Cloud::new(16, 8), Formula::Coord(1)).unwrap();
+        let sg = MultiplicativeSubgroup::new(P, 16).unwrap();
+        let dist = crate::census::buckets::dp::distribution_q1(&sg, 8).unwrap();
+        let (mx, arg) = dist.max();
+        let b = vm.buckets();
+        assert_eq!(b.get(&arg).copied().unwrap_or(0), mx);
+        assert_eq!(vm.max_bucket(), mx);
     }
 }

@@ -50,7 +50,10 @@ pub struct CeilingRow {
     /// Certified upper endpoint of the same.
     pub lg_sound_hi: f64,
     /// True if the next list radius is certified on the other side of
-    /// the target: the crossing is pinned to one lattice step.
+    /// the target: the ENVELOPE's crossing is pinned to one lattice
+    /// step. This pins the instrument, not the true list — the
+    /// envelope is only an upper bound, so nothing is claimed about
+    /// where the true list crosses.
     pub crossing_pinned: bool,
 }
 
@@ -76,13 +79,18 @@ pub fn lg_mca_error(lg_list: &Lg, z: u64, inv_eta: u64, ext_q: &Integer) -> Resu
 /// with `z_ca/n <= 1 - sqrt(1 - z/n + eta)`, computed with directed
 /// rounding (the sqrt argument and the sqrt both rounded up).
 pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
-    use rug::ops::{MulAssignRound, SubAssignRound};
+    use rug::ops::{DivAssignRound, MulAssignRound, SubAssignRound};
     use rug::Float;
     let prec = 128;
+    // both quotients rounded UP: a larger sqrt argument makes the
+    // claimed radius smaller, the conservative direction (the audit
+    // found the previous nearest-rounded `/=` violating the contract
+    // stated below; u64 -> Float at this precision is exact, unlike
+    // the old `as f64` cast)
     let mut arg = Float::with_val(prec, n - z);
-    arg /= n as f64;
+    arg.div_assign_round(&Float::with_val(prec, n), Round::Up);
     let mut eta = Float::with_val(prec, 1.0);
-    eta /= inv_eta as f64;
+    eta.div_assign_round(&Float::with_val(prec, inv_eta), Round::Up);
     let mut s = Float::with_val_round(prec, arg + eta, Round::Up).0;
     s.sqrt_round(Round::Up);
     // remaining steps rounded DOWN so the claimed radius never overshoots
@@ -235,8 +243,9 @@ mod list_tests {
     /// Crossing behavior on the list lattice: pinned where the
     /// threshold cuts through the envelope's range, monotone in the
     /// target, and saturation at z_max reported unpinned. The envelope
-    /// is the assembled (32, 15) tower, whose values run 7.7 to 17.0
-    /// bits over z in [1, 16].
+    /// is the assembled (32, 15) tower, whose values run 0.1 to 29.1
+    /// bits over z in [1, 16] (Johnson-clamped through z = 10, the
+    /// corrected cut strata beyond).
     #[test]
     fn list_ceiling_is_pinned_monotone_and_saturates() {
         use super::super::envelope::{assemble, TrivialInterface, DEFAULT_RESOLUTION};
@@ -248,11 +257,11 @@ mod list_tests {
             })
             .unwrap()
         };
-        let strict = row(-54.0); // threshold ~ 10 bits: crossing inside
-        let loose = row(-50.0); // threshold ~ 14 bits: crossing inside
+        let strict = row(-48.0); // threshold ~ 16 bits: crossing inside
+        let loose = row(-44.0); // threshold ~ 20 bits: crossing inside
         assert!(strict.crossing_pinned && loose.crossing_pinned);
         assert!(strict.z_star <= loose.z_star, "monotone in the target");
-        let saturated = row(-45.0); // threshold ~ 19 bits: never exceeded
+        let saturated = row(-33.0); // threshold ~ 31 bits: never exceeded
         assert!(saturated.z_star == 16 && !saturated.crossing_pinned);
     }
 

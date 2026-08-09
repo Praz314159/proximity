@@ -38,16 +38,20 @@
 //! tower; [`assemble_levels_from`] is the seam for sharper bases
 //! (the certified floor values of the base section's companion
 //! statement, when the register lands). With the analytic base the
-//! floor holds no flood at small `n0`, and the loss map's one
-//! remaining wall is the trivial `D_b` flood in the middle charge —
-//! beyond-Johnson radii are gated entirely on the engine's supply.
+//! floor holds no flood at small `n0`. The loss map's measured wall
+//! (box run, 2026-08-09) is the SMALL-STRATA cut charge: past the
+//! Johnson radius the classes at `l` just below `kod` activate, and
+//! the configuration-count `D_c` floods at scale in both data modes
+//! — beyond-Johnson radii are gated on a scale-correct small-strata
+//! charge (the graded-pencil route) before the `D_b` supply even
+//! binds.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rayon::prelude::*;
 
 use crate::error::{Error, Result};
-use crate::math::enclosure::{lg_binom, Lg};
+use crate::math::enclosure::{lg_binom, lg_factorial, Lg};
 use rug::float::Round;
 use rug::ops::{AddAssignRound, SubAssignRound};
 use rug::{Float, Integer};
@@ -86,38 +90,84 @@ pub const DEFAULT_RESOLUTION: u64 = 1 << 13;
 /// computed profile and refuses on a violation.
 pub trait Interface: Sync {
     /// Bound on the core-summed family-member count at surplus `a >= 1`.
+    ///
+    /// Contract (load-bearing): the bound must hold for EVERY word at
+    /// the level, and must be non-increasing in `a`. The step's
+    /// off-grid block enclosure rests on the exact right-hand side
+    /// being non-increasing in the threshold, and `d_b` is the only
+    /// data-supplied factor in that monotonicity. The step's guard
+    /// catches only violations larger than a bracket width — a
+    /// provider that violates monotonicity by less silently
+    /// invalidates every off-grid bracket at coarse resolution, so
+    /// the contract cannot be discharged by the guard alone.
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg;
-    /// Bound on the cut stratum at pair count `l < k/2`.
-    fn d_c(&self, s: u64, k: u64, l: u64) -> Lg;
-    /// Bound on `max(d_c(l'))` over `l' <= l` — the small-strata tail
-    /// bound's numerator. The default scans, which is correct but
-    /// linear in `l`; providers with structure should override.
-    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Lg {
-        let mut best = self.d_c(s, k, 0);
-        for lp in 1..=l {
-            let v = self.d_c(s, k, lp);
-            if v.hi > best.hi {
-                best = v;
+    /// Bound on the cut stratum `|Z^(l)(b)|` at pair count
+    /// `l < k/2`, valid for every word at the level. `None` asserts
+    /// the stratum is PROVABLY EMPTY (no geometry admits a member) —
+    /// which a log-domain bracket cannot express.
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg>;
+    /// Bound on `max(d_c(l'))` over `l' <= l`, `None` when every
+    /// stratum up to `l` is empty — the small-strata tail bound's
+    /// numerator. The default scans, which is correct but linear in
+    /// `l`; providers with structure should override.
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let mut best: Option<Lg> = None;
+        for lp in 0..=l {
+            match (self.d_c(s, k, lp), &best) {
+                (Some(v), Some(b)) if v.hi > b.hi => best = Some(v),
+                (Some(v), None) => best = Some(v),
+                _ => {}
             }
         }
         best
     }
 }
 
+/// The configuration geometry of cut stratum `l` at cell `(s, k)`
+/// with rung `r = k + 1`, in the `l'`-corrected bookkeeping of the
+/// general cut bound (ch. 3 scope note; gate_cut_shower): a
+/// stratum-`l` member's complement has `l' = s/2 + l - r` full
+/// slots, and the folded functionals pair against `l'`-sets. Returns
+/// `(n' = s/2, h = r - 2l, l')`, or `None` when the stratum is empty
+/// (no complement geometry exists).
+fn stratum_geometry(s: u64, k: u64, l: u64) -> Option<(u64, u64, u64)> {
+    let np = s / 2;
+    let r = k + 1;
+    if 2 * l > r {
+        return None;
+    }
+    let h = r - 2 * l;
+    let lp = (np + l).checked_sub(r)?;
+    if lp > np || h > np - lp {
+        return None;
+    }
+    Some((np, h, lp))
+}
+
 /// The citable floor of the data hierarchy — no engine, no prime.
 ///
-/// `D_c(l) = C(s/2, l)`: the whole stratum (every `l`-subset of the
-/// slots counted as consistent). `D_b(a) = C(s/2, kod) * m` with
-/// `m = floor((s - 2 kod)/a)` at odd `k` — the pencil-agreement
-/// lemma's disjointness bound: the level sets of members reaching
-/// surplus `a` are disjoint subsets, each of size at least `a`, of
-/// the `s - 2 kod` available points — and `m = 1` at even `k`, where
-/// the family through a core is a single interpolant.
+/// `D_c(l) = 2^h C(s/2, l') C(s/2 - l', h)`: the full stratum of the
+/// cut by configurations — every configuration charged its whole
+/// section cube. (The earlier `C(s/2, l)` here was unsound against
+/// the master's contract, which needs `D_c(l) >= |Z^(l)(b)|`: at
+/// (16,7) the top word's stratum 1 is 256 against `C(8,1) = 8`.
+/// Corrected 2026-08-09 with the shower/window work, issue #61.)
+/// `D_b(a) = C(s/2, kod) * m` with `m = floor((s - 2 kod)/a)` at odd
+/// `k` — the pencil-agreement lemma's disjointness bound: the level
+/// sets of members reaching surplus `a` are disjoint subsets, each
+/// of size at least `a`, of the `s - 2 kod` available points — and
+/// `m = 1` at even `k`, where the family through a core is a single
+/// interpolant.
 pub struct TrivialInterface;
 
 impl Interface for TrivialInterface {
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
         let kod = k / 2;
+        assert!(
+            2 * kod < s,
+            "d_b needs k < s (got s = {s}, k = {k}); the step enforces \
+             k <= s - 2 — direct callers must too"
+        );
         let per_core = if k % 2 == 1 {
             (s - 2 * kod) / a.max(1)
         } else {
@@ -129,14 +179,193 @@ impl Interface for TrivialInterface {
         lg_binom(s / 2, kod).mul(&Lg::from_u64(per_core.max(1)))
     }
 
-    fn d_c(&self, s: u64, _k: u64, l: u64) -> Lg {
-        lg_binom(s / 2, l)
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let (np, h, lp) = stratum_geometry(s, k, l)?;
+        Some(
+            Lg::from_u64(2)
+                .pow(h)
+                .mul(&lg_binom(np, lp))
+                .mul(&lg_binom(np - lp, h)),
+        )
+    }
+}
+
+/// The per-`(s, k)` prefix-maximum store of [`ShowerInterface`]'s
+/// suprema, as outward-rounded `f64` endpoint pairs (`None` = every
+/// stratum up to that index provably empty).
+type SupCache = std::sync::Mutex<BTreeMap<(u64, u64), Vec<Option<(f64, f64)>>>>;
+
+/// The word-free cut strata of the shower assembly (issue #61,
+/// gate_cut_shower): the general cut bound in `l'`-corrected form,
+/// with the joint counts word-freed by the low-strata pencil theorem
+/// where it applies and by counting where it does not:
+///
+/// `D_c(l) = 2^(h-1) ( C(n', l') C(n' - l', h) + Jbar C(n' - l', h) )`
+///
+/// with `Jbar = C(n' - 1, l' - 1)` when `2 l' <= h + 1` (Theorem P:
+/// the joint sets are a pencil over a nonempty base locus) and
+/// `Jbar = C(n', l')` otherwise. Unconditional at every prime.
+/// `D_b` is the same pencil-agreement disjointness bound as
+/// [`TrivialInterface`] — this provider sharpens only the cut face.
+///
+/// The prefix suprema the small-strata tail bound consumes are
+/// computed once per `(s, k)` from a parallel factorial table and
+/// cached; the assembler's window queries become lookups.
+pub struct ShowerInterface {
+    sup: SupCache,
+}
+
+impl ShowerInterface {
+    /// A provider with an empty supremum cache; the first tower
+    /// assembly at each `(s, k)` fills it.
+    #[must_use]
+    pub fn new() -> Self {
+        ShowerInterface {
+            sup: std::sync::Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl Default for ShowerInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The shower stratum bound `2^(h-1) (C(np,lp) C(np-lp,h) + Jbar
+/// C(np-lp,h))`, with the joint count from the low-strata pencil
+/// theorem where it applies (`2 lp <= h + 1`) and by counting
+/// elsewhere; `binom` abstracts the binomial source so the cached
+/// scan can substitute its factorial table.
+fn shower_d_c(np: u64, h: u64, lp: u64, binom: &dyn Fn(u64, u64) -> Lg) -> Lg {
+    let sections = Lg::from_u64(2).pow(h.saturating_sub(1));
+    let halves = binom(np - lp, h);
+    let config = binom(np, lp).mul(&halves);
+    if lp == 0 {
+        // the empty missed-set is joint only at B = 0, excluded:
+        // no joint term (Lg cannot say zero, so omit it)
+        return sections.mul(&config);
+    }
+    let jbar = if 2 * lp <= h + 1 {
+        binom(np - 1, lp - 1)
+    } else {
+        binom(np, lp)
+    };
+    sections.mul(&config.add(&jbar.mul(&halves)))
+}
+
+impl Interface for ShowerInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        TrivialInterface.d_b(s, k, a)
     }
 
-    // C(s/2, ·) increases up to its peak at s/4, so the prefix
-    // maximum is the value at min(l, s/4)
-    fn d_c_sup(&self, s: u64, _k: u64, l: u64) -> Lg {
-        lg_binom(s / 2, l.min(s / 4))
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let (np, h, lp) = stratum_geometry(s, k, l)?;
+        Some(shower_d_c(np, h, lp, &lg_binom))
+    }
+
+    /// Precondition: `l < k/2` (the master's small-strata range) and
+    /// `k >= 2` — matching the trait's stated `d_c` domain.
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let kod = k / 2;
+        assert!(
+            l < kod,
+            "d_c_sup asked at l = {l} outside the small-strata range \
+             [0, {kod}) of k = {k}"
+        );
+        let mut cache = self
+            .sup
+            .lock()
+            // the cache holds only outward-rounded endpoint pairs,
+            // valid regardless of where another thread panicked
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prefix = cache.entry((s, k)).or_insert_with(|| {
+            // one factorial table per (s, k), built in parallel,
+            // turns the O(kod) scan of three-lgamma binomials into
+            // table lookups — the profiled 94%-of-wall hot spot
+            let np = s / 2;
+            let table: Vec<Lg> = (0..=np).into_par_iter().map(lg_factorial).collect();
+            let binom = |n: u64, k: u64| -> Lg {
+                table[n as usize]
+                    .div(&table[k as usize])
+                    .div(&table[(n - k) as usize])
+            };
+            let vals: Vec<Option<Lg>> = (0..kod)
+                .into_par_iter()
+                .map(|lp| {
+                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| shower_d_c(np, h, lpp, &binom))
+                })
+                .collect();
+            let mut out = Vec::with_capacity(kod as usize);
+            let mut best: Option<Lg> = None;
+            for v in vals {
+                match (v, &best) {
+                    (Some(v), Some(b)) if v.hi > b.hi => best = Some(v),
+                    (Some(v), None) => best = Some(v),
+                    _ => {}
+                }
+                out.push(best.as_ref().map(store));
+            }
+            out
+        });
+        let (lo, hi) = prefix[l as usize]?;
+        Some(Lg {
+            lo: Float::with_val(PREC, lo),
+            hi: Float::with_val(PREC, hi),
+        })
+    }
+}
+
+/// The bucket-rigidity interface — CONDITIONAL. The cut face is the
+/// unconditional [`ShowerInterface`]; the middle face is the
+/// program's single external hypothesis in interface form, the
+/// tail-rigidity statement (the SBC face): derived buckets have
+/// bounded surplus. Concretely,
+///
+/// `D_b(a) <= C(s/2, kod) * 2^(4 - a)` for `a <= a_max`, and
+/// `D_b(a) <= 1` for `a > a_max`
+///
+/// — the measured-transport shape (both measured cells: (16,7)
+/// D_b = 128/28/20, (32,15) D_b = 28348/824/400, cap at surplus 4,
+/// per-core densities ~2.4 constant across the tower), with the cap
+/// taken at `a_max` rather than the measured 4. Every tower
+/// assembled with this data is valid EXACTLY UNDER that hypothesis;
+/// its rows are the conditional form of the worst-case bound, and
+/// the hypothesis is the one theorem the program still owes.
+pub struct RigidityInterface {
+    shower: ShowerInterface,
+    /// The hypothesized surplus cap (measured: 4).
+    pub a_max: u64,
+}
+
+impl RigidityInterface {
+    /// The conditional provider at hypothesized surplus cap `a_max`
+    /// (measured cap at the gate cells: 4).
+    #[must_use]
+    pub fn new(a_max: u64) -> Self {
+        RigidityInterface {
+            shower: ShowerInterface::new(),
+            a_max,
+        }
+    }
+}
+
+impl Interface for RigidityInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        if a > self.a_max {
+            return Lg::zero();
+        }
+        let kod = k / 2;
+        let shape = Lg::from_u64(16).div(&Lg::from_u64(2).pow(a.min(4)));
+        lg_binom(s / 2, kod).mul(&shape)
+    }
+
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c(s, k, l)
+    }
+
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c_sup(s, k, l)
     }
 }
 
@@ -313,13 +542,15 @@ fn base_from_counts(
         n: n0,
         rows: BTreeMap::new(),
     };
+    let n0_32 =
+        u32::try_from(n0).map_err(|_| Error::OutOfRange(format!("base level {n0} exceeds u32")))?;
     for &k in dims {
         if k == 0 || k + 1 > n0 {
             return Err(Error::OutOfRange(format!(
                 "base dimension {k} needs 1 <= k < n0 = {n0}"
             )));
         }
-        let interp = Integer::from(Integer::binomial_u(n0 as u32, k as u32));
+        let interp = Integer::from(Integer::binomial_u(n0_32, k as u32));
         let vals = (k + 1..=n0)
             .map(|t| {
                 store(&Lg::from_integer(
@@ -366,8 +597,12 @@ pub fn analytic_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
 /// `(n, k, t)` where they apply — the analytic statement's two
 /// nontrivial clauses in exact integers, for the base constructor.
 fn analytic_refine(n: u64, k: u64, t: u64, best: &mut Integer) {
-    if t * t > n * (k - 1) {
-        let johnson = Integer::from(n * (t - k + 1) / (t * t - n * (k - 1)));
+    // u128 throughout: at levels past 2^32 the u64 products wrap in
+    // release and a wrapped Johnson clause could clamp BELOW the
+    // truth — the one failure mode this module must never have
+    let (tw, nw, kw) = (t as u128, n as u128, k as u128);
+    if tw * tw > nw * (kw - 1) {
+        let johnson = Integer::from(nw * (tw - kw + 1) / (tw * tw - nw * (kw - 1)));
         if johnson < *best {
             *best = johnson;
         }
@@ -386,8 +621,12 @@ fn analytic_refine(n: u64, k: u64, t: u64, best: &mut Integer) {
 /// integers.
 fn analytic_brackets(n: u64, k: u64, t: u64) -> Vec<Lg> {
     let mut out = vec![lg_binom(n, k), lg_binom(n, k + 1).div(&lg_binom(t, k + 1))];
-    if t * t > n * (k - 1) {
-        out.push(Lg::from_u64(n * (t - k + 1)).div(&Lg::from_u64(t * t - n * (k - 1))));
+    let (tw, nw, kw) = (t as u128, n as u128, k as u128);
+    if tw * tw > nw * (kw - 1) {
+        out.push(
+            Lg::from_integer(&Integer::from(nw * (tw - kw + 1)))
+                .div(&Lg::from_integer(&Integer::from(tw * tw - nw * (kw - 1)))),
+        );
     }
     out
 }
@@ -567,8 +806,10 @@ impl MidSuffix {
 /// `D_c` values of the capped window are threshold-independent, so
 /// they are fetched once.
 struct CutCharge {
-    /// `(d_c, d_c_sup)` for `l` in `[window_lo, kod)`.
-    window: Vec<(Lg, Lg)>,
+    /// `(d_c, d_c_sup)` for `l` in `[window_lo, kod)`; `None` = the
+    /// provider certifies the stratum (resp. every stratum up to
+    /// here) empty, and the charge skips it.
+    window: Vec<(Option<Lg>, Option<Lg>)>,
     window_lo: u64,
 }
 
@@ -584,7 +825,7 @@ impl CutCharge {
         CutCharge { window, window_lo }
     }
 
-    fn dc(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Lg {
+    fn dc(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Option<Lg> {
         if l >= self.window_lo {
             self.window[(l - self.window_lo) as usize].0.clone()
         } else {
@@ -592,7 +833,7 @@ impl CutCharge {
         }
     }
 
-    fn dc_sup(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Lg {
+    fn dc_sup(&self, cell: &Cell, data: &dyn Interface, l: u64) -> Option<Lg> {
         if l >= self.window_lo {
             self.window[(l - self.window_lo) as usize].1.clone()
         } else {
@@ -609,27 +850,43 @@ impl CutCharge {
         let mut acc: Option<Lg> = None;
         let mut l = kod - 1;
         loop {
-            let term = self.dc(cell, data, l).div(&lg_binom(t - 2 * l, r - 2 * l));
-            acc = Some(add_to(acc, term));
+            if let Some(dc) = self.dc(cell, data, l) {
+                let term = dc.div(&lg_binom(t - 2 * l, r - 2 * l));
+                acc = Some(add_to(acc, term));
+            }
             if l == lmin {
                 break;
             }
+            // a provider that certifies everything below `l` empty
+            // closes the sum exactly — no tail term at all
+            let Some(sup) = self.dc_sup(cell, data, l - 1) else {
+                break;
+            };
             let count = l - lmin;
-            let cur = acc.as_ref().expect("nonempty");
             let mut tail_hi = Lg::from_u64(count).hi;
-            tail_hi.add_assign_round(&self.dc_sup(cell, data, l - 1).hi, Round::Up);
+            tail_hi.add_assign_round(&sup.hi, Round::Up);
             tail_hi.sub_assign_round(&lg_binom(t - 2 * (l - 1), r - 2 * (l - 1)).lo, Round::Up);
-            let mut margin = cur.hi.clone();
-            margin -= Self::NEGLIGIBLE_BITS;
-            if tail_hi <= margin || kod - 1 - l >= Self::CAP {
+            let closable = match &acc {
+                Some(cur) => {
+                    let mut margin = cur.hi.clone();
+                    margin -= Self::NEGLIGIBLE_BITS;
+                    tail_hi <= margin
+                }
+                None => false,
+            };
+            if closable || kod - 1 - l >= Self::CAP {
                 let tail = Lg {
                     lo: Float::with_val(PREC, f64::NEG_INFINITY),
                     hi: tail_hi,
                 };
-                let bounded = cur.add(&tail);
-                acc = Some(Lg {
-                    lo: cur.lo.clone(),
-                    hi: bounded.hi,
+                acc = Some(match &acc {
+                    Some(cur) => Lg {
+                        lo: cur.lo.clone(),
+                        hi: cur.add(&tail).hi,
+                    },
+                    // every visited stratum was empty: the tail
+                    // alone bounds the rest, with no mass below
+                    None => tail,
                 });
                 break;
             }
@@ -907,7 +1164,12 @@ mod tests {
                 }
             }
             for l in lmin..kod {
-                exact += Rational::from((binom(n, l), binom(t - 2 * l, r - 2 * l)));
+                // the corrected trivial D_c: full stratum by
+                // configurations, 2^h C(n, l') C(n - l', h) with
+                // l' = l on the rung (r = n here)
+                let h = (r - 2 * l) as u32;
+                let dc = (Integer::from(1) << h) * binom(n, l) * binom(n - l, r - 2 * l);
+                exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
             }
             // the profile is the master's RHS clamped by the analytic
             // brackets at this level (unfloored ratios) — mirror them
@@ -938,6 +1200,121 @@ mod tests {
             );
             assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
         }
+    }
+
+    /// The step against exact rational arithmetic with the SHOWER
+    /// provider — the same oracle as the trivial-data gate below, with
+    /// the shower `D_c` mirrored independently (configuration count
+    /// plus the pencil-or-counting joint term), so a transcription
+    /// error in either the provider or the charge plumbing shows as a
+    /// bracket miss.
+    #[test]
+    fn step_encloses_exact_rational_at_16_7_shower() {
+        let (n, k) = (8u64, 7u64);
+        let s = 2 * n;
+        let (kev, kod) = channel_dims(k); // (4, 3)
+        let r = k + 1;
+        let lstar = (n + k - 1).div_ceil(3); // 5
+        let base = interpolation_base(n, &BTreeSet::from([kev, kod])).expect("base");
+        let data = ShowerInterface::new();
+        let prof = step(&base, &BTreeSet::from([k]), &data, u64::MAX).expect("step");
+        for t in r..=s {
+            let lmin = t.saturating_sub(n);
+            let mut exact = Rational::new();
+            for _l in lmin.max(lstar)..=n {
+                exact += Rational::from(binom(n, kev).max(binom(n, kod)));
+            }
+            if lmin.max(kod) < lstar {
+                let a = t - 2 * kod;
+                let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
+                for l in lmin.max(kod)..lstar {
+                    exact += db.clone() / Rational::from(binom(l, kod));
+                }
+            }
+            for l in lmin..kod {
+                // the shower D_c, mirrored: r = n here (on the rung),
+                // so l' = l and h = r - 2l
+                let h = r - 2 * l;
+                let halves = binom(n - l, h);
+                let jbar = if l == 0 {
+                    Integer::from(0)
+                } else if 2 * l <= h + 1 {
+                    binom(n - 1, l - 1)
+                } else {
+                    binom(n, l)
+                };
+                let dc =
+                    (Integer::from(1) << (h - 1) as u32) * (binom(n, l) * &halves + jbar * &halves);
+                exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
+            }
+            let mut clamps = vec![
+                Rational::from(binom(s, k)),
+                Rational::from((binom(s, k + 1), binom(t, k + 1))),
+            ];
+            if t * t > s * (k - 1) {
+                clamps.push(Rational::from((
+                    Integer::from(s * (t - k + 1)),
+                    Integer::from(t * t - s * (k - 1)),
+                )));
+            }
+            for c in clamps {
+                if c < exact {
+                    exact = c;
+                }
+            }
+            let got = prof.eval(k, t).expect("in domain");
+            let want = exact.to_f64().log2();
+            let lo = got.lo.to_f64_round(Round::Down);
+            let hi = got.hi.to_f64_round(Round::Up);
+            assert!(
+                lo <= want + 1e-12 && want <= hi + 1e-12,
+                "t = {t}: [{lo}, {hi}] vs exact {want}"
+            );
+            assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
+        }
+    }
+
+    /// The provider pins: the shower `D_c` reproduces the word-free
+    /// stratum bounds of gate_cut_shower at (32,15) exactly, and both
+    /// providers dominate the measured strata at (16,7) (top word:
+    /// 256 and 416 at l = 1, 2 — the counts that exposed the old
+    /// `C(s/2, l)` as unsound).
+    #[test]
+    fn provider_pins() {
+        let sh = ShowerInterface::new();
+        let dc = |l: u64| sh.d_c(32, 15, l).expect("nonempty stratum");
+        // l = 0: 2^15 (config 1, pencil-J empty)
+        assert!((dc(0).hi.to_f64() - 15.0).abs() < 1e-9);
+        // l = 4: 2^7 * C(12,8) * (C(16,4) + C(15,3))
+        let want = (128f64 * 495.0 * (1820.0 + 455.0)).log2();
+        assert!((dc(4).hi.to_f64() - want).abs() < 1e-9);
+        // l = 6: trivial-J branch (2l > h + 1): 2^3 C(10,4) * 2 C(16,6)
+        let want = (8f64 * 210.0 * 2.0 * 8008.0).log2();
+        assert!((dc(6).hi.to_f64() - want).abs() < 1e-9);
+        // soundness against measured strata at (16,7), top word
+        for (l, meas) in [(1u64, 256f64), (2, 416.0)] {
+            assert!(sh.d_c(16, 7, l).expect("nonempty").hi.to_f64() >= meas.log2());
+            assert!(
+                TrivialInterface
+                    .d_c(16, 7, l)
+                    .expect("nonempty")
+                    .hi
+                    .to_f64()
+                    >= meas.log2()
+            );
+        }
+        // the sup is a prefix maximum: never below the pointwise value
+        for l in 0..7 {
+            assert!(sh.d_c_sup(32, 15, l).expect("nonempty").hi >= dc(l).hi);
+        }
+        // rigidity: cut face delegates, middle face caps
+        let rig = RigidityInterface::new(8);
+        assert_eq!(
+            rig.d_c(32, 15, 3).expect("nonempty").hi.to_f64(),
+            dc(3).hi.to_f64()
+        );
+        assert!(rig.d_b(32, 15, 9).hi.to_f64() < 1e-9); // beyond the cap: one
+        assert!(rig.d_b(32, 15, 2).hi.to_f64() >= (28348f64).log2()); // measured
     }
 
     /// The assembled tower dominates the measured record at the base

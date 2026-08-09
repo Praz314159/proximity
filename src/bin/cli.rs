@@ -9,8 +9,9 @@
 //!   vanish toy     --p 5767169 --s 16 --r 8
 //!   vanish certify --p 1568247649 --s 32 --r 16
 //!   vanish attack  --n 2097152 --k 1048576 --list-bits 57.93 [--base-bits 31]
-//!   vanish pinch   [--total 2097152] [--n0 8] [--res 8192] [--eps-bits -128]
-//!   vanish tower   [--total 2097152] [--n0 8] [--res 8192] [--eps-bits -128]
+//!   vanish pinch   [--total 2097152] [--k total/2-1] [--n0 8] [--res 8192]
+//!                  [--eps-bits -128] [--data trivial|shower|rigidity] [--acap 8]
+//!   vanish tower   (same flags as pinch)
 //!
 //! `pinch` and `tower` (certified feature) are the challenge
 //! instruments: the two faces at the box, and the per-level loss map.
@@ -284,6 +285,16 @@ fn main() {
             {
                 use rug::ops::Pow;
                 use rug::Integer;
+                // a certified instrument must not silently ignore a
+                // mistyped flag (`--res=16384` would otherwise fall
+                // back to the default without a word)
+                for key in m.keys() {
+                    if !["total", "k", "n0", "res", "eps-bits", "data", "acap"]
+                        .contains(&key.as_str())
+                    {
+                        die(format!("unknown flag --{key} for {cmd}"));
+                    }
+                }
                 use vanish::soundness::envelope::{
                     assemble_levels, Interface, RigidityInterface, ShowerInterface,
                     TrivialInterface, DEFAULT_RESOLUTION,

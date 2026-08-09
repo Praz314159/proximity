@@ -38,20 +38,31 @@ fn f(v: f64) -> Float {
     Float::with_val(PREC, v)
 }
 
-/// ln(2) rounded in both directions (shared divisor for lngamma -> log2).
-fn ln2(round: Round) -> Float {
-    let mut x = Float::with_val(PREC, Constant::Log2);
-    // Constant::Log2 is correctly rounded to nearest; nudge one ulp outward.
+/// ln(2) rounded in both directions (shared divisor for lngamma ->
+/// log2), computed once — profiling showed the constant being rebuilt
+/// twice per `lgamma2` call.
+fn ln2(round: Round) -> &'static Float {
+    static LN2: std::sync::OnceLock<(Float, Float)> = std::sync::OnceLock::new();
+    let (down, up) = LN2.get_or_init(|| {
+        let x = Float::with_val(PREC, Constant::Log2);
+        // Constant::Log2 is correctly rounded to nearest; nudge one
+        // ulp outward.
+        let mut d = x.clone();
+        d.next_down();
+        let mut u = x;
+        u.next_up();
+        (d, u)
+    });
     match round {
-        Round::Down => x.next_down(),
-        Round::Up => x.next_up(),
+        Round::Down => down,
+        Round::Up => up,
         _ => unreachable!(),
     }
-    x
 }
 
 impl Lg {
     /// Exact zero (the quantity 1).
+    #[must_use]
     pub fn zero() -> Self {
         Lg {
             lo: f(0.0),
@@ -60,6 +71,7 @@ impl Lg {
     }
 
     /// log2 of an exact nonzero integer.
+    #[must_use]
     pub fn from_integer(x: &Integer) -> Self {
         assert!(*x > 0);
         let mut lo = Float::with_val_round(PREC, x, Round::Down).0;
@@ -70,11 +82,13 @@ impl Lg {
     }
 
     /// log2 of an exact nonzero u64.
+    #[must_use]
     pub fn from_u64(x: u64) -> Self {
         Self::from_integer(&Integer::from(x))
     }
 
     /// Product of quantities = sum of logs.
+    #[must_use]
     pub fn mul(&self, o: &Lg) -> Lg {
         let mut lo = self.lo.clone();
         lo.add_assign_round(&o.lo, Round::Down);
@@ -84,6 +98,7 @@ impl Lg {
     }
 
     /// Quotient of quantities = difference of logs.
+    #[must_use]
     pub fn div(&self, o: &Lg) -> Lg {
         let mut lo = self.lo.clone();
         lo.sub_assign_round(&o.hi, Round::Down);
@@ -93,21 +108,21 @@ impl Lg {
     }
 
     /// Integer power of the quantity = scale the log by `e >= 0`.
+    /// Scaling by a nonnegative factor with outward rounding preserves
+    /// `lo <= hi` for either sign of the log — no case split.
+    #[must_use]
     pub fn pow(&self, e: u64) -> Lg {
         let ef = Float::with_val(PREC, e);
         let mut lo = self.lo.clone();
         lo.mul_assign_round(&ef, Round::Down);
         let mut hi = self.hi.clone();
         hi.mul_assign_round(&ef, Round::Up);
-        // negative logs scale the other way; swap if needed
-        if lo > hi {
-            std::mem::swap(&mut lo, &mut hi);
-        }
         Lg { lo, hi }
     }
 
     /// Sum of quantities: log2(2^a + 2^b), each endpoint with its own
     /// rounding direction.
+    #[must_use]
     pub fn add(&self, o: &Lg) -> Lg {
         Lg {
             lo: lg_add_dir(&self.lo, &o.lo, Round::Down),
@@ -116,6 +131,7 @@ impl Lg {
     }
 
     /// Widen the upper endpoint by `bits` (multiplicative slack 2^bits).
+    #[must_use]
     pub fn widen_hi(&self, bits: &Float) -> Lg {
         let mut hi = self.hi.clone();
         hi.add_assign_round(bits, Round::Up);
@@ -131,7 +147,8 @@ fn lg_add_dir(a: &Float, b: &Float, round: Round) -> Float {
     let (m, s) = if a >= b { (a, b) } else { (b, a) };
     let mut d = s.clone();
     d.sub_assign_round(m, round); // <= 0
-    let mut t = d.exp2();
+    d.exp2_round(round); // directed: the no-suffix exp2 rounds to nearest
+    let mut t = d;
     t.add_assign_round(&f(1.0), round);
     t.log2_round(round);
     t.add_assign_round(m, round);
@@ -171,14 +188,24 @@ fn lgamma2(x: u64) -> Lg {
     let mut hi = xf;
     hi.ln_gamma_round(Round::Up);
     // divide by ln 2 (positive), directed
-    lo.div_assign_round(&ln2(Round::Up), Round::Down);
-    hi.div_assign_round(&ln2(Round::Down), Round::Up);
+    lo.div_assign_round(ln2(Round::Up), Round::Down);
+    hi.div_assign_round(ln2(Round::Down), Round::Up);
     Lg { lo, hi }
 }
 
+/// log2 of Gamma(x + 1) = log2 of x! as an interval — the table
+/// entry for table-driven binomials (the tower's prefix scans build
+/// one factorial table per level instead of three `lgamma2` calls
+/// per binomial).
+#[must_use]
+pub fn lg_factorial(x: u64) -> Lg {
+    lgamma2(x + 1)
+}
+
 /// log2 of the binomial coefficient C(n, k).
+#[must_use]
 pub fn lg_binom(n: u64, k: u64) -> Lg {
-    assert!(k <= n);
+    assert!(k <= n, "lg_binom needs k <= n (got n = {n}, k = {k})");
     lgamma2(n + 1).div(&lgamma2(k + 1)).div(&lgamma2(n - k + 1))
 }
 

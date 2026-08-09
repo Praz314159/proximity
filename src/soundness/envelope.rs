@@ -104,15 +104,41 @@ pub trait Interface: Sync {
     }
 }
 
+/// The configuration geometry of cut stratum `l` at cell `(s, k)`
+/// with rung `r = k + 1`, in the `l'`-corrected bookkeeping of the
+/// general cut bound (ch. 3 scope note; gate_cut_shower): a
+/// stratum-`l` member's complement has `l' = s/2 + l - r` full
+/// slots, and the folded functionals pair against `l'`-sets. Returns
+/// `(n' = s/2, h = r - 2l, l')`, or `None` when the stratum is empty
+/// (no complement geometry exists).
+fn stratum_geometry(s: u64, k: u64, l: u64) -> Option<(u64, u64, u64)> {
+    let np = s / 2;
+    let r = k + 1;
+    if 2 * l > r {
+        return None;
+    }
+    let h = r - 2 * l;
+    let lp = (np + l).checked_sub(r)?;
+    if lp > np || h > np - lp {
+        return None;
+    }
+    Some((np, h, lp))
+}
+
 /// The citable floor of the data hierarchy — no engine, no prime.
 ///
-/// `D_c(l) = C(s/2, l)`: the whole stratum (every `l`-subset of the
-/// slots counted as consistent). `D_b(a) = C(s/2, kod) * m` with
-/// `m = floor((s - 2 kod)/a)` at odd `k` — the pencil-agreement
-/// lemma's disjointness bound: the level sets of members reaching
-/// surplus `a` are disjoint subsets, each of size at least `a`, of
-/// the `s - 2 kod` available points — and `m = 1` at even `k`, where
-/// the family through a core is a single interpolant.
+/// `D_c(l) = 2^h C(s/2, l') C(s/2 - l', h)`: the full stratum of the
+/// cut by configurations — every configuration charged its whole
+/// section cube. (The earlier `C(s/2, l)` here was unsound against
+/// the master's contract, which needs `D_c(l) >= |Z^(l)(b)|`: at
+/// (16,7) the top word's stratum 1 is 256 against `C(8,1) = 8`.
+/// Corrected 2026-08-09 with the shower/window work, issue #61.)
+/// `D_b(a) = C(s/2, kod) * m` with `m = floor((s - 2 kod)/a)` at odd
+/// `k` — the pencil-agreement lemma's disjointness bound: the level
+/// sets of members reaching surplus `a` are disjoint subsets, each
+/// of size at least `a`, of the `s - 2 kod` available points — and
+/// `m = 1` at even `k`, where the family through a core is a single
+/// interpolant.
 pub struct TrivialInterface;
 
 impl Interface for TrivialInterface {
@@ -129,14 +155,150 @@ impl Interface for TrivialInterface {
         lg_binom(s / 2, kod).mul(&Lg::from_u64(per_core.max(1)))
     }
 
-    fn d_c(&self, s: u64, _k: u64, l: u64) -> Lg {
-        lg_binom(s / 2, l)
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Lg {
+        match stratum_geometry(s, k, l) {
+            Some((np, h, lp)) => Lg::from_u64(2)
+                .pow(h)
+                .mul(&lg_binom(np, lp))
+                .mul(&lg_binom(np - lp, h)),
+            None => Lg::zero(),
+        }
+    }
+}
+
+/// The word-free cut strata of the shower assembly (issue #61,
+/// gate_cut_shower): the general cut bound in `l'`-corrected form,
+/// with the joint counts word-freed by the low-strata pencil theorem
+/// where it applies and by counting where it does not:
+///
+/// `D_c(l) = 2^(h-1) ( C(n', l') C(n' - l', h) + Jbar C(n' - l', h) )`
+///
+/// with `Jbar = C(n' - 1, l' - 1)` when `2 l' <= h + 1` (Theorem P:
+/// the joint sets are a pencil over a nonempty base locus) and
+/// `Jbar = C(n', l')` otherwise. Unconditional at every prime.
+/// `D_b` is the same pencil-agreement disjointness bound as
+/// [`TrivialInterface`] — this provider sharpens only the cut face.
+///
+/// The prefix suprema the small-strata tail bound consumes are exact
+/// scans, computed once per `(s, k)` and cached (the scan is linear
+/// in `kod`; the cache turns the assembler's window queries into
+/// lookups).
+pub struct ShowerInterface {
+    sup: std::sync::Mutex<BTreeMap<(u64, u64), Vec<(f64, f64)>>>,
+}
+
+impl ShowerInterface {
+    #[must_use]
+    pub fn new() -> Self {
+        ShowerInterface {
+            sup: std::sync::Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl Default for ShowerInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Interface for ShowerInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        TrivialInterface.d_b(s, k, a)
     }
 
-    // C(s/2, ·) increases up to its peak at s/4, so the prefix
-    // maximum is the value at min(l, s/4)
-    fn d_c_sup(&self, s: u64, _k: u64, l: u64) -> Lg {
-        lg_binom(s / 2, l.min(s / 4))
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Lg {
+        let Some((np, h, lp)) = stratum_geometry(s, k, l) else {
+            return Lg::zero();
+        };
+        let sections = Lg::from_u64(2).pow(h.saturating_sub(1));
+        let halves = lg_binom(np - lp, h);
+        let config = lg_binom(np, lp).mul(&halves);
+        if lp == 0 {
+            // the empty missed-set is joint only at B = 0, excluded:
+            // no joint term (Lg cannot say zero, so omit it)
+            return sections.mul(&config);
+        }
+        let jbar = if 2 * lp <= h + 1 {
+            lg_binom(np - 1, lp - 1)
+        } else {
+            lg_binom(np, lp)
+        };
+        sections.mul(&config.add(&jbar.mul(&halves)))
+    }
+
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Lg {
+        let kod = k / 2;
+        let mut cache = self.sup.lock().expect("sup cache");
+        let prefix = cache.entry((s, k)).or_insert_with(|| {
+            let mut out = Vec::with_capacity(kod as usize);
+            let mut best: Option<Lg> = None;
+            for lp in 0..kod {
+                let v = self.d_c(s, k, lp);
+                best = Some(match best {
+                    Some(b) if b.hi >= v.hi => b,
+                    _ => v,
+                });
+                out.push(store(best.as_ref().expect("just set")));
+            }
+            out
+        });
+        let (lo, hi) = prefix[(l.min(kod.saturating_sub(1))) as usize];
+        Lg {
+            lo: Float::with_val(PREC, lo),
+            hi: Float::with_val(PREC, hi),
+        }
+    }
+}
+
+/// The bucket-rigidity interface — CONDITIONAL. The cut face is the
+/// unconditional [`ShowerInterface`]; the middle face is the
+/// program's single external hypothesis in interface form, the
+/// tail-rigidity statement (the SBC face): derived buckets have
+/// bounded surplus. Concretely,
+///
+/// `D_b(a) <= C(s/2, kod) * 2^(4 - a)` for `a <= a_max`, and
+/// `D_b(a) <= 1` for `a > a_max`
+///
+/// — the measured-transport shape (both measured cells: (16,7)
+/// D_b = 128/28/20, (32,15) D_b = 28348/824/400, cap at surplus 4,
+/// per-core densities ~2.4 constant across the tower), with the cap
+/// taken at `a_max` rather than the measured 4. Every tower
+/// assembled with this data is valid EXACTLY UNDER that hypothesis;
+/// its rows are the conditional form of the worst-case bound, and
+/// the hypothesis is the one theorem the program still owes.
+pub struct RigidityInterface {
+    shower: ShowerInterface,
+    /// The hypothesized surplus cap (measured: 4).
+    pub a_max: u64,
+}
+
+impl RigidityInterface {
+    #[must_use]
+    pub fn new(a_max: u64) -> Self {
+        RigidityInterface {
+            shower: ShowerInterface::new(),
+            a_max,
+        }
+    }
+}
+
+impl Interface for RigidityInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        if a > self.a_max {
+            return Lg::zero();
+        }
+        let kod = k / 2;
+        let shape = Lg::from_u64(16).div(&Lg::from_u64(2).pow(a.min(4)));
+        lg_binom(s / 2, kod).mul(&shape)
+    }
+
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Lg {
+        self.shower.d_c(s, k, l)
+    }
+
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Lg {
+        self.shower.d_c_sup(s, k, l)
     }
 }
 
@@ -907,7 +1069,12 @@ mod tests {
                 }
             }
             for l in lmin..kod {
-                exact += Rational::from((binom(n, l), binom(t - 2 * l, r - 2 * l)));
+                // the corrected trivial D_c: full stratum by
+                // configurations, 2^h C(n, l') C(n - l', h) with
+                // l' = l on the rung (r = n here)
+                let h = (r - 2 * l) as u32;
+                let dc = (Integer::from(1) << h) * binom(n, l) * binom(n - l, r - 2 * l);
+                exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
             }
             // the profile is the master's RHS clamped by the analytic
             // brackets at this level (unfloored ratios) — mirror them
@@ -938,6 +1105,41 @@ mod tests {
             );
             assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
         }
+    }
+
+    /// The provider pins: the shower `D_c` reproduces the word-free
+    /// stratum bounds of gate_cut_shower at (32,15) exactly, and both
+    /// providers dominate the measured strata at (16,7) (top word:
+    /// 256 and 416 at l = 1, 2 — the counts that exposed the old
+    /// `C(s/2, l)` as unsound).
+    #[test]
+    fn provider_pins() {
+        let sh = ShowerInterface::new();
+        // l = 0: 2^15 (config 1, pencil-J empty)
+        assert!((sh.d_c(32, 15, 0).hi.to_f64() - 15.0).abs() < 1e-9);
+        // l = 4: 2^7 * C(12,8) * (C(16,4) + C(15,3))
+        let want = (128f64 * 495.0 * (1820.0 + 455.0)).log2();
+        assert!((sh.d_c(32, 15, 4).hi.to_f64() - want).abs() < 1e-9);
+        // l = 6: trivial-J branch (2l > h + 1): 2^3 C(10,4) * 2 C(16,6)
+        let want = (8f64 * 210.0 * 2.0 * 8008.0).log2();
+        assert!((sh.d_c(32, 15, 6).hi.to_f64() - want).abs() < 1e-9);
+        // soundness against measured strata at (16,7), top word
+        for (l, meas) in [(1u64, 256f64), (2, 416.0)] {
+            assert!(sh.d_c(16, 7, l).hi.to_f64() >= meas.log2());
+            assert!(TrivialInterface.d_c(16, 7, l).hi.to_f64() >= meas.log2());
+        }
+        // the sup is a prefix maximum: never below the pointwise value
+        for l in 0..7 {
+            assert!(sh.d_c_sup(32, 15, l).hi >= sh.d_c(32, 15, l).hi);
+        }
+        // rigidity: cut face delegates, middle face caps
+        let rig = RigidityInterface::new(8);
+        assert_eq!(
+            rig.d_c(32, 15, 3).hi.to_f64(),
+            sh.d_c(32, 15, 3).hi.to_f64()
+        );
+        assert!(rig.d_b(32, 15, 9).hi.to_f64() < 1e-9); // beyond the cap: one
+        assert!(rig.d_b(32, 15, 2).hi.to_f64() >= (28348f64).log2()); // measured
     }
 
     /// The assembled tower dominates the measured record at the base

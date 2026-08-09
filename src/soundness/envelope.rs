@@ -38,9 +38,13 @@
 //! tower; [`assemble_levels_from`] is the seam for sharper bases
 //! (the certified floor values of the base section's companion
 //! statement, when the register lands). With the analytic base the
-//! floor holds no flood at small `n0`, and the loss map's one
-//! remaining wall is the trivial `D_b` flood in the middle charge —
-//! beyond-Johnson radii are gated entirely on the engine's supply.
+//! floor holds no flood at small `n0`. The loss map's measured wall
+//! (box run, 2026-08-09) is the SMALL-STRATA cut charge: past the
+//! Johnson radius the classes at `l` just below `kod` activate, and
+//! the configuration-count `D_c` floods at scale in both data modes
+//! — beyond-Johnson radii are gated on a scale-correct small-strata
+//! charge (the graded-pencil route) before the `D_b` supply even
+//! binds.
 
 use std::collections::{BTreeMap, BTreeSet};
 

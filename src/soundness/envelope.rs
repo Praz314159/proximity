@@ -1016,7 +1016,7 @@ impl CutCharge {
             // rises — so count x d_r_sup x J(lmin) bounds the whole
             // remainder; non-increasing in `t` (numerator-derivative
             // sign reduces to `k > s - 1`, impossible)
-            if 2 * t <= cell.s + cell.k - 1 {
+            if 2 * t < cell.s + cell.k {
                 if let (Some(j), Some(rsup)) = (
                     derived_johnson(cell.s, cell.k, lmin, t - 2 * lmin),
                     data.d_r_sup(cell.s, cell.k, l - 1, t),
@@ -1355,7 +1355,7 @@ mod tests {
                 small += graded_min(cut, s, k, n, l, t);
             }
             let chan = binom(n, kev).max(binom(n, kod));
-            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, k, n, kev, kod, lstar, t);
+            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
             // the profile is the candidate-min RHS clamped by the
             // analytic brackets (unfloored ratios) — mirror them
             let mut clamps = vec![
@@ -1426,7 +1426,7 @@ mod tests {
                 small += graded_min(cut, s, k, n, l, t);
             }
             let chan = binom(n, kev).max(binom(n, kod));
-            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, k, n, kev, kod, lstar, t);
+            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
             let mut clamps = vec![
                 Rational::from(binom(s, k)),
                 Rational::from((binom(s, k + 1), binom(t, k + 1))),
@@ -1467,14 +1467,11 @@ mod tests {
         small: &Rational,
         chan: &Integer,
         s: u64,
-        k: u64,
         n: u64,
-        kev: u64,
         kod: u64,
         lstar: u64,
         t: u64,
     ) -> (Rational, Rational) {
-        let _ = kev;
         let lmin = t.saturating_sub(n);
         // classic candidate (tight)
         let mut classic = small.clone();

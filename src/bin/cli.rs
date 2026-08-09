@@ -317,8 +317,9 @@ fn main() {
                     "interface data: {data_name}{}",
                     match data_name.as_str() {
                         "rigidity" => format!(
-                            " (CONDITIONAL: bucket-rigidity / tail-SBC hypothesis, \
-                             surplus cap {a_cap}; measured cap 4)"
+                            " (CONDITIONAL: graded bucket-rigidity / tail-SBC \
+                             hypothesis, surplus cap {a_cap} on both the middle \
+                             and graded faces; measured caps 4 and 2)"
                         ),
                         _ => " (unconditional)".to_string(),
                     }

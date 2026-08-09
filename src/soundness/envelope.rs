@@ -289,8 +289,7 @@ impl Interface for ShowerInterface {
             let vals: Vec<Option<Lg>> = (0..kod)
                 .into_par_iter()
                 .map(|lp| {
-                    stratum_geometry(s, k, lp)
-                        .map(|(np, h, lpp)| shower_d_c(np, h, lpp, &binom))
+                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| shower_d_c(np, h, lpp, &binom))
                 })
                 .collect();
             let mut out = Vec::with_capacity(kod as usize);
@@ -539,8 +538,8 @@ fn base_from_counts(
         n: n0,
         rows: BTreeMap::new(),
     };
-    let n0_32 = u32::try_from(n0)
-        .map_err(|_| Error::OutOfRange(format!("base level {n0} exceeds u32")))?;
+    let n0_32 =
+        u32::try_from(n0).map_err(|_| Error::OutOfRange(format!("base level {n0} exceeds u32")))?;
     for &k in dims {
         if k == 0 || k + 1 > n0 {
             return Err(Error::OutOfRange(format!(
@@ -1240,8 +1239,8 @@ mod tests {
                 } else {
                     binom(n, l)
                 };
-                let dc = (Integer::from(1) << (h - 1) as u32)
-                    * (binom(n, l) * &halves + jbar * &halves);
+                let dc =
+                    (Integer::from(1) << (h - 1) as u32) * (binom(n, l) * &halves + jbar * &halves);
                 exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
             }
             let mut clamps = vec![

@@ -326,8 +326,8 @@ fn main() {
                 let base = Integer::from(vanish::field::named::KOALABEAR);
                 let ext = base.clone().pow(6);
                 let t0 = std::time::Instant::now();
-                let levels = assemble_levels(total, k, n0, data.as_ref(), res)
-                    .unwrap_or_else(|e| die(e));
+                let levels =
+                    assemble_levels(total, k, n0, data.as_ref(), res).unwrap_or_else(|e| die(e));
                 let prof = levels.last().expect("nonempty tower");
                 let assembled = t0.elapsed();
                 if cmd == "tower" {

@@ -130,6 +130,68 @@ impl Lg {
         }
     }
 
+    /// Rebuild a bracket from stored `f64` endpoints (the profile
+    /// store's round trip): `f64 -> Float` at the module's working
+    /// precision is exact, so this is a widening-free restore. The
+    /// single home for the store/restore precision — callers must
+    /// not copy `PREC`.
+    #[must_use]
+    pub fn from_f64_bracket(lo: f64, hi: f64) -> Lg {
+        Lg {
+            lo: Float::with_val(PREC, lo),
+            hi: Float::with_val(PREC, hi),
+        }
+    }
+
+    /// A bracket hull from two sources: the `lo` of one and the `hi`
+    /// of the other. The named form of the `[first term, closed
+    /// form]` pattern — hand-rolling it reads as a typo.
+    #[must_use]
+    pub fn hull(lo_of: &Lg, hi_of: &Lg) -> Lg {
+        Lg {
+            lo: lo_of.lo.clone(),
+            hi: hi_of.hi.clone(),
+        }
+    }
+
+    /// Enclosure of the smaller of the two enclosed quantities:
+    /// elementwise min of endpoints. Valid because
+    /// `min(x, y) >= min(lo_x, lo_y)` and `min(x, y) <= min(hi_x,
+    /// hi_y)` for any `x` in `[lo_x, hi_x]`, `y` in `[lo_y, hi_y]`.
+    #[must_use]
+    pub fn min(&self, o: &Lg) -> Lg {
+        Lg {
+            lo: if o.lo < self.lo {
+                o.lo.clone()
+            } else {
+                self.lo.clone()
+            },
+            hi: if o.hi < self.hi {
+                o.hi.clone()
+            } else {
+                self.hi.clone()
+            },
+        }
+    }
+
+    /// Enclosure of the larger of the two enclosed quantities:
+    /// elementwise max of endpoints (same argument as [`Lg::min`]).
+    #[must_use]
+    pub fn max(&self, o: &Lg) -> Lg {
+        Lg {
+            lo: if o.lo > self.lo {
+                o.lo.clone()
+            } else {
+                self.lo.clone()
+            },
+            hi: if o.hi > self.hi {
+                o.hi.clone()
+            } else {
+                self.hi.clone()
+            },
+        }
+    }
+
     /// Widen the upper endpoint by `bits` (multiplicative slack 2^bits).
     #[must_use]
     pub fn widen_hi(&self, bits: &Float) -> Lg {
@@ -200,6 +262,35 @@ fn lgamma2(x: u64) -> Lg {
 #[must_use]
 pub fn lg_factorial(x: u64) -> Lg {
     lgamma2(x + 1)
+}
+
+/// A parallel-built factorial table for repeated binomials at one
+/// scale: `binom` is bit-for-bit [`lg_binom`] (both reduce to
+/// `lgamma2` at the same precision), amortized to three lookups —
+/// the tower's prefix scans make ~10^6 binomial queries per level.
+pub struct LgFactorials {
+    table: Vec<Lg>,
+}
+
+impl LgFactorials {
+    /// The table of `log2(x!)` for `x <= n_max`.
+    #[must_use]
+    pub fn new(n_max: u64) -> Self {
+        use rayon::prelude::*;
+        LgFactorials {
+            table: (0..=n_max).into_par_iter().map(lg_factorial).collect(),
+        }
+    }
+
+    /// `log2 C(n, k)` from the table; panics beyond `n_max` (same
+    /// contract as [`lg_binom`]'s `k <= n` assert).
+    #[must_use]
+    pub fn binom(&self, n: u64, k: u64) -> Lg {
+        assert!(k <= n, "binom needs k <= n (got n = {n}, k = {k})");
+        self.table[n as usize]
+            .div(&self.table[k as usize])
+            .div(&self.table[(n - k) as usize])
+    }
 }
 
 /// log2 of the binomial coefficient C(n, k).

@@ -74,7 +74,7 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
         }
     }
 
-    let total = binomial(s, r) as usize;
+    let total = crate::field::binom(s as u64, r as u64) as usize;
     let mut fps: Vec<u128> = Vec::new();
     fps.try_reserve_exact(total)
         .map_err(|_| Error::Unsupported("census allocation (memory)".into()))?;
@@ -127,7 +127,7 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
                 e0[0][0] = 1;
                 apply(&mut e0, coord.min(1), i0, half, true);
                 apply(&mut e0, coord.min(2), i1, half, true);
-                let cap = binomial(s - 1 - i1, r - 2) as usize;
+                let cap = crate::field::binom((s - 1 - i1) as u64, (r - 2) as u64) as usize;
                 let mut out: Vec<u128> = Vec::with_capacity(cap);
                 dfs(&mut e0, &mut out, i1 + 1, 2, s, r, coord, half, fingerprint);
                 out
@@ -154,15 +154,6 @@ pub fn exact_value_census(s: usize, r: usize, coord: usize) -> Result<(u64, u64,
     let max_mult = mults[0];
     mults.truncate(5);
     Ok((distinct, max_mult, mults))
-}
-
-fn binomial(n: usize, k: usize) -> u64 {
-    let k = k.min(n - k);
-    let mut acc = 1u64;
-    for i in 0..k {
-        acc = acc * (n - i) as u64 / (i + 1) as u64;
-    }
-    acc
 }
 
 #[cfg(test)]

@@ -78,7 +78,7 @@ impl ReedSolomon {
     /// Relative minimum distance `1 - (k-1)/n` (the capacity radius).
     #[must_use]
     pub fn capacity_radius(&self) -> f64 {
-        1.0 - (self.k as f64 - 1.0) / self.n() as f64
+        capacity_radius(self.n(), self.k)
     }
     /// Johnson radius `1 - sqrt(rate)`.
     #[must_use]
@@ -155,3 +155,11 @@ impl ReedSolomon {
 }
 
 pub use crate::field::top_elementary_symmetric;
+
+/// Relative minimum distance `1 - (k - 1)/n` — the free form of
+/// [`ReedSolomon::capacity_radius`] for callers without a
+/// constructed code (the soundness explorer).
+#[must_use]
+pub fn capacity_radius(n: usize, k: usize) -> f64 {
+    1.0 - (k as f64 - 1.0) / n as f64
+}

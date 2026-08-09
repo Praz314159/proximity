@@ -106,6 +106,25 @@ pub trait Interface: Sync {
     /// the stratum is PROVABLY EMPTY (no geometry admits a member) —
     /// which a log-domain bracket cannot express.
     fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg>;
+    /// Bound on the number of REALIZED partial cores at stratum `l`:
+    /// `l`-subsets `Y` of the slots whose rank-`(k - 2l)` derived
+    /// list at agreement `>= m` is nonempty (gate_graded_pencils,
+    /// Lemma D) — the graded interface datum. Must hold for every
+    /// word and be non-increasing in `m`. The default counts every
+    /// `l`-subset — word-free and weak; the graded-rigidity
+    /// hypothesis sharpens it. The charge multiplies this by the
+    /// derived-Johnson multiplicity (Lemma J, a theorem), so `d_r`
+    /// carries the entire hypothesis content of the graded route.
+    fn d_r(&self, s: u64, _k: u64, l: u64, _m: u64) -> Option<Lg> {
+        Some(lg_binom(s / 2, l))
+    }
+    /// Bound on `max(d_r(l', t - 2 l'))` over `l' <= l` — the graded
+    /// tail's numerator. The default covers the default `d_r` (every
+    /// `l'`-subset; the prefix max of `C(s/2, ·)` peaks at `s/4`).
+    /// Must be non-increasing in `t` at fixed `l`.
+    fn d_r_sup(&self, s: u64, _k: u64, l: u64, _t: u64) -> Option<Lg> {
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
     /// Bound on `max(d_c(l'))` over `l' <= l`, `None` when every
     /// stratum up to `l` is empty — the small-strata tail bound's
     /// numerator. The default scans, which is correct but linear in
@@ -351,6 +370,30 @@ impl RigidityInterface {
 }
 
 impl Interface for RigidityInterface {
+    /// The graded face of the same hypothesis: a realized partial
+    /// core at stratum `l` demands derived agreement `m` on a
+    /// rank-`k' = k - 2l` family, i.e. graded surplus `m - k'` —
+    /// which equals `t - k`, INDEPENDENT of `l` (measured at the
+    /// record cell: every populated stratum sits at graded surplus
+    /// 2). The hypothesis caps it: beyond `a_max`, at most one
+    /// realized core per stratum; within the cap, all cores allowed.
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        let kp = k - 2 * l;
+        if m.saturating_sub(kp) > self.a_max {
+            return Some(Lg::zero()); // at most one realized core
+        }
+        Some(lg_binom(s / 2, l))
+    }
+
+    /// Beyond the cap the graded surplus `t - k` (l-independent)
+    /// caps every stratum's realized cores at one, so the sup is one.
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        if t.saturating_sub(k) > self.a_max {
+            return Some(Lg::zero());
+        }
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
+
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
         if a > self.a_max {
             return Lg::zero();
@@ -688,6 +731,15 @@ struct DeepRun {
     sum_above: Option<Lg>,
 }
 
+impl DeepRun {
+    /// The channel-max bracket at a threshold inside the run — the
+    /// blocks are constant over `[lo, hi]`, so it is the run's max.
+    fn max_at(&self, l: u64) -> Lg {
+        debug_assert!(self.lo <= l && l <= self.hi);
+        self.max.clone()
+    }
+}
+
 impl DeepCharge {
     fn build(prev: &Profile, cell: &Cell) -> Self {
         let mut runs = Vec::new();
@@ -725,8 +777,29 @@ impl DeepCharge {
         DeepCharge { runs }
     }
 
-    /// The charge at threshold `t`: the profile suffix from
-    /// `max(l*, t - n)`, or `None` when the stratum range is empty.
+    /// The round-9 single-term charge at split `l0` (which must lie
+    /// in `[l*, n]`): `2 max(E(n, kev, l0), E(n, kod, l0))`.
+    fn single_at(&self, l0: u64) -> Option<Lg> {
+        if self.runs.is_empty() {
+            return None;
+        }
+        let j = self.runs.partition_point(|run| run.lo > l0);
+        let run = &self.runs[j];
+        Some(Lg::from_u64(2).mul(&run.max_at(l0)))
+    }
+
+    /// The charge at threshold `t`: the smaller of the master's
+    /// suffix sum from `l0 = max(l*, t - n)` and the round-9
+    /// single-term charge `2 max(E(n, kev, l0), E(n, kod, l0))` —
+    /// the nesting + injectivity + FT-2 chain (verifier
+    /// s19_ft2_correlated): every deep class injects into the joint
+    /// list at its own threshold, the joint lists NEST down to `l0`,
+    /// and FT-2's tiling (`3 l0 >= n + k - 1`, guaranteed by the
+    /// coverage threshold) collapses the joint list to twice the
+    /// larger channel list, loss ONE — no width factor per level.
+    /// Both forms are non-increasing in `t`, so the pointwise min
+    /// preserves the grid's enclosure contract. `None` when the
+    /// stratum range is empty.
     fn at(&self, cell: &Cell, t: u64) -> Option<Lg> {
         let l0 = t.saturating_sub(cell.n).max(cell.lstar);
         if l0 > cell.n || self.runs.is_empty() {
@@ -736,9 +809,22 @@ impl DeepCharge {
         let run = &self.runs[j];
         debug_assert!(run.lo <= l0 && l0 <= run.hi);
         let partial = Lg::from_u64(run.hi - l0 + 1).mul(&run.max);
-        Some(match &run.sum_above {
+        let sum_form = match &run.sum_above {
             Some(above) => above.add(&partial),
             None => partial,
+        };
+        let single = Lg::from_u64(2).mul(&run.max_at(l0));
+        Some(Lg {
+            lo: if single.lo < sum_form.lo {
+                single.lo
+            } else {
+                sum_form.lo
+            },
+            hi: if single.hi < sum_form.hi {
+                single.hi
+            } else {
+                sum_form.hi
+            },
         })
     }
 }
@@ -777,6 +863,22 @@ impl MidSuffix {
         MidSuffix::Exact(suffix)
     }
 
+    /// The suffix bracket for an EXTENDED split `lambda > l*`
+    /// (round-9 split-point freedom): the range `[l0, lambda)` is
+    /// enclosed by [first term, infinite telescope] — loose by a
+    /// fraction of a bit, sound for every `lambda`, and free of any
+    /// `lambda`-indexed storage. Caller guarantees `kod >= 2`.
+    fn range_bracket(&self, cell: &Cell, l0: u64) -> Lg {
+        let hi = Lg::from_u64(cell.kod)
+            .div(&Lg::from_u64(cell.kod - 1))
+            .div(&lg_binom(l0 - 1, cell.kod - 1));
+        let lo = Lg::zero().div(&lg_binom(l0, cell.kod));
+        Lg {
+            lo: lo.lo,
+            hi: hi.hi,
+        }
+    }
+
     fn suffix_from(&self, cell: &Cell, l0: u64) -> Lg {
         match self {
             MidSuffix::Exact(suffix) => suffix[(cell.lstar - 1 - l0) as usize].clone(),
@@ -792,6 +894,29 @@ impl MidSuffix {
             }
         }
     }
+}
+
+/// The derived-Johnson per-core multiplicity (gate_graded_pencils,
+/// Lemma J): members through a partial core of size `l` agree
+/// pairwise on at most `k' - 1` of the `N = s - 2l` available
+/// points, so at derived agreement `m` the classical Johnson count
+/// `N (m - k' + 1) / (m^2 - N (k' - 1))` bounds the per-core class.
+/// Returned only where BOTH the quadratic condition holds (true on
+/// the whole band below the coverage curve — the marginality
+/// identity) AND the expression is non-increasing in `m`
+/// (`m >= 2 (k' - 1)`), which the step's off-grid block enclosure
+/// requires of every summand.
+fn derived_johnson(s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+    let kp = k.checked_sub(2 * l)?;
+    let n_av = s - 2 * l;
+    let (mw, nw, kw) = (m as u128, n_av as u128, kp as u128);
+    if kw == 0 || mw * mw <= nw * (kw - 1) || mw < 2 * (kw - 1) || mw < kw {
+        return None;
+    }
+    Some(
+        Lg::from_integer(&Integer::from(nw * (mw - kw + 1)))
+            .div(&Lg::from_integer(&Integer::from(mw * mw - nw * (kw - 1)))),
+    )
 }
 
 /// Charge 3 — small strata (`l < kod`): canonical subsets to the cut,
@@ -850,8 +975,26 @@ impl CutCharge {
         let mut acc: Option<Lg> = None;
         let mut l = kod - 1;
         loop {
-            if let Some(dc) = self.dc(cell, data, l) {
-                let term = dc.div(&lg_binom(t - 2 * l, r - 2 * l));
+            let cut_term = self
+                .dc(cell, data, l)
+                .map(|dc| dc.div(&lg_binom(t - 2 * l, r - 2 * l)));
+            // the graded route (Lemma D + Lemma J): realized cores
+            // times the derived-Johnson multiplicity, where the
+            // theorem applies; a pointwise min of valid bounds is a
+            // valid bound, and both branches are non-increasing in t
+            let graded_term = derived_johnson(cell.s, cell.k, l, t - 2 * l)
+                .and_then(|j| data.d_r(cell.s, cell.k, l, t - 2 * l).map(|rr| rr.mul(&j)));
+            // an empty stratum (cut face None) means the class is
+            // empty outright — the graded term must not resurrect it
+            let term = match (cut_term, graded_term) {
+                (Some(c), Some(g)) => Some(Lg {
+                    lo: if g.lo < c.lo { g.lo } else { c.lo },
+                    hi: if g.hi < c.hi { g.hi } else { c.hi },
+                }),
+                (Some(c), None) => Some(c),
+                (None, _) => None,
+            };
+            if let Some(term) = term {
                 acc = Some(add_to(acc, term));
             }
             if l == lmin {
@@ -866,6 +1009,26 @@ impl CutCharge {
             let mut tail_hi = Lg::from_u64(count).hi;
             tail_hi.add_assign_round(&sup.hi, Round::Up);
             tail_hi.sub_assign_round(&lg_binom(t - 2 * (l - 1), r - 2 * (l - 1)).lo, Round::Up);
+            // the graded tail majorant: on the band (`phi` increasing
+            // in `l`, i.e. `t <= (s + k - 1)/2`) the derived-Johnson
+            // multiplicity at the BINDING stratum dominates every
+            // remaining one — `N` falls, `m - k'` is constant, `phi`
+            // rises — so count x d_r_sup x J(lmin) bounds the whole
+            // remainder; non-increasing in `t` (numerator-derivative
+            // sign reduces to `k > s - 1`, impossible)
+            if 2 * t < cell.s + cell.k {
+                if let (Some(j), Some(rsup)) = (
+                    derived_johnson(cell.s, cell.k, lmin, t - 2 * lmin),
+                    data.d_r_sup(cell.s, cell.k, l - 1, t),
+                ) {
+                    let mut graded_hi = Lg::from_u64(count).hi;
+                    graded_hi.add_assign_round(&rsup.hi, Round::Up);
+                    graded_hi.add_assign_round(&j.hi, Round::Up);
+                    if graded_hi < tail_hi {
+                        tail_hi = graded_hi;
+                    }
+                }
+            }
             let closable = match &acc {
                 Some(cur) => {
                     let mut margin = cur.hi.clone();
@@ -961,24 +1124,54 @@ impl<'a> Charges<'a> {
         )
     }
 
-    /// The master's right-hand side at threshold `t`: the sum of the
-    /// three charges over their (possibly empty) stratum ranges.
+    /// The master's right-hand side at threshold `t`: the minimum
+    /// over split candidates of the three charges. The split between
+    /// the middle band and the deep range is a FREE parameter
+    /// `lambda in [l*, n]` — the core charge holds at every
+    /// `l >= kod` and the round-9 nesting + FT-2 chain holds at
+    /// every `F >= l*` — and the candidates bracket its extremes:
+    /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
+    /// middle range through cores, deep reduced to the fully-paired
+    /// class). Each candidate is non-increasing in `t`, so the min
+    /// preserves the grid's enclosure contract.
     fn rhs(&self, t: u64) -> Result<Lg> {
         let cell = &self.cell;
-        [
-            self.deep.at(cell, t),
-            self.mid_at(t),
-            self.cut.at(cell, self.data, t),
-        ]
-        .into_iter()
-        .flatten()
-        .reduce(|a, b| a.add(&b))
-        .ok_or_else(|| {
-            Error::Unsupported(format!(
+        let small = self.cut.at(cell, self.data, t);
+        let classic = [self.deep.at(cell, t), self.mid_at(t), small.clone()]
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| a.add(&b));
+        let full_mid = if cell.kod >= 2 && cell.lstar < cell.n {
+            let l0m = t.saturating_sub(cell.n).max(cell.kod);
+            let mid = if l0m < cell.n {
+                let a = t - 2 * cell.kod;
+                Some(
+                    self.data
+                        .d_b(cell.s, cell.k, a)
+                        .mul(&self.mid.range_bracket(cell, l0m)),
+                )
+            } else {
+                None
+            };
+            [self.deep.single_at(cell.n), mid, small]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| a.add(&b))
+        } else {
+            None
+        };
+        match (classic, full_mid) {
+            (Some(c), Some(f)) => Ok(Lg {
+                lo: if f.lo < c.lo { f.lo } else { c.lo },
+                hi: if f.hi < c.hi { f.hi } else { c.hi },
+            }),
+            (Some(c), None) => Ok(c),
+            (None, Some(f)) => Ok(f),
+            (None, None) => Err(Error::Unsupported(format!(
                 "no charge covers cell ({}, {}, {t})",
                 cell.s, cell.k
-            ))
-        })
+            ))),
+        }
     }
 }
 
@@ -1151,28 +1344,20 @@ mod tests {
         let prof = step(&base, &BTreeSet::from([k]), &TrivialInterface, u64::MAX).expect("step");
         for t in r..=s {
             let lmin = t.saturating_sub(n);
-            let mut exact = Rational::new();
-            for _l in lmin.max(lstar)..=n {
-                // base values: C(8, 4) vs C(8, 3), max is C(8, 4) = 70
-                exact += Rational::from(binom(n, kev).max(binom(n, kod)));
-            }
-            if lmin.max(kod) < lstar {
-                let a = t - 2 * kod;
-                let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
-                for l in lmin.max(kod)..lstar {
-                    exact += db.clone() / Rational::from(binom(l, kod));
-                }
-            }
+            let mut small = Rational::new();
             for l in lmin..kod {
                 // the corrected trivial D_c: full stratum by
                 // configurations, 2^h C(n, l') C(n - l', h) with
                 // l' = l on the rung (r = n here)
                 let h = (r - 2 * l) as u32;
                 let dc = (Integer::from(1) << h) * binom(n, l) * binom(n - l, r - 2 * l);
-                exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
+                let cut = Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
+                small += graded_min(cut, s, k, n, l, t);
             }
-            // the profile is the master's RHS clamped by the analytic
-            // brackets at this level (unfloored ratios) — mirror them
+            let chan = binom(n, kev).max(binom(n, kod));
+            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
+            // the profile is the candidate-min RHS clamped by the
+            // analytic brackets (unfloored ratios) — mirror them
             let mut clamps = vec![
                 Rational::from(binom(s, k)),
                 Rational::from((binom(s, k + 1), binom(t, k + 1))),
@@ -1184,21 +1369,23 @@ mod tests {
                 )));
             }
             for c in clamps {
-                if c < exact {
-                    exact = c;
+                if c < want_lo {
+                    want_lo = c.clone();
+                }
+                if c < want_hi {
+                    want_hi = c;
                 }
             }
             let got = prof.eval(k, t).expect("in domain");
-            let want = exact.to_f64().log2();
             let lo = got.lo.to_f64_round(Round::Down);
             let hi = got.hi.to_f64_round(Round::Up);
-            // `want` is itself a two-rounding f64 approximation of the
-            // exact rational, so compare with an ulp-scale tolerance
+            let (wl, wh) = (want_lo.to_f64().log2(), want_hi.to_f64().log2());
+            // endpoint mirror: the computed bracket must match the
+            // mirrored lo/hi forms to rounding tolerance
             assert!(
-                lo <= want + 1e-12 && want <= hi + 1e-12,
-                "t = {t}: [{lo}, {hi}] vs exact {want}"
+                (lo - wl).abs() < 1e-9 && (hi - wh).abs() < 1e-9,
+                "t = {t}: [{lo}, {hi}] vs mirror [{wl}, {wh}]"
             );
-            assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
         }
     }
 
@@ -1220,17 +1407,7 @@ mod tests {
         let prof = step(&base, &BTreeSet::from([k]), &data, u64::MAX).expect("step");
         for t in r..=s {
             let lmin = t.saturating_sub(n);
-            let mut exact = Rational::new();
-            for _l in lmin.max(lstar)..=n {
-                exact += Rational::from(binom(n, kev).max(binom(n, kod)));
-            }
-            if lmin.max(kod) < lstar {
-                let a = t - 2 * kod;
-                let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
-                for l in lmin.max(kod)..lstar {
-                    exact += db.clone() / Rational::from(binom(l, kod));
-                }
-            }
+            let mut small = Rational::new();
             for l in lmin..kod {
                 // the shower D_c, mirrored: r = n here (on the rung),
                 // so l' = l and h = r - 2l
@@ -1245,8 +1422,11 @@ mod tests {
                 };
                 let dc =
                     (Integer::from(1) << (h - 1) as u32) * (binom(n, l) * &halves + jbar * &halves);
-                exact += Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
+                let cut = Rational::from((dc, binom(t - 2 * l, r - 2 * l)));
+                small += graded_min(cut, s, k, n, l, t);
             }
+            let chan = binom(n, kev).max(binom(n, kod));
+            let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
             let mut clamps = vec![
                 Rational::from(binom(s, k)),
                 Rational::from((binom(s, k + 1), binom(t, k + 1))),
@@ -1258,20 +1438,111 @@ mod tests {
                 )));
             }
             for c in clamps {
-                if c < exact {
-                    exact = c;
+                if c < want_lo {
+                    want_lo = c.clone();
+                }
+                if c < want_hi {
+                    want_hi = c;
                 }
             }
             let got = prof.eval(k, t).expect("in domain");
-            let want = exact.to_f64().log2();
             let lo = got.lo.to_f64_round(Round::Down);
             let hi = got.hi.to_f64_round(Round::Up);
+            let (wl, wh) = (want_lo.to_f64().log2(), want_hi.to_f64().log2());
             assert!(
-                lo <= want + 1e-12 && want <= hi + 1e-12,
-                "t = {t}: [{lo}, {hi}] vs exact {want}"
+                (lo - wl).abs() < 1e-9 && (hi - wh).abs() < 1e-9,
+                "t = {t}: [{lo}, {hi}] vs mirror [{wl}, {wh}]"
             );
-            assert!(hi - lo < 0.01, "t = {t}: bracket too wide");
         }
+    }
+
+    /// Exact-rational mirror of the candidate-min right-hand side:
+    /// the classic (lambda = l*) candidate is tight; the extended
+    /// (lambda = n) candidate carries the deliberately loose
+    /// [first-term, telescope] mid bracket, so the mirror returns
+    /// separate lo/hi forms. `small` is the (already graded-min'd)
+    /// small-strata sum, shared by both candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn rhs_mirror(
+        small: &Rational,
+        chan: &Integer,
+        s: u64,
+        n: u64,
+        kod: u64,
+        lstar: u64,
+        t: u64,
+    ) -> (Rational, Rational) {
+        let lmin = t.saturating_sub(n);
+        // classic candidate (tight)
+        let mut classic = small.clone();
+        let l0 = lmin.max(lstar);
+        if l0 <= n {
+            let sum_form = Rational::from(chan.clone()) * Rational::from(n - l0 + 1);
+            let single = Rational::from(chan.clone()) * Rational::from(2);
+            classic += sum_form.min(single);
+        }
+        if lmin.max(kod) < lstar {
+            let a = t - 2 * kod;
+            let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
+            for l in lmin.max(kod)..lstar {
+                classic += db.clone() / Rational::from(binom(l, kod));
+            }
+        }
+        // extended candidate (lambda = n): deep = fully-paired class
+        // only; mid = [first term, telescope] times d_b
+        let mut ext_lo = small.clone() + Rational::from(chan.clone()) * Rational::from(2);
+        let mut ext_hi = ext_lo.clone();
+        let l0m = lmin.max(kod);
+        if l0m < n {
+            let a = t - 2 * kod;
+            let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
+            ext_lo += db.clone() / Rational::from(binom(l0m, kod));
+            ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
+                / Rational::from(binom(l0m - 1, kod - 1));
+        }
+        (classic.clone().min(ext_lo), classic.min(ext_hi))
+    }
+
+    /// Oracle mirror of the graded min-term: the cut term min'd with
+    /// `C(n, l)` (default `d_r`) times the exact-rational
+    /// derived-Johnson multiplicity, under the same validity and
+    /// monotonicity gates as [`derived_johnson`].
+    fn graded_min(cut: Rational, s: u64, k: u64, n: u64, l: u64, t: u64) -> Rational {
+        let (kp, n_av, m) = (k - 2 * l, s - 2 * l, t - 2 * l);
+        if kp == 0 || m * m <= n_av * (kp - 1) || m < 2 * (kp - 1) || m < kp {
+            return cut;
+        }
+        let j = Rational::from((
+            Integer::from(n_av * (m - kp + 1)),
+            Integer::from(m * m - n_av * (kp - 1)),
+        ));
+        let graded = Rational::from(binom(n, l)) * j;
+        cut.min(graded)
+    }
+
+    /// The graded face pins: the rigidity provider's `d_r` caps at
+    /// the graded surplus (`m - k' = t - k`, l-independent), and the
+    /// default `d_r` counts every core.
+    #[test]
+    fn graded_face_pins() {
+        let rig = RigidityInterface::new(8);
+        // (32,15): l = 5, m = 7 -> k' = 5, surplus 2 <= 8: all cores
+        let v = rig.d_r(32, 15, 5, 7).expect("within cap");
+        assert!((v.hi.to_f64() - (4368f64).log2()).abs() < 1e-9);
+        // surplus 9 > 8: at most one realized core
+        let v = rig.d_r(32, 15, 5, 14).expect("capped");
+        assert!(v.hi.to_f64() < 1e-9);
+        // default d_r: every l-subset
+        let v = TrivialInterface.d_r(32, 15, 3, 100).expect("default");
+        assert!((v.hi.to_f64() - (560f64).log2()).abs() < 1e-9);
+        // derived_johnson: valid + monotone-safe region only
+        assert!(derived_johnson(32, 15, 5, 7).is_none()); // 49 <= 88
+        let j = derived_johnson(32, 15, 7, 15).expect("k'=1 always valid");
+        assert!((j.hi.to_f64() - (18f64 * 15.0 / 225.0).log2()).abs() < 1e-9);
+        // quadratic-valid but monotone-unsafe: (16,7) l = 0, m = 10:
+        // 100 > 96 yet m < 2(k'-1) = 12 — gated; m = 12 admits
+        assert!(derived_johnson(16, 7, 0, 10).is_none());
+        assert!(derived_johnson(16, 7, 0, 12).is_some());
     }
 
     /// The provider pins: the shower `D_c` reproduces the word-free

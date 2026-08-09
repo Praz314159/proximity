@@ -73,10 +73,11 @@ fn check_domain(n: u64, k: u64) -> Result<()> {
     Ok(())
 }
 
-/// Relative minimum distance `1 - (k - 1)/n` (capacity radius).
+/// Relative minimum distance `1 - (k - 1)/n` — delegates to the
+/// code layer's single implementation.
 #[must_use]
 pub fn capacity_radius(n: u64, k: u64) -> f64 {
-    1.0 - (k as f64 - 1.0) / n as f64
+    crate::rs::code::capacity_radius(n as usize, k as usize)
 }
 
 /// Binary entropy `H2(x)` in bits.

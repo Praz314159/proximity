@@ -1019,7 +1019,7 @@ mod tests {
             badset_from_gpu_json(&[tmp.to_str().unwrap().into()], 16, 8, None).unwrap();
         // mass invariant: sum_w counts = C(8,w) * 2^w
         for w in 1..=8usize {
-            let expect = binom(8, w) * (1u64 << w);
+            let expect = crate::field::binom(8, w as u64) * (1u64 << w);
             assert_eq!(stats.mass_by_weight[w], expect, "mass at w={w}");
         }
         let reference = bad_set(16, 8, 1).unwrap();
@@ -1062,7 +1062,10 @@ mod tests {
         }
         let (rows, stats) = badset_from_gpu_json(&[prefix.to_string()], 16, 8, None).unwrap();
         for w in 1..=8usize {
-            assert_eq!(stats.mass_by_weight[w], binom(8, w) * (1u64 << w));
+            assert_eq!(
+                stats.mass_by_weight[w],
+                crate::field::binom(8, w as u64) * (1u64 << w)
+            );
         }
         let reference = bad_set(16, 8, 1).unwrap();
         assert_eq!(rows.len(), reference.len());
@@ -1140,13 +1143,5 @@ mod tests {
     fn missing_file_is_io_error() {
         let r = badset_from_gpu_json(&["/nonexistent/vanish_test.json".into()], 16, 8, None);
         assert!(matches!(r, Err(crate::Error::Io { .. })));
-    }
-
-    fn binom(n: u64, k: usize) -> u64 {
-        let mut r = 1u64;
-        for i in 0..k as u64 {
-            r = r * (n - i) / (i + 1);
-        }
-        r
     }
 }

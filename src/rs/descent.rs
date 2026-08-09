@@ -41,6 +41,15 @@ use crate::rs::linalg::dd;
 use crate::rs::vs::VsSpace;
 use rayon::prelude::*;
 
+/// The fold's dimension split: degree-below-`k` polynomials decompose
+/// into even and odd channel parts of dimensions `ceil(k/2)` and
+/// `floor(k/2)`. One operation, one implementation — [`Descent`]'s
+/// accessors and the soundness envelope both read it from here.
+#[must_use]
+pub fn channel_dims(k: usize) -> (usize, usize) {
+    (k.div_ceil(2), k / 2)
+}
+
 /// Fiber statistics of a derived word over its available points.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PsiStats {
@@ -109,12 +118,12 @@ impl Descent {
     /// Even channel dimension `ceil(k / 2)`.
     #[must_use]
     pub fn k_even(&self) -> usize {
-        self.vs.k().div_ceil(2)
+        channel_dims(self.vs.k()).0
     }
     /// Odd channel dimension `floor(k / 2)` — the core size.
     #[must_use]
     pub fn k_odd(&self) -> usize {
-        self.vs.k() / 2
+        channel_dims(self.vs.k()).1
     }
     /// The half domain, in the channel-word convention
     /// (`half_points[j] = dom[2j]`).

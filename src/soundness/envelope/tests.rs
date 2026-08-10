@@ -186,9 +186,10 @@ fn graded_face_pins() {
     // (32,15): l = 5, m = 7 -> k' = 5, surplus 2 <= 8: all cores
     let v = rig.d_r(32, 15, 5, 7).expect("within cap");
     assert!((v.hi.to_f64() - (4368f64).log2()).abs() < 1e-9);
-    // surplus 9 > 8: at most one realized core
-    let v = rig.d_r(32, 15, 5, 14).expect("capped");
-    assert!(v.hi.to_f64() < 1e-9);
+    // surplus 9 > 8: ZERO realized cores — the emptiness form
+    // (issue #65): None, and the sup empties with it
+    assert!(rig.d_r(32, 15, 5, 14).is_none());
+    assert!(rig.d_r_sup(32, 15, 6, 15 + 9).is_none());
     // default d_r: every l-subset
     let v = TrivialInterface.d_r(32, 15, 3, 100).expect("default");
     assert!((v.hi.to_f64() - (560f64).log2()).abs() < 1e-9);

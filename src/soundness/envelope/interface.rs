@@ -44,19 +44,31 @@ pub trait Interface: Sync {
     /// Bound on the number of REALIZED partial cores at stratum `l`:
     /// `l`-subsets `Y` of the slots whose rank-`(k - 2l)` derived
     /// list at agreement `>= m` is nonempty (gate_graded_pencils,
-    /// Lemma D) — the graded interface datum. Must hold for every
-    /// word and be non-increasing in `m`. The default counts every
-    /// `l`-subset — word-free and weak; the graded-rigidity
-    /// hypothesis sharpens it. The charge multiplies this by the
-    /// derived-Johnson multiplicity (Lemma J, a theorem), so `d_r`
-    /// carries the entire hypothesis content of the graded route.
+    /// Lemma D) — the graded interface datum. `None` asserts the
+    /// count is PROVABLY ZERO — which a log-domain bracket cannot
+    /// express — and hence, since every class member realizes its
+    /// own fiber set (the graded charge's decomposition,
+    /// unconditional), that the class at `(l, m)` is EMPTY: the
+    /// charge consumes this with no multiplicity factor and no
+    /// derived-Johnson validity condition (issue #65; the emptiness
+    /// form crosses the coverage curve). Must hold for every word,
+    /// and be non-increasing in `m` (`None` = bottom, so
+    /// empty-beyond-a-surplus is monotone-safe). The default counts
+    /// every `l`-subset — word-free and weak; the graded-rigidity
+    /// hypothesis sharpens it. Where the count is positive, the
+    /// charge multiplies it by the derived-Johnson multiplicity
+    /// (Lemma J, a theorem), so `d_r` carries the entire hypothesis
+    /// content of the graded route.
     fn d_r(&self, s: u64, _k: u64, l: u64, _m: u64) -> Option<Lg> {
         Some(lg_binom(s / 2, l))
     }
     /// Bound on `max(d_r(l', t - 2 l'))` over `l' <= l` — the graded
-    /// tail's numerator. The default covers the default `d_r` (every
-    /// `l'`-subset; the prefix max of `C(s/2, ·)` peaks at `s/4`).
-    /// Must be non-increasing in `t` at fixed `l`.
+    /// tail's numerator. `None` asserts every stratum up to `l` has
+    /// provably zero realized cores at threshold `t` (all their
+    /// classes empty — the tail vanishes outright). The default
+    /// covers the default `d_r` (every `l'`-subset; the prefix max
+    /// of `C(s/2, ·)` peaks at `s/4`). Must be non-increasing in
+    /// `t` at fixed `l`.
     fn d_r_sup(&self, s: u64, _k: u64, l: u64, _t: u64) -> Option<Lg> {
         Some(lg_binom(s / 2, l.min(s / 4)))
     }
@@ -309,23 +321,28 @@ impl Interface for RigidityInterface {
     /// The graded face of the same hypothesis: a realized partial
     /// core at stratum `l` demands derived agreement `m` on a
     /// rank-`k' = k - 2l` family, i.e. graded surplus `m - k'` —
-    /// which equals `t - k`, INDEPENDENT of `l` (measured at the
-    /// record cell: every populated stratum sits at graded surplus
-    /// 2). The hypothesis caps it: beyond `a_max`, at most one
-    /// realized core per stratum; within the cap, all cores allowed.
+    /// which equals `t - k`, INDEPENDENT of `l` (the witness
+    /// identity; measured at the record cell: every populated
+    /// stratum sits at graded surplus 2). The hypothesis empties it:
+    /// beyond `a_max`, ZERO realized cores (the census measures
+    /// zero, not few, at every cell and stratum), expressed as
+    /// `None` — the emptiness form of the charge, which needs no
+    /// derived-Johnson factor (issue #65). Within the cap, all
+    /// cores allowed.
     fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
         let kp = k - 2 * l;
         if m.saturating_sub(kp) > self.a_max {
-            return Some(Lg::zero()); // at most one realized core
+            return None; // zero realized cores: the class is empty
         }
         Some(lg_binom(s / 2, l))
     }
 
     /// Beyond the cap the graded surplus `t - k` (l-independent)
-    /// caps every stratum's realized cores at one, so the sup is one.
+    /// empties every stratum's realized cores at once, so the sup
+    /// is `None` and the small-strata tail vanishes outright.
     fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
         if t.saturating_sub(k) > self.a_max {
-            return Some(Lg::zero());
+            return None;
         }
         Some(lg_binom(s / 2, l.min(s / 4)))
     }

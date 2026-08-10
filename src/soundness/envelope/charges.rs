@@ -297,18 +297,31 @@ impl CutCharge {
             let cut_term = self
                 .dc(cell, data, l)
                 .map(|dc| dc.div(&lg_binom(t - 2 * l, r - 2 * l)));
-            // the graded route (Lemma D + Lemma J): realized cores
-            // times the derived-Johnson multiplicity, where the
+            // the graded route (Lemma D + Lemma J). The decomposition
+            // is unconditional — every class member realizes its own
+            // fiber set — so a provider asserting ZERO realized cores
+            // (d_r = None) empties the class outright, with no
+            // multiplicity factor and hence no derived-Johnson
+            // validity condition (issue #65: the emptiness form
+            // crosses the coverage curve). Where the count is
+            // positive, multiply by the Johnson factor where the
             // theorem applies; a pointwise min of valid bounds is a
-            // valid bound, and both branches are non-increasing in t
-            let graded_term = derived_johnson(cell.s, cell.k, l, t - 2 * l)
-                .and_then(|j| data.d_r(cell.s, cell.k, l, t - 2 * l).map(|rr| rr.mul(&j)));
-            // an empty stratum (cut face None) means the class is
-            // empty outright — the graded term must not resurrect it
-            let term = match (cut_term, graded_term) {
-                (Some(c), Some(g)) => Some(c.min(&g)),
-                (Some(c), None) => Some(c),
-                (None, _) => None,
+            // valid bound, and every branch is non-increasing in t.
+            let term = match data.d_r(cell.s, cell.k, l, t - 2 * l) {
+                // zero realized cores: the class at (l, t) is empty
+                None => None,
+                Some(rr) => {
+                    let graded_term =
+                        derived_johnson(cell.s, cell.k, l, t - 2 * l).map(|j| rr.mul(&j));
+                    // an empty stratum (cut face None) means the
+                    // class is empty outright — the graded term must
+                    // not resurrect it
+                    match (cut_term, graded_term) {
+                        (Some(c), Some(g)) => Some(c.min(&g)),
+                        (Some(c), None) => Some(c),
+                        (None, _) => None,
+                    }
+                }
             };
             if let Some(term) = term {
                 acc = Some(add_to(acc, term));
@@ -317,7 +330,14 @@ impl CutCharge {
                 break;
             }
             // a provider that certifies everything below `l` empty
-            // closes the sum exactly — no tail term at all
+            // closes the sum exactly — no tail term at all: either
+            // through the cut face (d_c_sup = None) or through the
+            // graded face (d_r_sup = None: zero realized cores at
+            // every remaining stratum, so every remaining class is
+            // empty by the unconditional decomposition)
+            if data.d_r_sup(cell.s, cell.k, l - 1, t).is_none() {
+                break;
+            }
             let Some(sup) = self.dc_sup(cell, data, l - 1) else {
                 break;
             };

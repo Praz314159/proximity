@@ -283,6 +283,118 @@ impl Interface for ShowerInterface {
     }
 }
 
+/// The star-maximum cut face — UNCONDITIONAL and EXACT. The
+/// per-stratum star-maximum theorem (STAR-MAXIMUM-GENERAL.md,
+/// SPLICE rounds 5-9; gates star_maximum / stratum_rate /
+/// secant_general) evaluates the word-free stratum supremum in
+/// closed form: with `(np, h, lp)` the stratum geometry,
+///
+/// `D_c(l) = sup_b |Z^(l)(b)|
+///         = 2^h C(np-1, lp-1) C(np-lp, h)
+///           + 2^(h-1) C(np-1, lp) C(np-lp-1, h-1)`
+///
+/// (Pascal's identity absorbs the subtraction in the raw form),
+/// equal to `(k+1)/s` times the full stratum — the stratum-uniform
+/// rate law. The supremum is ATTAINED (by the point-divisor
+/// syndromes, the same word at every stratum simultaneously), so
+/// this is the exact worst case, not merely a bound; and the
+/// theorem is field-uniform — valid at every prime `p = 1 mod s`
+/// with no accident hypotheses. `D_b` remains the unconditional
+/// pencil-disjointness bound: this provider sharpens (to exactness)
+/// only the cut face.
+pub struct StarInterface {
+    sup: SupCache,
+}
+
+impl StarInterface {
+    /// A provider with an empty supremum cache; the first tower
+    /// assembly at each `(s, k)` fills it.
+    #[must_use]
+    pub fn new() -> Self {
+        StarInterface {
+            sup: std::sync::Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl Default for StarInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The star-maximum stratum supremum `2^h C(np-1,lp-1) C(np-lp,h)
+/// + 2^(h-1) C(np-1,lp) C(np-lp-1,h-1)`; the `lp = 0` stratum has
+/// no core face and keeps only the point term
+/// `2^(h-1) C(np-1, h-1)`; the `h = 0` stratum (outside the d_c
+/// domain at odd `k`, kept for completeness) is Lemma B alone:
+/// `C(np-1, lp-1)`.
+fn star_d_c(np: u64, h: u64, lp: u64, binom: &dyn Fn(u64, u64) -> Lg) -> Lg {
+    if h == 0 {
+        return if lp == 0 {
+            Lg::from_u64(1)
+        } else {
+            binom(np - 1, lp - 1)
+        };
+    }
+    let point = Lg::from_u64(2)
+        .pow(h - 1)
+        .mul(&binom(np - 1, lp))
+        .mul(&binom(np - lp - 1, h - 1));
+    if lp == 0 {
+        // C(np-1, lp) = 1 and C(np-lp-1, h-1) = C(np-1, h-1)
+        return point;
+    }
+    let star = Lg::from_u64(2)
+        .pow(h)
+        .mul(&binom(np - 1, lp - 1))
+        .mul(&binom(np - lp, h));
+    star.add(&point)
+}
+
+impl Interface for StarInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        TrivialInterface.d_b(s, k, a)
+    }
+
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let (np, h, lp) = stratum_geometry(s, k, l)?;
+        Some(star_d_c(np, h, lp, &lg_binom))
+    }
+
+    /// Precondition: `l < k/2` — matching the trait's stated `d_c`
+    /// domain (same as the shower provider).
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let kod = k / 2;
+        assert!(
+            l < kod,
+            "d_c_sup asked at l = {l} outside the small-strata range \
+             [0, {kod}) of k = {k}"
+        );
+        let mut cache = self
+            .sup
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prefix = cache.entry((s, k)).or_insert_with(|| {
+            let np = s / 2;
+            let facts = LgFactorials::new(np);
+            let binom = |n: u64, kk: u64| -> Lg { facts.binom(n, kk) };
+            let vals: Vec<Option<Lg>> = (0..kod)
+                .into_par_iter()
+                .map(|lp| {
+                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| star_d_c(np, h, lpp, &binom))
+                })
+                .collect();
+            prefix_max_by_hi(vals.into_iter())
+                .into_iter()
+                .map(|v| v.as_ref().map(store))
+                .collect()
+        });
+        let (lo, hi) = prefix[l as usize]?;
+        Some(Lg::from_f64_bracket(lo, hi))
+    }
+}
+
 /// The bucket-rigidity interface — CONDITIONAL. The cut face is the
 /// unconditional [`ShowerInterface`]; the middle face is the
 /// program's single external hypothesis in interface form, the

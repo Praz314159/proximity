@@ -55,7 +55,7 @@ mod tests;
 
 pub use base::{analytic_base, interpolation_base};
 pub use charges::channel_dims;
-pub use interface::{Interface, RigidityInterface, ShowerInterface, TrivialInterface};
+pub use interface::{Interface, RigidityInterface, ShowerInterface, StarInterface, TrivialInterface};
 pub use profile::{Profile, DEFAULT_RESOLUTION};
 
 use base::analytic_brackets;

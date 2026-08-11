@@ -390,3 +390,103 @@ fn small_strata_truncation_smoke() {
         assert!(v.hi >= v.lo);
     }
 }
+
+/// The star-maximum provider: exact sup pins at the audited cells
+/// (the stratum_sweep / gate_stratum_rate numbers), dominance under
+/// the shower bound, the rate law against the trivial face, and
+/// soundness against measured strata. This is the calibration leg:
+/// the closed forms must reproduce the audited numbers EXACTLY.
+#[test]
+fn star_provider_pins() {
+    let st = StarInterface::new();
+    let sh = ShowerInterface::new();
+    // (16,7): strata l = 0,1,2 <-> (lp,h) = (0,8),(1,6),(2,4);
+    // audited sups 128, 1792, 3360 (gate_stratum_rate, both primes)
+    for (l, sup) in [(0u64, 128f64), (1, 1792.0), (2, 3360.0)] {
+        let got = st.d_c(16, 7, l).expect("nonempty").hi.to_f64();
+        assert!(
+            (got - sup.log2()).abs() < 1e-9,
+            "l = {l}: got 2^{got}, want {sup}"
+        );
+    }
+    // (32,15): l = 6 <-> (lp,h) = (6,4):
+    // 2^4 C(15,5) C(10,4) + 2^3 C(15,6) C(9,3) = 13,453,440
+    let want = (13_453_440f64).log2();
+    assert!((st.d_c(32, 15, 6).expect("nonempty").hi.to_f64() - want).abs() < 1e-9);
+    // star <= shower at every queried stratum (both cells): the
+    // exact sup can never exceed the shower bound
+    for l in 0..3 {
+        assert!(
+            st.d_c(16, 7, l).expect("s").hi.to_f64()
+                <= sh.d_c(16, 7, l).expect("s").hi.to_f64() + 1e-9
+        );
+    }
+    for l in 0..7 {
+        assert!(
+            st.d_c(32, 15, l).expect("s").hi.to_f64()
+                <= sh.d_c(32, 15, l).expect("s").hi.to_f64() + 1e-9
+        );
+    }
+    // the stratum-uniform rate law: star = (k+1)/s * trivial, i.e.
+    // exactly half at rate-1/2 cells
+    for l in 0..7 {
+        let tv = TrivialInterface.d_c(32, 15, l).expect("s").hi.to_f64();
+        let stv = st.d_c(32, 15, l).expect("s").hi.to_f64();
+        assert!((stv - (tv - 1.0)).abs() < 1e-9, "l = {l}");
+    }
+    // soundness against measured strata at (16,7), top word
+    for (l, meas) in [(1u64, 256f64), (2, 416.0)] {
+        assert!(st.d_c(16, 7, l).expect("s").hi.to_f64() >= meas.log2());
+    }
+    // sup face: prefix maximum never below pointwise
+    for l in 0..7 {
+        assert!(
+            st.d_c_sup(32, 15, l).expect("s").hi
+                >= st.d_c(32, 15, l).expect("s").hi
+        );
+    }
+}
+
+/// The star tower at the record cell: assembles, dominates the
+/// measured record 2674 at (32,15,17), and its ceiling face is
+/// nowhere above the shower tower's (the exact sup sharpens, never
+/// weakens).
+#[test]
+fn star_tower_dominates_and_sharpens() {
+    let star = assemble(32, 15, 8, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    let record = (2674f64).log2();
+    let at = star.eval(15, 17).expect("in domain");
+    assert!(at.lo.to_f64_round(Round::Down) >= record);
+    let shower = assemble(32, 15, 8, &ShowerInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    for t in 16..=32 {
+        let s_ = star.eval(15, t).expect("in domain");
+        let h_ = shower.eval(15, t).expect("in domain");
+        assert!(
+            s_.hi.to_f64_round(Round::Up) <= h_.hi.to_f64_round(Round::Up) + 1e-6,
+            "t = {t}: star must not exceed shower"
+        );
+    }
+}
+
+/// The reduced-box pinch with the star face: the certified radius
+/// exists and is at least the trivial tower's — the provable data
+/// provider moves the ceiling the right way at the box.
+#[test]
+fn star_ceiling_at_reduced_box() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let base = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
+    let star = assemble(total, k, 64, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    let row_of = |prof: &Profile| {
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .expect("a positive ceiling")
+    };
+    let zb = row_of(&base).z_star;
+    let zs = row_of(&star).z_star;
+    assert!(zs >= zb, "star z* = {zs} < trivial z* = {zb}");
+    println!("reduced box z*: trivial {zb}, star {zs}");
+}

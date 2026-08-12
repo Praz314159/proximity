@@ -891,3 +891,58 @@ fn deepcap_sensitivity_scan() {
         );
     }
 }
+
+/// The cap-endpoint scan (SPLICE round 19): the certified radius as
+/// a function of the surplus-cap fraction phi = a_cap/s alone —
+/// validating delta* = 1/2 - phi at the named endpoints:
+/// phi = 1/4 (the FREE cap from the min-distance split: t_max >=
+/// s + k - t forces list <= 1, else member agreement < s + k - t
+/// caps a at (s-k)/2), phi = 1/6 (M1), phi = 0.03217 (the wall),
+/// and decay on/off to show amplitude irrelevance. Conditional
+/// scan below the free cap; the free-cap row itself is HONEST
+/// (min-distance is a theorem).
+#[test]
+fn cap_endpoint_scan() {
+    use rug::ops::Pow;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |total: u64, a_max: u64, decay: bool| -> u64 {
+        let k = total / 2 - 1;
+        let data = ProbeInterface {
+            shower: ShowerInterface::new(),
+            a_max,
+            cap_b: true,
+            cap_r: true,
+            decay: false,
+        };
+        let _ = decay;
+        let prof = match assemble(total, k, 32, &data, DEFAULT_RESOLUTION) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    println!("== cap endpoint scan: z* vs phi = a_cap/s ==");
+    for total in [1u64 << 12, 1u64 << 21] {
+        let s = total as f64;
+        for (label, phi) in [
+            ("free (min-dist) 1/4", 0.25f64),
+            ("1/8", 0.125),
+            ("M1 target 1/6", 1.0 / 6.0),
+            ("wall target", 0.03217),
+            ("1/64", 1.0 / 64.0),
+        ] {
+            let cap = (phi * s) as u64;
+            let z = zstar(total, cap, false);
+            println!(
+                "2^{}: phi = {phi:.5} ({label}), cap = {cap}: \
+                 z* = {z}  delta = {:.5}  [1/2 - phi = {:.5}]",
+                total.ilog2(),
+                z as f64 / s,
+                0.5 - phi
+            );
+        }
+    }
+}

@@ -36,6 +36,21 @@ pub trait Interface: Sync {
     /// invalidates every off-grid bracket at coarse resolution, so
     /// the contract cannot be discharged by the guard alone.
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg;
+    /// PER-STRATUM form of the middle-band datum: a bound on the
+    /// number of family members with EXACTLY `l` pairs at surplus
+    /// `a`. The default is the ownership division of [`d_b`] — the
+    /// identity `sum_Y N_Y(t) = sum_f C(pairs(f), kod)` says a
+    /// member with `l` pairs is counted `C(l, kod)` times, so
+    /// `d_b / C(l, kod)` bounds how many such members there are —
+    /// which reproduces the aggregate charge exactly. Providers
+    /// override it to price the SPECIES separately: `l = kod` is the
+    /// pair-poor face (the capacity theorem's object, weight one
+    /// each) and `l > kod` the pair-rich face (weight `C(l, kod)`,
+    /// where the mass sits, and the class Transport recurses).
+    /// Must be non-increasing in `a` for the same reason `d_b` is.
+    fn d_b_at(&self, s: u64, k: u64, l: u64, a: u64) -> Lg {
+        self.d_b(s, k, a).div(&lg_binom(l, k / 2))
+    }
     /// Bound on the cut stratum `|Z^(l)(b)|` at pair count
     /// `l < k/2`, valid for every word at the level. `None` asserts
     /// the stratum is PROVABLY EMPTY (no geometry admits a member) —
@@ -514,5 +529,92 @@ impl Interface for RigidityInterface {
 
     fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
         self.shower.d_c_sup(s, k, l)
+    }
+}
+
+/// The SPECIES-SPLIT middle face (SPLICE round 19m) — a PROBE, not
+/// a theorem. The (32,15) measurement showed the middle-band datum
+/// is a multiplicity-weighted count whose mass sits on PAIR-RICH
+/// members: at threshold 18 the charge is 400, of which ten
+/// nine-pair members contribute 360 and the forty pair-poor ones
+/// contribute 40. The two species have different mechanisms —
+/// pair-poor is the capacity theorem's object, pair-rich transports
+/// — so this provider prices them separately and the scan asks
+/// which one the gauge actually responds to.
+///
+/// Cut face: the exact [`StarInterface`]. Pair-rich strata
+/// (`l > kod`): the unconditional pigeonhole with an optional
+/// emptiness cap. Pair-poor stratum (`l = kod`): a free parameter
+/// (`poor_lg` bits, empty past `poor_cap`) — the knob the deep
+/// capacity theorem would have to fill.
+pub struct SpeciesInterface {
+    star: StarInterface,
+    /// log2 of the pair-poor bound (the `l = kod` stratum).
+    pub poor_lg: f64,
+    /// Surplus past which the PAIR-POOR face is empty.
+    pub poor_cap: u64,
+    /// Surplus past which the PAIR-RICH face is empty (`None` =
+    /// never: the unconditional pigeonhole all the way up).
+    pub rich_cap: Option<u64>,
+}
+
+impl SpeciesInterface {
+    #[must_use]
+    pub fn new(poor_lg: f64, poor_cap: u64, rich_cap: Option<u64>) -> Self {
+        SpeciesInterface {
+            star: StarInterface::new(),
+            poor_lg,
+            poor_cap,
+            rich_cap,
+        }
+    }
+}
+
+impl Interface for SpeciesInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        // the aggregate (used only by the charge's far tail): the
+        // unconditional pigeonhole, emptied past the rich cap
+        if self.rich_cap.is_some_and(|c| a > c) {
+            return Lg::zero();
+        }
+        TrivialInterface.d_b(s, k, a)
+    }
+
+    fn d_b_at(&self, s: u64, k: u64, l: u64, a: u64) -> Lg {
+        let kod = k / 2;
+        if l == kod {
+            // the pair-poor face: weight one per member
+            if a > self.poor_cap {
+                return Lg::zero();
+            }
+            return Lg::from_f64_bracket(self.poor_lg, self.poor_lg);
+        }
+        // the pair-rich face: ownership division of the aggregate
+        self.d_b(s, k, a).div(&lg_binom(l, kod))
+    }
+
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        let kp = k - 2 * l;
+        let a = m.saturating_sub(kp);
+        if self.rich_cap.is_some_and(|c| a > c) && a > self.poor_cap {
+            return None;
+        }
+        Some(lg_binom_memo(s / 2, l))
+    }
+
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        let a = t.saturating_sub(k);
+        if self.rich_cap.is_some_and(|c| a > c) && a > self.poor_cap {
+            return None;
+        }
+        Some(lg_binom_memo(s / 2, l.min(s / 4)))
+    }
+
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.star.d_c(s, k, l)
+    }
+
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.star.d_c_sup(s, k, l)
     }
 }

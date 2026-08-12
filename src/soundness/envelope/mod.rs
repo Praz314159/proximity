@@ -61,7 +61,10 @@ mod tests;
 
 pub use base::{analytic_base, interpolation_base};
 pub use charges::channel_dims;
-pub use interface::{Interface, RigidityInterface, ShowerInterface, StarInterface, TrivialInterface};
+pub use interface::{
+    Interface, RigidityInterface, ShowerInterface, SpeciesInterface, StarInterface,
+    TrivialInterface,
+};
 pub use profile::{Profile, DEFAULT_RESOLUTION};
 
 use base::analytic_brackets;
@@ -89,6 +92,13 @@ struct Charges<'a> {
 }
 
 impl<'a> Charges<'a> {
+    /// How many of the lowest middle-band strata are consumed
+    /// through the per-stratum datum before the aggregate's closed
+    /// form takes over. Small: the ownership divisor `C(l, kod)`
+    /// makes higher strata negligible, and the box's `l*` is far too
+    /// large to sum term by term.
+    const SPECIES_WINDOW: u64 = 4;
+
     fn build(prev: &Profile, k: u64, data: &'a dyn Interface) -> Result<Self> {
         let cell = Cell::new(prev.n, k);
         if k < 2 || k > cell.s - 2 {
@@ -126,6 +136,18 @@ impl<'a> Charges<'a> {
     }
 
     /// Charge 2 at threshold `t`, `None` when the band is empty.
+    ///
+    /// The first [`Self::SPECIES_WINDOW`] strata are consumed through
+    /// the PER-STRATUM datum [`Interface::d_b_at`] and the rest
+    /// through the aggregate's closed form. The split is exact: with
+    /// the default `d_b_at` (the ownership division) the two forms
+    /// sum to the old single-term product, so shipped providers are
+    /// unaffected. It exists because the strata are not alike — the
+    /// dominant term is `l = kod`, where the ownership divisor is
+    /// one, and that is exactly the PAIR-POOR species; the strata
+    /// above it are pair-rich and already discounted by
+    /// `C(l, kod)`. A provider that prices the species separately
+    /// (SpeciesInterface) is read here and nowhere else.
     fn mid_at(&self, t: u64) -> Option<Lg> {
         let cell = &self.cell;
         let l0 = t.saturating_sub(cell.n).max(cell.kod);
@@ -133,11 +155,26 @@ impl<'a> Charges<'a> {
             return None;
         }
         let a = t - 2 * cell.kod;
-        Some(
-            self.data
+        let hi = (l0 + Self::SPECIES_WINDOW).min(cell.lstar);
+        let mut acc: Option<Lg> = None;
+        for l in l0..hi {
+            let term = self.data.d_b_at(cell.s, cell.k, l, a);
+            acc = Some(match acc {
+                Some(x) => x.add(&term),
+                None => term,
+            });
+        }
+        if hi < cell.lstar {
+            let tail = self
+                .data
                 .d_b(cell.s, cell.k, a)
-                .mul(&self.mid.suffix_from(cell, l0)),
-        )
+                .mul(&self.mid.suffix_from(cell, hi));
+            acc = Some(match acc {
+                Some(x) => x.add(&tail),
+                None => tail,
+            });
+        }
+        acc
     }
 
     /// [RETRACTED 2026-08-12, SPLICE round 17b] A "band collapse"

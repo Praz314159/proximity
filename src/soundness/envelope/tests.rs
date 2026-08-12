@@ -946,3 +946,51 @@ fn cap_endpoint_scan() {
         }
     }
 }
+
+/// The species-split scan (SPLICE round 19m). The (32,15)
+/// measurement: at threshold 18 the middle datum is 400, of which
+/// ten NINE-pair members contribute 360 and the forty pair-poor
+/// ones contribute 40 — the mass is pair-rich. The two species have
+/// different mechanisms, so this asks the instrument which one the
+/// gauge responds to: sweep the PAIR-POOR bound (magnitude and
+/// emptiness cap) with the pair-rich face held at the
+/// unconditional pigeonhole, then repeat with the rich face capped.
+/// If the gauge moves only when the RICH cap moves, the capacity
+/// programme is aimed at a non-binding face and Transport-style
+/// recursion for pair-rich members is the requirement.
+#[test]
+fn species_split_scan() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |data: &dyn Interface| -> u64 {
+        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    println!("== species split, reduced box (s = 2^12, k = {k}) ==");
+    println!("baseline (trivial, no split):        z* = {}", zstar(&TrivialInterface));
+    println!("-- pair-poor swept, pair-rich UNCAPPED (pigeonhole) --");
+    for (lg, cap) in [(60.0f64, 4096u64), (20.0, 4096), (0.0, 4096), (0.0, 512), (0.0, 64)] {
+        let z = zstar(&SpeciesInterface::new(lg, cap, None));
+        println!("   poor = 2^{lg:<5} up to a = {cap:<5}: z* = {z}");
+    }
+    println!("-- pair-rich CAPPED, pair-poor free (2^60, uncapped) --");
+    for rc in [4096u64, 1024, 682, 512, 131] {
+        let z = zstar(&SpeciesInterface::new(60.0, 4096, Some(rc)));
+        println!("   rich cap a <= {rc:<5}: z* = {z}   (1/2 - {:.4} => delta {:.4})",
+                 rc as f64 / total as f64, 0.5 - rc as f64 / total as f64);
+    }
+    println!("-- BOTH capped together --");
+    for c in [682u64, 512, 131] {
+        let z = zstar(&SpeciesInterface::new(0.0, c, Some(c)));
+        println!("   both caps a <= {c:<5}: z* = {z}  (delta {:.5})",
+                 z as f64 / total as f64);
+    }
+}

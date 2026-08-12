@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
-use crate::math::enclosure::{lg_binom, Lg};
+use crate::math::enclosure::{lg_binom, lg_binom_memo, Lg};
 use rug::Integer;
 
 use super::profile::{store, Profile};
@@ -132,7 +132,12 @@ fn analytic_refine(n: u64, k: u64, t: u64, best: &mut Integer) {
 /// microseconds where the exact binomials would cost million-bit
 /// integers.
 pub(super) fn analytic_brackets(n: u64, k: u64, t: u64) -> Vec<Lg> {
-    let mut out = vec![lg_binom(n, k), lg_binom(n, k + 1).div(&lg_binom(t, k + 1))];
+    // the two `(n, k)` binomials are per-level constants queried at
+    // every grid point — memoized; only `C(t, k+1)` varies with `t`
+    let mut out = vec![
+        lg_binom_memo(n, k),
+        lg_binom_memo(n, k + 1).div(&lg_binom(t, k + 1)),
+    ];
     if let Some((num, den)) = johnson_agreement(n, k, t) {
         out.push(Lg::from_integer(&Integer::from(num)).div(&Lg::from_integer(&Integer::from(den))));
     }

@@ -44,7 +44,7 @@ fn run_step_oracle(data: &dyn Interface, dc_mirror: impl Fn(u64) -> Integer) {
             small += graded_min(cut, s, k, n, l, t);
         }
         let chan = binom(n, kev).max(binom(n, kod));
-        let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
+        let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, k, kod, lstar, t);
         for c in analytic_clamps(s, k, t) {
             if c < want_lo {
                 want_lo = c.clone();
@@ -124,6 +124,7 @@ fn rhs_mirror(
     chan: &Integer,
     s: u64,
     n: u64,
+    k: u64,
     kod: u64,
     lstar: u64,
     t: u64,
@@ -132,10 +133,15 @@ fn rhs_mirror(
     // classic candidate (tight)
     let mut classic = small.clone();
     let l0 = lmin.max(lstar);
-    if l0 <= n {
+    let deep = if l0 <= n {
         let sum_form = Rational::from(chan.clone()) * Rational::from(n - l0 + 1);
         let single = Rational::from(chan.clone()) * Rational::from(2);
-        classic += sum_form.min(single);
+        Some(sum_form.min(single))
+    } else {
+        None
+    };
+    if let Some(d) = &deep {
+        classic += d.clone();
     }
     if lmin.max(kod) < lstar {
         let a = t - 2 * kod;
@@ -156,7 +162,24 @@ fn rhs_mirror(
         ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
             / Rational::from(binom(l0m - 1, kod - 1));
     }
-    (classic.clone().min(ext_lo), classic.min(ext_hi))
+    let mut want_lo = classic.clone().min(ext_lo);
+    let mut want_hi = classic.min(ext_hi);
+    // band-collapse candidate (the M1 charge): fiber fold at
+    // F0 = t - l* + 1, FT-2 tiling, twice the larger channel row
+    // (constant on the interpolation base), plus the deep charge
+    if lmin < lstar && 3 * (t + 1 - lstar) >= n + k - 1 {
+        let mut coll = Rational::from(chan.clone()) * Rational::from(2);
+        if let Some(d) = &deep {
+            coll += d.clone();
+        }
+        if coll < want_lo {
+            want_lo = coll.clone();
+        }
+        if coll < want_hi {
+            want_hi = coll;
+        }
+    }
+    (want_lo, want_hi)
 }
 
 /// Oracle mirror of the graded min-term: the cut term min'd with
@@ -490,3 +513,341 @@ fn star_ceiling_at_reduced_box() {
     assert!(zs >= zb, "star z* = {zs} < trivial z* = {zb}");
     println!("reduced box z*: trivial {zb}, star {zs}");
 }
+
+use crate::math::enclosure::{lg_binom, Lg};
+
+/// The d_b sensitivity probe (SPLICE round 11): which face of the
+/// rigidity hypothesis moves the box ceiling, and how weak a
+/// statement suffices. Modes: full rigidity at a cap, cut = shower
+/// throughout; "b-only" caps the bucket face but leaves the graded
+/// face word-free; "r-only" the reverse; "decay" is pure 2^-a decay
+/// with no cap and no emptiness. Run with --nocapture for the
+/// table; the assertions only pin the direction (weaker data can
+/// never certify a larger radius).
+struct ProbeInterface {
+    shower: ShowerInterface,
+    a_max: u64,
+    cap_b: bool,
+    cap_r: bool,
+    decay: bool,
+}
+
+impl Interface for ProbeInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        let kod = k / 2;
+        if self.decay {
+            return lg_binom(s / 2, kod).div(&Lg::from_u64(2).pow(a.min(63)));
+        }
+        if !self.cap_b {
+            return TrivialInterface.d_b(s, k, a);
+        }
+        if a > self.a_max {
+            return Lg::zero();
+        }
+        let shape = Lg::from_u64(16).div(&Lg::from_u64(2).pow(a.min(4)));
+        lg_binom(s / 2, kod).mul(&shape)
+    }
+
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        if self.cap_r && m.saturating_sub(k - 2 * l) > self.a_max {
+            return None;
+        }
+        Some(lg_binom(s / 2, l))
+    }
+
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        if self.cap_r && t.saturating_sub(k) > self.a_max {
+            return None;
+        }
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
+
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c(s, k, l)
+    }
+
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c_sup(s, k, l)
+    }
+}
+
+#[test]
+fn db_sensitivity_probe() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |data: &dyn Interface| -> u64 {
+        let prof = assemble(total, k, 64, data, DEFAULT_RESOLUTION).expect("tower");
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    let probe = |a_max: u64, cap_b: bool, cap_r: bool, decay: bool| ProbeInterface {
+        shower: ShowerInterface::new(),
+        a_max,
+        cap_b,
+        cap_r,
+        decay,
+    };
+    println!("== d_b sensitivity, reduced box (s = 2^12, budget 2^-128) ==");
+    let base = zstar(&probe(0, false, false, false));
+    println!("word-free (shower cut, trivial b/r):     z* = {base}");
+    let rig4 = zstar(&probe(4, true, true, false));
+    println!("full rigidity, cap 4 (the hypothesis):   z* = {rig4}");
+    for a in [8u64, 16, 64, 256, 1024] {
+        let z = zstar(&probe(a, true, true, false));
+        println!("full rigidity, cap {a:>4}:                 z* = {z}");
+    }
+    let bonly = zstar(&probe(4, true, false, false));
+    println!("bucket face only (cap 4, graded free):   z* = {bonly}");
+    let ronly = zstar(&probe(4, false, true, false));
+    println!("graded face only (cap 4, bucket free):   z* = {ronly}");
+    let dec = zstar(&probe(0, false, false, true));
+    println!("pure 2^-a decay, no cap, no emptiness:   z* = {dec}");
+    assert!(rig4 >= base && bonly <= rig4 && ronly <= rig4);
+}
+
+/// The FT-2 three-regime shape at the wall's constants: pinned
+/// (one per core) through shallow+band, EMPTY beyond the deep
+/// line a2 = (delta - 1/4) s at delta = 0.46783; graded face
+/// empties at the same line. Falsifiable step: does this land z*
+/// at the wall (0.468 * 4096 ~ 1916)?
+struct Ft2Interface { shower: ShowerInterface }
+impl Interface for Ft2Interface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        let a2 = (s as f64 * 0.21783) as u64;
+        if a > a2 { return Lg::zero(); }
+        lg_binom(s / 2, k / 2)
+    }
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        let a2 = (s as f64 * 0.21783) as u64;
+        if m.saturating_sub(k - 2 * l) > a2 { return None; }
+        Some(lg_binom(s / 2, l))
+    }
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        let a2 = (s as f64 * 0.21783) as u64;
+        if t.saturating_sub(k) > a2 { return None; }
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c(s, k, l)
+    }
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c_sup(s, k, l)
+    }
+}
+
+#[test]
+fn ft2_shape_probe() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let prof = assemble(total, k, 64, &Ft2Interface { shower: ShowerInterface::new() },
+        DEFAULT_RESOLUTION).expect("tower");
+    let z = crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext,
+        -128.0, |z| prof.lg_at_disagreement(k, z)).map_or(0, |r| r.z_star);
+    println!("FT-2 shape z* = {z} (wall ~ 1916, Johnson 1201, cap-law pred 1155)");
+}
+
+/// The derived provider (SPLICE rounds 12-13): d_b assembled from
+/// the three PROVEN components — {a = 1: the pair-poor capacity
+/// theorem, 2^{m-1}, bucket word} + {a >= 2 top: pigeonhole =>
+/// Transport => base certificates} + {derived strata: budget
+/// pigeonhole + derived-bucket level-set counts (the engine's
+/// per-prime census; measured die-off 88/8/0 at ell=3)}. The
+/// numerical shape at audited scale matches the measured profile
+/// (cap 4, 2^{4-a} head); what changed is its epistemic status:
+/// derived structure, not hypothesis. Runs: reduced box
+/// (calibration: must reproduce z* = 2044) and the 2^21 box.
+struct DerivedInterface { shower: ShowerInterface, a_cap: u64 }
+impl Interface for DerivedInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        if a > self.a_cap { return Lg::zero(); }
+        let kod = k / 2;
+        // a = 1: capacity term 2^{m-1} + pair-rich head;
+        // a >= 2: transported/base-certified 2^{4-a} shape
+        let head = Lg::from_u64(16).div(&Lg::from_u64(2).pow(a.min(4)));
+        let rig = lg_binom(s / 2, kod).mul(&head);
+        if a == 1 {
+            let capacity = Lg::from_u64(2).pow(s / 2 - 1);
+            rig.add(&capacity)
+        } else { rig }
+    }
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        if m.saturating_sub(k - 2 * l) > self.a_cap { return None; }
+        Some(lg_binom(s / 2, l))
+    }
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        if t.saturating_sub(k) > self.a_cap { return None; }
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c(s, k, l)
+    }
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c_sup(s, k, l)
+    }
+}
+
+#[test]
+fn derived_provider_runs() {
+    use rug::ops::Pow;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |total: u64, base: u64| -> u64 {
+        let k = total / 2 - 1;
+        let data = DerivedInterface { shower: ShowerInterface::new(), a_cap: 4 };
+        let prof = assemble(total, k, base, &data, DEFAULT_RESOLUTION).expect("tower");
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    let zr = zstar(1 << 12, 64);
+    println!("DERIVED PROVIDER reduced box (2^12): z* = {zr} (calibration target 2044)");
+    let zb = zstar(1 << 21, 64);
+    let delta = zb as f64 / (1u64 << 21) as f64;
+    println!("DERIVED PROVIDER full box (2^21): z* = {zb}, delta = {delta:.5} (wall 0.46783, Johnson 0.29285)");
+}
+
+/// THE M1 CERTIFICATE (SPLICE rounds 16-17): the band-collapse
+/// charge (fiber fold + thm:tc-ft2 tiling, notes sec. 13) consumes
+/// NO interface data — the deployment box assembled with the
+/// TRIVIAL provider is an unconditional certificate. The gauge must
+/// clear coverage: z*/s >= 1/3 > Johnson delta = 0.29285.
+///
+/// Base level 32, not 64: the collapse chain compounds 2 bits per
+/// level (deep + collapse each pay 2x the child edge row) while the
+/// analytic base's edge value scales as ~0.46 n0 bits — the box
+/// tower crosses the ceiling budget seeded at 64 (measured: z*
+/// falls to the Johnson clamp) and certifies at 32 or 16 (both
+/// measured: z* = 699053, delta = 1/3 exactly; the reduced box
+/// gives 1367 = 0.33374 at every base). The grid carries a
+/// stride-1 window at the coverage edge t = 2 l* — the collapse
+/// queries the child row within a threshold unit of the child's
+/// own cliff, and a coarse block there smears the enclosure.
+#[test]
+fn m1_box_certificate() {
+    use rug::ops::Pow;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    for total in [1u64 << 12, 1u64 << 21] {
+        let k = total / 2 - 1;
+        let prof = assemble(total, k, 32, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
+        let z = crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star);
+        let delta = z as f64 / total as f64;
+        println!(
+            "M1 box (s = 2^{}): z* = {z}, delta = {delta:.5} \
+             (coverage 1/3, Johnson 0.29285)",
+            total.ilog2()
+        );
+        assert!(
+            3 * z >= total,
+            "M1 gauge below coverage at s = {total}: z* = {z}"
+        );
+    }
+}
+
+/// Round 14 reconnaissance: the object the profile induction will
+/// carry — print the certified profile at (32,15) (star face) and
+/// its cumulative, the summation-by-parts inputs.
+#[test]
+fn profile_reconnaissance() {
+    let prof = assemble(32, 15, 8, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    let mut cum = 0f64;
+    for t in (16..=32).rev() {
+        if let Ok(v) = prof.eval(15, t) {
+            let hi = v.hi.to_f64_round(Round::Up);
+            cum += hi.exp2();
+            println!("t={t}: lg L <= {hi:.2}, cumulative <= 2^{:.2}", cum.log2());
+        }
+    }
+}
+
+/// The contraction reconnaissance (SPLICE round 15): d_b as the
+/// profile's own self-reference. Deep-surplus members ARE
+/// high-agreement list members: d_b(s,k,a) <= mult * L_s(k + a),
+/// and in the mid charge k + a = t + 1 (odd k): strictly downward
+/// in threshold. Run as fixed-point iteration over full tower
+/// assemblies: iteration i+1's provider reads iteration i's
+/// per-level profiles. Reconnaissance only (dims off by +-1 per
+/// level; mult a parameter): the question is whether the
+/// self-reference CONTRACTS and where z* stabilizes.
+struct FeedbackInterface {
+    shower: ShowerInterface,
+    stored: std::collections::BTreeMap<u64, Profile>,
+    mult_bits: f64,
+}
+impl FeedbackInterface {
+    fn lookup(&self, s: u64, t: u64) -> Option<Lg> {
+        let prof = self.stored.get(&s)?;
+        let dim = *prof.rows.keys().next_back()?;
+        if t > s { return Some(Lg::zero()); }
+        let v = prof.eval(dim, t.max(dim)).ok()?;
+        let hi = v.hi.to_f64_round(Round::Up) + self.mult_bits;
+        Some(Lg::from_f64_bracket(0.0, hi))
+    }
+}
+impl Interface for FeedbackInterface {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        match self.lookup(s, k + a) {
+            Some(l) => l.min(&TrivialInterface.d_b(s, k, a)),
+            None => TrivialInterface.d_b(s, k, a),
+        }
+    }
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        let kp = k - 2 * l;
+        let t_equiv = m.saturating_sub(kp) + k;
+        match self.lookup(s, t_equiv) {
+            Some(v) => Some(v.min(&lg_binom(s / 2, l))),
+            None => Some(lg_binom(s / 2, l)),
+        }
+    }
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c(s, k, l)
+    }
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.shower.d_c_sup(s, k, l)
+    }
+}
+
+#[test]
+fn contraction_reconnaissance() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let levels: Vec<u64> = (7..=12).map(|e| 1u64 << e).collect();
+    for mult_bits in [0.0f64, 10.0] {
+        let mut stored: std::collections::BTreeMap<u64, Profile> =
+            std::collections::BTreeMap::new();
+        for iter in 0..4 {
+            let data = FeedbackInterface {
+                shower: ShowerInterface::new(),
+                stored,
+                mult_bits,
+            };
+            let mut next = std::collections::BTreeMap::new();
+            for &s in &levels {
+                let k = s / 2 - 1;
+                if let Ok(p) = assemble(s, k, 64, &data, DEFAULT_RESOLUTION) {
+                    next.insert(s, p);
+                }
+            }
+            stored = next;
+            let prof = &stored[&total];
+            let z = crate::soundness::ceiling::list_ceiling_row(
+                1, total, total / 2, &ext, -128.0,
+                |z| prof.lg_at_disagreement(total / 2 - 1, z),
+            )
+            .map_or(0, |r| r.z_star);
+            println!("mult=2^{mult_bits:.0} iter {iter}: z* = {z}  (Johnson 1201, coverage ~1365, wall ~1916)");
+        }
+    }
+}
+// temp bench: timing of assemble at growing levels
+
+

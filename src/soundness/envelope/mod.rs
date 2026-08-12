@@ -38,13 +38,20 @@
 //! tower; [`assemble_levels_from`] is the seam for sharper bases
 //! (the certified floor values of the base section's companion
 //! statement, when the register lands). With the analytic base the
-//! floor holds no flood at small `n0`. The loss map's measured wall
-//! (box run, 2026-08-09) is the SMALL-STRATA cut charge: past the
-//! Johnson radius the classes at `l` just below `kod` activate, and
-//! the configuration-count `D_c` floods at scale in both data modes
-//! — beyond-Johnson radii are gated on a scale-correct small-strata
-//! charge (the graded-pencil route) before the `D_b` supply even
-//! binds.
+//! floor holds no flood at small `n0`.
+//!
+//! THE M1 CERTIFICATE (SPLICE rounds 16-17). The earlier measured
+//! wall — every provider's gauge pinned at the Johnson clamp — was
+//! the mid band priced through `D_b` at `l0 = kod`, where no data
+//! can be small. The band-collapse charge removes the wall with no
+//! data at all: at `t >= ~2 l*` every sub-`l*` stratum sits in the
+//! folded joint list at fiber agreement `F0 = t - l* + 1`, inside
+//! FT-2's tiling, and collapses to twice the larger channel row —
+//! self-similar down the tower. The deployment box (`s = 2^21`,
+//! rate 1/2, KoalaBear^6, budget `2^-128`) certifies
+//! `z* = 699053`, `delta = 1/3` exactly, from the TRIVIAL
+//! interface and base level 32: unconditional, beyond Johnson
+//! (0.29285), the coverage curve reached.
 
 mod base;
 mod charges;
@@ -134,6 +141,33 @@ impl<'a> Charges<'a> {
         )
     }
 
+    /// The band collapse — the M1 composition's charge (notes
+    /// STAR-MAXIMUM-GENERAL.md sec. 13; SPLICE round 16): a member
+    /// at threshold `t` with `l` pairs agrees on `t' - l >= t - l`
+    /// FIBERS (pairs occupy one fiber each), so every stratum below
+    /// `l*` sits in the joint folded list at fiber agreement
+    /// `F0 = t - l* + 1`, and FT-2's tiling (`3 F0 >= n + k - 1` —
+    /// thm:tc-ft2, the same theorem the deep charge's single form
+    /// instantiates at the pair fold) collapses that joint list to
+    /// twice the larger channel list at `F0`, loss one. One call
+    /// prices the ENTIRE sub-`l*` range — mid band and small strata
+    /// together — by the child's own certified rows: the coverage
+    /// regime is self-similar down the tower. `None` outside the
+    /// tiling range (there the classic charges stand alone) and when
+    /// no stratum lies below `l*`. Non-increasing in `t`: `F0`
+    /// grows with `t` and the child row is non-increasing.
+    fn band_collapse(&self, t: u64) -> Option<Lg> {
+        let cell = &self.cell;
+        if t.saturating_sub(cell.n) >= cell.lstar {
+            return None;
+        }
+        let f0 = (t + 1).checked_sub(cell.lstar)?;
+        if 3 * f0 < cell.n + cell.k - 1 {
+            return None;
+        }
+        self.deep.single_at(f0)
+    }
+
     /// The master's right-hand side at threshold `t`: the minimum
     /// over split candidates of the three charges. The split between
     /// the middle band and the deep range is a FREE parameter
@@ -142,7 +176,9 @@ impl<'a> Charges<'a> {
     /// every `F >= l*` — and the candidates bracket its extremes:
     /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
     /// middle range through cores, deep reduced to the fully-paired
-    /// class). Each candidate is non-increasing in `t`, so the min
+    /// class); the band collapse is the third candidate, covering
+    /// the whole sub-`l*` range by the fiber fold where FT-2 tiles.
+    /// Each candidate is non-increasing in `t`, so the min
     /// preserves the grid's enclosure contract.
     fn rhs(&self, t: u64) -> Result<Lg> {
         let cell = &self.cell;
@@ -170,15 +206,20 @@ impl<'a> Charges<'a> {
         } else {
             None
         };
-        match (classic, full_mid) {
-            (Some(c), Some(f)) => Ok(c.min(&f)),
-            (Some(c), None) => Ok(c),
-            (None, Some(f)) => Ok(f),
-            (None, None) => Err(Error::Unsupported(format!(
-                "no charge covers cell ({}, {}, {t})",
-                cell.s, cell.k
-            ))),
-        }
+        let collapse = self.band_collapse(t).map(|c| match self.deep.at(cell, t) {
+            Some(d) => d.add(&c),
+            None => c,
+        });
+        [classic, full_mid, collapse]
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| a.min(&b))
+            .ok_or_else(|| {
+                Error::Unsupported(format!(
+                    "no charge covers cell ({}, {}, {t})",
+                    cell.s, cell.k
+                ))
+            })
     }
 }
 
@@ -202,7 +243,12 @@ pub fn step(
     };
     for &k in dims {
         let charges = Charges::build(prev, k, data)?;
-        let grid = build_grid(charges.cell.r, charges.cell.s, res);
+        let grid = build_grid(
+            charges.cell.r,
+            charges.cell.s,
+            2 * charges.cell.lstar,
+            res,
+        );
         // the envelope is the min of every theorem in hand: the
         // master's right-hand side, clamped by the analytic counts at
         // this level (Johnson and the shower bound hold at every

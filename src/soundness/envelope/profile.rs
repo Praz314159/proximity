@@ -158,8 +158,17 @@ impl Profile {
 /// The threshold grid for `[t_min, t_max]` at the given resolution:
 /// the whole range when it fits, else a uniform coarse body plus a
 /// dense stride-1 tail of `res/2` points ending at `t_max` — full
-/// agreement is where the profile varies fastest per lattice step.
-pub(super) fn build_grid(t_min: u64, t_max: u64, res: u64) -> Vec<u64> {
+/// agreement is where the profile varies fastest per lattice step —
+/// plus a dense stride-1 window of `res/2` points centered on
+/// `edge` (the coverage edge `t = 2 l*`, where the band-collapse
+/// charge turns on and the profile falls off its cliff). The
+/// collapse queries the CHILD row within a threshold unit of the
+/// child's own cliff; a coarse block there smears the cliff across
+/// a whole stride and the monotone enclosure returns the pre-cliff
+/// value, killing the charge at every coarse level — the box
+/// measured exactly that (M1 run 1: z* pinned at Johnson at
+/// s = 2^21 while the stride-1 reduced box certified coverage).
+pub(super) fn build_grid(t_min: u64, t_max: u64, edge: u64, res: u64) -> Vec<u64> {
     let len = t_max - t_min + 1;
     let res = res.max(4);
     if len <= res {
@@ -167,9 +176,25 @@ pub(super) fn build_grid(t_min: u64, t_max: u64, res: u64) -> Vec<u64> {
     }
     let dense = res / 2;
     let dense_from = t_max - dense + 1;
+    let half = dense / 2;
+    let e_lo = edge.saturating_sub(half).max(t_min);
+    let e_hi = (edge + half).min(t_max);
     let body_len = dense_from - t_min;
     let stride = body_len.div_ceil(res - dense).max(1);
-    let mut g: Vec<u64> = (t_min..dense_from).step_by(stride as usize).collect();
+    let mut g: Vec<u64> = Vec::new();
+    let mut t = t_min;
+    while t < dense_from {
+        if t >= e_lo && t <= e_hi {
+            // inside the edge window: stride 1
+            g.push(t);
+            t += 1;
+        } else {
+            g.push(t);
+            // step by the coarse stride, but never jump the window
+            let next = t + stride;
+            t = if t < e_lo && next > e_lo { e_lo } else { next };
+        }
+    }
     g.extend(dense_from..=t_max);
     g
 }

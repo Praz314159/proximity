@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use rayon::prelude::*;
 
-use crate::math::enclosure::{lg_binom, Lg, LgFactorials};
+use crate::math::enclosure::{lg_binom, lg_binom_memo, Lg, LgFactorials};
 
 use super::profile::store;
 
@@ -60,7 +60,7 @@ pub trait Interface: Sync {
     /// (Lemma J, a theorem), so `d_r` carries the entire hypothesis
     /// content of the graded route.
     fn d_r(&self, s: u64, _k: u64, l: u64, _m: u64) -> Option<Lg> {
-        Some(lg_binom(s / 2, l))
+        Some(lg_binom_memo(s / 2, l))
     }
     /// Bound on `max(d_r(l', t - 2 l'))` over `l' <= l` — the graded
     /// tail's numerator. `None` asserts every stratum up to `l` has
@@ -70,7 +70,7 @@ pub trait Interface: Sync {
     /// of `C(s/2, ·)` peaks at `s/4`). Must be non-increasing in
     /// `t` at fixed `l`.
     fn d_r_sup(&self, s: u64, _k: u64, l: u64, _t: u64) -> Option<Lg> {
-        Some(lg_binom(s / 2, l.min(s / 4)))
+        Some(lg_binom_memo(s / 2, l.min(s / 4)))
     }
     /// Bound on `max(d_c(l'))` over `l' <= l`, `None` when every
     /// stratum up to `l` is empty — the small-strata tail bound's
@@ -157,7 +157,7 @@ impl Interface for TrivialInterface {
         // a surplus larger than the available points admits no
         // members, but the log bracket cannot say zero; one is still
         // a valid (and immaterial) upper bound there
-        lg_binom(s / 2, kod).mul(&Lg::from_u64(per_core.max(1)))
+        lg_binom_memo(s / 2, kod).mul(&Lg::from_u64(per_core.max(1)))
     }
 
     fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
@@ -168,6 +168,46 @@ impl Interface for TrivialInterface {
                 .mul(&lg_binom(np, lp))
                 .mul(&lg_binom(np - lp, h)),
         )
+    }
+
+    /// The prefix scan of the trait default is `O(l)` binomials per
+    /// query — at box scale that linear scan was the profiled wall
+    /// (37 of 40 assembly minutes). Same values, table-driven and
+    /// cached per `(s, k)`, the shower/star pattern.
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        let kod = k / 2;
+        assert!(
+            l < kod,
+            "d_c_sup asked at l = {l} outside the small-strata range \
+             [0, {kod}) of k = {k}"
+        );
+        static SUP: std::sync::OnceLock<SupCache> = std::sync::OnceLock::new();
+        let mut cache = SUP
+            .get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prefix = cache.entry((s, k)).or_insert_with(|| {
+            let np = s / 2;
+            let facts = LgFactorials::new(np);
+            let binom = |n: u64, kk: u64| -> Lg { facts.binom(n, kk) };
+            let vals: Vec<Option<Lg>> = (0..kod)
+                .into_par_iter()
+                .map(|lp| {
+                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| {
+                        Lg::from_u64(2)
+                            .pow(h)
+                            .mul(&binom(np, lpp))
+                            .mul(&binom(np - lpp, h))
+                    })
+                })
+                .collect();
+            prefix_max_by_hi(vals.into_iter())
+                .into_iter()
+                .map(|v| v.as_ref().map(store))
+                .collect()
+        });
+        let (lo, hi) = prefix[l as usize]?;
+        Some(Lg::from_f64_bracket(lo, hi))
     }
 }
 

@@ -794,3 +794,100 @@ fn contraction_reconnaissance() {
 // temp bench: timing of assemble at growing levels
 
 
+
+/// The deep-capacity sensitivity scan (SPLICE round 18): what
+/// growth law must the far collision top K(s) satisfy for the
+/// deep-capacity-SHAPED provider to certify the box at coverage
+/// (M1) and at the wall (M2)? Shape (conditional, a scan not a
+/// theorem): d_b(a) = K(s)/C(1+a, 2) — the die-off corollary of
+/// note sec. 14, anchored at the PROVEN K(16) = 280 — with the
+/// graded face empty where C(1+a, 2) > K (no level set can pay
+/// its collision count). K(s) = 280 (s/16)^alpha; the scan sweeps
+/// alpha. Cut face: the exact star provider. Run with --nocapture.
+struct DeepCapShape {
+    star: StarInterface,
+    alpha: f64,
+}
+
+impl DeepCapShape {
+    fn lg_k(&self, s: u64) -> f64 {
+        (280f64).log2() + self.alpha * ((s as f64).log2() - 4.0)
+    }
+    fn a_cap(&self, s: u64, k: u64) -> u64 {
+        // largest a with C(1+a, 2) <= K (level sets beyond cannot
+        // pay their collision count): a = floor((sqrt(1+8K)-1)/2)
+        let _ = k;
+        let kk = self.lg_k(s).exp2();
+        (((1.0 + 8.0 * kk).sqrt() - 1.0) / 2.0).floor() as u64
+    }
+}
+
+impl Interface for DeepCapShape {
+    fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
+        let _ = k;
+        let pairs = ((a + 1) * a / 2) as f64;
+        let v = self.lg_k(s) - pairs.log2();
+        // a count bound below one is still a count bound of one in
+        // the log bracket (cannot say zero)
+        Lg::from_f64_bracket(v.min(0.0).max(0.0).min(v), v.max(0.0))
+    }
+    fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
+        if m.saturating_sub(k - 2 * l) > self.a_cap(s, k) {
+            return None;
+        }
+        Some(lg_binom(s / 2, l))
+    }
+    fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
+        if t.saturating_sub(k) > self.a_cap(s, k) {
+            return None;
+        }
+        Some(lg_binom(s / 2, l.min(s / 4)))
+    }
+    fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.star.d_c(s, k, l)
+    }
+    fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
+        self.star.d_c_sup(s, k, l)
+    }
+}
+
+#[test]
+fn deepcap_sensitivity_scan() {
+    use rug::ops::Pow;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |total: u64, alpha: f64| -> u64 {
+        let k = total / 2 - 1;
+        let data = DeepCapShape {
+            star: StarInterface::new(),
+            alpha,
+        };
+        let prof = match assemble(total, k, 32, &data, DEFAULT_RESOLUTION) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    println!("== deep-capacity shape scan: K(s) = 280 (s/16)^alpha ==");
+    println!("targets: reduced box 1365 = 1/3 (M1), 1916 = wall (M2)");
+    for alpha in [0.0f64, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0] {
+        let zr = zstar(1 << 12, alpha);
+        let dr = zr as f64 / (1u64 << 12) as f64;
+        println!(
+            "alpha = {alpha:.1}: reduced z* = {zr:5} ({dr:.5})  \
+             [lgK(2^12) = {:.1}, cap {}]",
+            (280f64).log2() + alpha * 8.0,
+            DeepCapShape { star: StarInterface::new(), alpha }
+                .a_cap(1 << 12, (1 << 11) - 1)
+        );
+    }
+    for alpha in [0.0f64, 1.0, 2.0, 3.0] {
+        let zb = zstar(1 << 21, alpha);
+        let db = zb as f64 / (1u64 << 21) as f64;
+        println!(
+            "alpha = {alpha:.1}: FULL BOX z* = {zb:7} ({db:.5})"
+        );
+    }
+}

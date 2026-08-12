@@ -44,7 +44,7 @@ fn run_step_oracle(data: &dyn Interface, dc_mirror: impl Fn(u64) -> Integer) {
             small += graded_min(cut, s, k, n, l, t);
         }
         let chan = binom(n, kev).max(binom(n, kod));
-        let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, k, kod, lstar, t);
+        let (mut want_lo, mut want_hi) = rhs_mirror(&small, &chan, s, n, kod, lstar, t);
         for c in analytic_clamps(s, k, t) {
             if c < want_lo {
                 want_lo = c.clone();
@@ -124,7 +124,6 @@ fn rhs_mirror(
     chan: &Integer,
     s: u64,
     n: u64,
-    k: u64,
     kod: u64,
     lstar: u64,
     t: u64,
@@ -162,24 +161,7 @@ fn rhs_mirror(
         ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
             / Rational::from(binom(l0m - 1, kod - 1));
     }
-    let mut want_lo = classic.clone().min(ext_lo);
-    let mut want_hi = classic.min(ext_hi);
-    // band-collapse candidate (the M1 charge): fiber fold at
-    // F0 = t - l* + 1, FT-2 tiling, twice the larger channel row
-    // (constant on the interpolation base), plus the deep charge
-    if lmin < lstar && 3 * (t + 1 - lstar) >= n + k - 1 {
-        let mut coll = Rational::from(chan.clone()) * Rational::from(2);
-        if let Some(d) = &deep {
-            coll += d.clone();
-        }
-        if coll < want_lo {
-            want_lo = coll.clone();
-        }
-        if coll < want_hi {
-            want_hi = coll;
-        }
-    }
-    (want_lo, want_hi)
+    (classic.clone().min(ext_lo), classic.min(ext_hi))
 }
 
 /// Oracle mirror of the graded min-term: the cut term min'd with
@@ -712,45 +694,6 @@ fn derived_provider_runs() {
     println!("DERIVED PROVIDER full box (2^21): z* = {zb}, delta = {delta:.5} (wall 0.46783, Johnson 0.29285)");
 }
 
-/// THE M1 CERTIFICATE (SPLICE rounds 16-17): the band-collapse
-/// charge (fiber fold + thm:tc-ft2 tiling, notes sec. 13) consumes
-/// NO interface data — the deployment box assembled with the
-/// TRIVIAL provider is an unconditional certificate. The gauge must
-/// clear coverage: z*/s >= 1/3 > Johnson delta = 0.29285.
-///
-/// Base level 32, not 64: the collapse chain compounds 2 bits per
-/// level (deep + collapse each pay 2x the child edge row) while the
-/// analytic base's edge value scales as ~0.46 n0 bits — the box
-/// tower crosses the ceiling budget seeded at 64 (measured: z*
-/// falls to the Johnson clamp) and certifies at 32 or 16 (both
-/// measured: z* = 699053, delta = 1/3 exactly; the reduced box
-/// gives 1367 = 0.33374 at every base). The grid carries a
-/// stride-1 window at the coverage edge t = 2 l* — the collapse
-/// queries the child row within a threshold unit of the child's
-/// own cliff, and a coarse block there smears the enclosure.
-#[test]
-fn m1_box_certificate() {
-    use rug::ops::Pow;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    for total in [1u64 << 12, 1u64 << 21] {
-        let k = total / 2 - 1;
-        let prof = assemble(total, k, 32, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
-        let z = crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star);
-        let delta = z as f64 / total as f64;
-        println!(
-            "M1 box (s = 2^{}): z* = {z}, delta = {delta:.5} \
-             (coverage 1/3, Johnson 0.29285)",
-            total.ilog2()
-        );
-        assert!(
-            3 * z >= total,
-            "M1 gauge below coverage at s = {total}: z* = {z}"
-        );
-    }
-}
 
 /// Round 14 reconnaissance: the object the profile induction will
 /// carry — print the certified profile at (32,15) (star face) and

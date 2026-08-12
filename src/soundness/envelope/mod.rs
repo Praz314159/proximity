@@ -40,18 +40,17 @@
 //! statement, when the register lands). With the analytic base the
 //! floor holds no flood at small `n0`.
 //!
-//! THE M1 CERTIFICATE (SPLICE rounds 16-17). The earlier measured
-//! wall — every provider's gauge pinned at the Johnson clamp — was
-//! the mid band priced through `D_b` at `l0 = kod`, where no data
-//! can be small. The band-collapse charge removes the wall with no
-//! data at all: at `t >= ~2 l*` every sub-`l*` stratum sits in the
-//! folded joint list at fiber agreement `F0 = t - l* + 1`, inside
-//! FT-2's tiling, and collapses to twice the larger channel row —
-//! self-similar down the tower. The deployment box (`s = 2^21`,
-//! rate 1/2, KoalaBear^6, budget `2^-128`) certifies
-//! `z* = 699053`, `delta = 1/3` exactly, from the TRIVIAL
-//! interface and base level 32: unconditional, beyond Johnson
-//! (0.29285), the coverage curve reached.
+//! THE MEASURED WALL (re-affirmed, SPLICE round 17b). Every
+//! provider's gauge pins at the Johnson clamp because the mid band
+//! is priced through `D_b` at `l0 = kod`, where no data can be
+//! small. A "band-collapse" charge that briefly certified the box
+//! at `delta = 1/3` was RETRACTED the same day: its fiber-fold
+//! instantiation of thm:tc-ft2 misread the theorem's joint list
+//! (see the retraction note at `Charges::rhs`), and the standalone
+//! verifier gate_band_collapse.py refuted it with planted words.
+//! Beyond-Johnson radii remain gated on genuine mid-band data —
+//! the deep-capacity program (STAR-MAXIMUM-GENERAL.md secs. 12,
+//! 14) is the standing route.
 
 mod base;
 mod charges;
@@ -141,33 +140,21 @@ impl<'a> Charges<'a> {
         )
     }
 
-    /// The band collapse — the M1 composition's charge (notes
-    /// STAR-MAXIMUM-GENERAL.md sec. 13; SPLICE round 16): a member
-    /// at threshold `t` with `l` pairs agrees on `t' - l >= t - l`
-    /// FIBERS (pairs occupy one fiber each), so every stratum below
-    /// `l*` sits in the joint folded list at fiber agreement
-    /// `F0 = t - l* + 1`, and FT-2's tiling (`3 F0 >= n + k - 1` —
-    /// thm:tc-ft2, the same theorem the deep charge's single form
-    /// instantiates at the pair fold) collapses that joint list to
-    /// twice the larger channel list at `F0`, loss one. One call
-    /// prices the ENTIRE sub-`l*` range — mid band and small strata
-    /// together — by the child's own certified rows: the coverage
-    /// regime is self-similar down the tower. `None` outside the
-    /// tiling range (there the classic charges stand alone) and when
-    /// no stratum lies below `l*`. Non-increasing in `t`: `F0`
-    /// grows with `t` and the child row is non-increasing.
-    fn band_collapse(&self, t: u64) -> Option<Lg> {
-        let cell = &self.cell;
-        if t.saturating_sub(cell.n) >= cell.lstar {
-            return None;
-        }
-        let f0 = (t + 1).checked_sub(cell.lstar)?;
-        if 3 * f0 < cell.n + cell.k - 1 {
-            return None;
-        }
-        self.deep.single_at(f0)
-    }
-
+    /// [RETRACTED 2026-08-12, SPLICE round 17b] A "band collapse"
+    /// candidate briefly lived here: it priced the whole sub-`l*`
+    /// range by the child rows at fiber agreement `F0 = t - l* + 1`
+    /// via thm:tc-ft2, and certified the box at `delta = 1/3`. The
+    /// standalone verifier (gate_band_collapse.py) REFUTED it with
+    /// planted words at every audited cell: tc-ft2's joint list
+    /// `J_F` takes channel pairs with a COMMON F-fiber witness of
+    /// PLAIN agreement in both channels (07_topcut.tex), and an
+    /// unfolded member's plain both-channel agreement is exactly
+    /// its PAIR count `l` — the deep charge's `F = l`
+    /// instantiation, valid only at `l >= l*`. Single-fiber
+    /// (marked) agreement never enters `J_F`; there is no
+    /// fiber-fold instantiation, and the sub-`l*` strata remain
+    /// priced by `D_b`/`D_c` data alone.
+    ///
     /// The master's right-hand side at threshold `t`: the minimum
     /// over split candidates of the three charges. The split between
     /// the middle band and the deep range is a FREE parameter
@@ -176,9 +163,7 @@ impl<'a> Charges<'a> {
     /// every `F >= l*` — and the candidates bracket its extremes:
     /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
     /// middle range through cores, deep reduced to the fully-paired
-    /// class); the band collapse is the third candidate, covering
-    /// the whole sub-`l*` range by the fiber fold where FT-2 tiles.
-    /// Each candidate is non-increasing in `t`, so the min
+    /// class). Each candidate is non-increasing in `t`, so the min
     /// preserves the grid's enclosure contract.
     fn rhs(&self, t: u64) -> Result<Lg> {
         let cell = &self.cell;
@@ -206,11 +191,7 @@ impl<'a> Charges<'a> {
         } else {
             None
         };
-        let collapse = self.band_collapse(t).map(|c| match self.deep.at(cell, t) {
-            Some(d) => d.add(&c),
-            None => c,
-        });
-        [classic, full_mid, collapse]
+        [classic, full_mid]
             .into_iter()
             .flatten()
             .reduce(|a, b| a.min(&b))

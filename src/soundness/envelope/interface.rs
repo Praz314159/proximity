@@ -13,9 +13,23 @@ use super::profile::store;
 /// Certified interface data at a level (notes v2, ch. 4, the derived
 /// interface): `D_b(a)` bounds, over all cores, the number of family
 /// members with agreement surplus at least `a`; `D_c(l)` bounds the
-/// cut stratum at pair count `l`. Both must hold for every word at
-/// the level. Implementations receive the full cell context
-/// `(s, k, ·)` so one object can serve every level of a tower.
+/// cut stratum at pair count `l`. Implementations receive the full
+/// cell context `(s, k, ·)` so one object can serve every level of a
+/// tower.
+///
+/// SCOPE (desc:interface with desc:interface-scope): both displays
+/// must hold for every word at the level whose syndrome is NONZERO
+/// — that is, every non-codeword. The restriction is forced: at
+/// `b = 0` every `r`-subset is incident, so the cut stratum is the
+/// FULL configuration count and any sharper `d_c` fails outright
+/// (measured at (16,7): a codeword has `|Z^(0)(0)| = 2^8 = 256`
+/// against the 128 supplied by both the shower and star faces).
+/// It costs nothing: a zero-syndrome word is a codeword `g`, two
+/// distinct codewords cannot agree at `k` points, so `|Lam_t(g)| = 1`
+/// for `t >= r` and the master's conclusion holds with no interface
+/// data consumed. gate_provider_battery.py enforces this tiering —
+/// TrivialInterface is clean even at `b = 0`, ShowerInterface and
+/// StarInterface are clean exactly off it.
 ///
 /// Contract: `d_b` must be non-increasing in `a` (demanding more
 /// surplus admits fewer members — true of any honest bound). The

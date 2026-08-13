@@ -978,19 +978,124 @@ fn species_split_scan() {
     println!("baseline (trivial, no split):        z* = {}", zstar(&TrivialInterface));
     println!("-- pair-poor swept, pair-rich UNCAPPED (pigeonhole) --");
     for (lg, cap) in [(60.0f64, 4096u64), (20.0, 4096), (0.0, 4096), (0.0, 512), (0.0, 64)] {
-        let z = zstar(&SpeciesInterface::new(lg, cap, None));
+        let z = zstar(&SpeciesInterface::new(lg, cap, None, None));
         println!("   poor = 2^{lg:<5} up to a = {cap:<5}: z* = {z}");
     }
     println!("-- pair-rich CAPPED, pair-poor free (2^60, uncapped) --");
     for rc in [4096u64, 1024, 682, 512, 131] {
-        let z = zstar(&SpeciesInterface::new(60.0, 4096, Some(rc)));
+        let z = zstar(&SpeciesInterface::new(60.0, 4096, Some(rc), Some(rc)));
         println!("   rich cap a <= {rc:<5}: z* = {z}   (1/2 - {:.4} => delta {:.4})",
                  rc as f64 / total as f64, 0.5 - rc as f64 / total as f64);
     }
     println!("-- BOTH capped together --");
     for c in [682u64, 512, 131] {
-        let z = zstar(&SpeciesInterface::new(0.0, c, Some(c)));
+        let z = zstar(&SpeciesInterface::new(0.0, c, Some(c), Some(c)));
         println!("   both caps a <= {c:<5}: z* = {z}  (delta {:.5})",
                  z as f64 / total as f64);
+    }
+}
+
+/// The missing leg of round 19m: cap ONE species while the other is
+/// held SMALL (not merely capped). Round 19m's "rich cap alone does
+/// nothing" row left the poor face at 2^60, which busts the budget
+/// (~2^58) on its own — so it tested a broken poor face, not the
+/// rich cap. Here the poor face is 2^0 and never empty.
+#[test]
+fn species_one_sided_scan() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |data: &dyn Interface| -> u64 {
+        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    println!("== one-sided: rich capped, poor SMALL and never empty ==");
+    for rc in [682u64, 512, 131] {
+        let z = zstar(&SpeciesInterface::new(0.0, total, Some(rc), Some(rc)));
+        println!("   poor = 2^0 uncapped, rich cap {rc:<4}: z* = {z}  \
+                  (predicted {} if the rich cap alone sets the line)",
+                 total - k - rc - 1);
+    }
+    println!("== the reverse: poor capped, rich at its PROVEN bound ==");
+    println!("   (no row: the pair-rich word-free bound is the \
+              pigeonhole ~C(s/2,kod), exponentially over budget at \
+              every surplus — there is no 'small magnitude' setting \
+              to test, which is the asymmetry itself)");
+    println!("== what the capacity theorem actually supplies ==");
+    let m = total / 2;
+    println!("   capacity bound at the boundary = 2^(m-1) = 2^{}  \
+              vs budget ~2^58: over by {} bits",
+             m - 1, (m - 1) as i64 - 58);
+}
+
+/// The species question asked CORRECTLY (round 19n). Round 19m
+/// wired the graded face to the conjunction of both species caps,
+/// so its scan measured the SMALL-STRATA cut charge and reported it
+/// as a species result. Here the graded cap is held FIXED (the cut
+/// charge empty past `c`) and only the species vary inside the mid
+/// charge, which is the question that was meant to be asked.
+#[test]
+fn species_isolated_scan() {
+    use rug::ops::Pow;
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
+    let zstar = |data: &dyn Interface| -> u64 {
+        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
+            prof.lg_at_disagreement(k, z)
+        })
+        .map_or(0, |r| r.z_star)
+    };
+    for c in [682u64, 131] {
+        println!("== graded face capped at a <= {c} (cut charge empty past it) ==");
+        let both = zstar(&SpeciesInterface::new(0.0, c, Some(c), Some(c)));
+        println!("   both species capped at {c}:            z* = {both}");
+        let poor_only = zstar(&SpeciesInterface::new(0.0, c, None, Some(c)));
+        println!("   POOR capped, rich uncapped:           z* = {poor_only}");
+        let rich_only = zstar(&SpeciesInterface::new(0.0, total, Some(c), Some(c)));
+        println!("   RICH capped, poor small (2^0) uncapped: z* = {rich_only}");
+        let cap_lg = zstar(&SpeciesInterface::new(2047.0, c, Some(c), Some(c)));
+        println!("   poor CAPPED, magnitude 2^(m-1) = 2^2047:  z* = {cap_lg}");
+        let cap_nocap = zstar(&SpeciesInterface::new(2047.0, total, Some(c), Some(c)));
+        println!("   poor UNCAPPED at the capacity theorem's own \
+bound 2^2047 (what we can actually prove): z* = {cap_nocap}");
+    }
+}
+
+/// Debug: where does the poor term actually land in the envelope?
+#[test]
+fn species_envelope_probe() {
+    let total = 1u64 << 12;
+    let k = total / 2 - 1;
+    let (kev, kod) = channel_dims(k);
+    let lstar = (total / 2 + k - 1).div_ceil(3);
+    println!("s = {total}, k = {k}, kod = {kod}, kev = {kev}, lstar = {lstar}");
+    for (name, data) in [
+        ("poor 2^2047 uncapped, rich cap 131",
+         SpeciesInterface::new(2047.0, total, Some(131), Some(131))),
+        ("poor 2^0 uncapped, rich cap 131",
+         SpeciesInterface::new(0.0, total, Some(131), Some(131))),
+    ] {
+        let prof = assemble(total, k, 32, &data, DEFAULT_RESOLUTION).expect("tower");
+        println!("{name}:");
+        for t in [2179u64, 2200, 2400, 3000, 3071, 3100] {
+            let l0 = t.saturating_sub(total / 2).max(kod);
+            let a = t - 2 * kod;
+            let v = prof.eval(k, t).map(|x| x.hi.to_f64_round(Round::Up));
+            println!("   t = {t}: l0 = {l0} (kod = {kod}, mid active: \
+                      {}), a = {a}, envelope hi = {:?}",
+                     l0 < lstar, v.map(|x| format!("2^{x:.1}")));
+        }
     }
 }

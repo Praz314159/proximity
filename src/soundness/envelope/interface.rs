@@ -532,8 +532,18 @@ impl Interface for RigidityInterface {
     }
 }
 
-/// The SPECIES-SPLIT middle face (SPLICE round 19m) — a PROBE, not
-/// a theorem. The (32,15) measurement showed the middle-band datum
+/// The SPECIES-SPLIT middle face — a PROBE, not a theorem, and
+/// NOT CURRENTLY EXERCISED BY THE ASSEMBLY (round 19n): the
+/// master's right-hand side takes a MIN over two candidates, and
+/// the winning one (`full_mid`, the `lambda = n` extended split)
+/// prices the whole middle range with the AGGREGATE [`Interface::d_b`],
+/// bypassing [`Interface::d_b_at`] entirely. Disabling that
+/// candidate drops every configuration to the Johnson clamp, which
+/// is the proof that it, not the per-stratum data, carries the
+/// gauge. Making the species split meaningful requires teaching
+/// `full_mid` the per-stratum datum over its whole range — real
+/// surgery, not a knob. Until then this provider's rows measure
+/// the aggregate cap and the graded cap, nothing finer. The (32,15) measurement showed the middle-band datum
 /// is a multiplicity-weighted count whose mass sits on PAIR-RICH
 /// members: at threshold 18 the charge is 400, of which ten
 /// nine-pair members contribute 360 and the forty pair-poor ones
@@ -556,16 +566,28 @@ pub struct SpeciesInterface {
     /// Surplus past which the PAIR-RICH face is empty (`None` =
     /// never: the unconditional pigeonhole all the way up).
     pub rich_cap: Option<u64>,
+    /// Surplus past which the GRADED face (`d_r`, which prices the
+    /// SMALL-STRATA cut charge, a different charge entirely) is
+    /// empty. Independent of the species caps: round 19m wired it
+    /// to the conjunction of both and so measured this face while
+    /// believing it measured the species split.
+    pub graded_cap: Option<u64>,
 }
 
 impl SpeciesInterface {
     #[must_use]
-    pub fn new(poor_lg: f64, poor_cap: u64, rich_cap: Option<u64>) -> Self {
+    pub fn new(
+        poor_lg: f64,
+        poor_cap: u64,
+        rich_cap: Option<u64>,
+        graded_cap: Option<u64>,
+    ) -> Self {
         SpeciesInterface {
             star: StarInterface::new(),
             poor_lg,
             poor_cap,
             rich_cap,
+            graded_cap,
         }
     }
 }
@@ -594,9 +616,8 @@ impl Interface for SpeciesInterface {
     }
 
     fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
-        let kp = k - 2 * l;
-        let a = m.saturating_sub(kp);
-        if self.rich_cap.is_some_and(|c| a > c) && a > self.poor_cap {
+        let a = m.saturating_sub(k - 2 * l);
+        if self.graded_cap.is_some_and(|c| a > c) {
             return None;
         }
         Some(lg_binom_memo(s / 2, l))
@@ -604,7 +625,7 @@ impl Interface for SpeciesInterface {
 
     fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
         let a = t.saturating_sub(k);
-        if self.rich_cap.is_some_and(|c| a > c) && a > self.poor_cap {
+        if self.graded_cap.is_some_and(|c| a > c) {
             return None;
         }
         Some(lg_binom_memo(s / 2, l.min(s / 4)))

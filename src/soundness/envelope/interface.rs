@@ -464,10 +464,28 @@ impl Interface for StarInterface {
     }
 }
 
-/// The bucket-rigidity interface — CONDITIONAL. The cut face is the
-/// unconditional [`ShowerInterface`]; the middle face is the
-/// program's single external hypothesis in interface form, the
-/// tail-rigidity statement (the SBC face): derived buckets have
+/// The bucket-rigidity interface — **REFUTED, DO NOT USE** (round
+/// 20, 2026-08-13). Its middle face asserts `D_b(a) <= 1` past a
+/// cap, which is FALSE as the interface requires it (for every word
+/// at the level): a word at Hamming distance ONE from a codeword
+/// has a list of size one, but that codeword carries `n - 1` pairs
+/// and is therefore owned by `C(n - 1, kod)` cores, so the
+/// core-summed count the interface bounds is `C(7,3) = 35` at
+/// (16,7) for every `a` up to 9. gate_provider_battery.py refutes
+/// it on four distinct non-codeword words. Every tower assembled
+/// with this data is conditional on a false statement, hence
+/// VACUOUS rather than optimistic; the rows it produced (z* = 2044
+/// and the cap-endpoint table) are withdrawn. Kept only so the
+/// refutation has a referent and the battery has a negative
+/// control. The repair is the far-branch, mid-restricted form
+/// (SPLICE round 20b): restrict to members whose pair count lies in
+/// the middle range, and assert only over words the near/far split
+/// leaves to the master.
+///
+/// Historical description follows. The cut face is the
+/// unconditional [`ShowerInterface`]; the middle face was intended
+/// as the program's single external hypothesis in interface form,
+/// the tail-rigidity statement (the SBC face): derived buckets have
 /// bounded surplus. Concretely,
 ///
 /// `D_b(a) <= C(s/2, kod) * 2^(4 - a)` for `a <= a_max`, and

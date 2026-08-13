@@ -30,6 +30,25 @@ pub(super) struct Cell {
 }
 
 impl Cell {
+    /// The largest pair count any member can carry at threshold `t`,
+    /// on the FAR branch of the near/far split — free, and a
+    /// theorem rather than a hypothesis.
+    ///
+    /// At threshold `t` a word with `t_max >= s + k - t` has list
+    /// exactly one (its best codeword and any member agree with
+    /// each other on `>= t + t_max - s >= k` points, and distinct
+    /// polynomials of degree `< k` agree at most `k - 1` times), so
+    /// that branch consumes no charge and `Charges::rhs` floors the
+    /// envelope at one. Every remaining word has
+    /// `t_max <= s + k - t - 1`, hence every member has agreement at
+    /// most that, hence at most `floor((s + k - t - 1)/2)` pairs.
+    /// Strata above this limit are EMPTY and the sums may stop
+    /// there — which is also what structurally removes near words'
+    /// deeply-paired members from the middle band (SPLICE round 20b).
+    pub(super) fn far_pair_limit(&self, t: u64) -> u64 {
+        (self.s + self.k).saturating_sub(t + 1) / 2
+    }
+
     pub(super) fn new(n: u64, k: u64) -> Self {
         let (kev, kod) = channel_dims(k);
         Cell {

@@ -155,7 +155,14 @@ impl<'a> Charges<'a> {
             return None;
         }
         let a = t - 2 * cell.kod;
-        let hi = (l0 + Self::SPECIES_WINDOW).min(cell.lstar);
+        // strata above the far-branch pair limit are empty (a
+        // theorem, Cell::far_pair_limit); the near branch is
+        // floored at one in `rhs`
+        let top = cell.lstar.min(cell.far_pair_limit(t) + 1);
+        if l0 >= top {
+            return None;
+        }
+        let hi = (l0 + Self::SPECIES_WINDOW).min(top);
         let mut acc: Option<Lg> = None;
         for l in l0..hi {
             let term = self.data.d_b_at(cell.s, cell.k, l, a);
@@ -164,7 +171,7 @@ impl<'a> Charges<'a> {
                 None => term,
             });
         }
-        if hi < cell.lstar {
+        if hi < top {
             let tail = self
                 .data
                 .d_b(cell.s, cell.k, a)
@@ -211,13 +218,35 @@ impl<'a> Charges<'a> {
             .reduce(|a, b| a.add(&b));
         let full_mid = if cell.kod >= 2 && cell.lstar < cell.n {
             let l0m = t.saturating_sub(cell.n).max(cell.kod);
-            let mid = if l0m < cell.n {
+            // per-stratum over the window, aggregate for the tail —
+            // the same treatment as `mid_at`, so a provider that
+            // prices strata separately is consulted by BOTH
+            // candidates. (Before round 19n this candidate read only
+            // the aggregate, and since it wins the min it made the
+            // per-stratum seam invisible.)
+            let topm = cell.n.min(cell.far_pair_limit(t) + 1);
+            let mid = if l0m < topm {
                 let a = t - 2 * cell.kod;
-                Some(
-                    self.data
+                let hi = (l0m + Self::SPECIES_WINDOW).min(topm);
+                let mut acc: Option<Lg> = None;
+                for l in l0m..hi {
+                    let term = self.data.d_b_at(cell.s, cell.k, l, a);
+                    acc = Some(match acc {
+                        Some(x) => x.add(&term),
+                        None => term,
+                    });
+                }
+                if hi < topm {
+                    let tail = self
+                        .data
                         .d_b(cell.s, cell.k, a)
-                        .mul(&self.mid.range_bracket(cell, l0m)),
-                )
+                        .mul(&self.mid.range_bracket(cell, hi));
+                    acc = Some(match acc {
+                        Some(x) => x.add(&tail),
+                        None => tail,
+                    });
+                }
+                acc
             } else {
                 None
             };
@@ -228,16 +257,20 @@ impl<'a> Charges<'a> {
         } else {
             None
         };
-        [classic, full_mid]
+        // THE NEAR BRANCH (desc:interface-scope's companion, SPLICE
+        // round 20b). At threshold `t` a word with
+        // `t_max >= s + k - t` has list EXACTLY ONE: its best
+        // codeword `g` and any member `f` agree with each other on
+        // `>= t + t_max - s >= k` points, and two distinct
+        // polynomials of degree `< k` agree at most `k - 1` times.
+        // That branch consumes no charge, so the envelope is the
+        // MAX of one and the far branch's bound — which is why an
+        // all-empty right-hand side is the value one, not an error.
+        Ok([classic, full_mid]
             .into_iter()
             .flatten()
             .reduce(|a, b| a.min(&b))
-            .ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "no charge covers cell ({}, {}, {t})",
-                    cell.s, cell.k
-                ))
-            })
+            .map_or_else(Lg::zero, |v| v.max(&Lg::zero())))
     }
 }
 

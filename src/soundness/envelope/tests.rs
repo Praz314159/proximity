@@ -150,16 +150,31 @@ fn rhs_mirror(
         }
     }
     // extended candidate (lambda = n): deep = fully-paired class
-    // only; mid = [first term, telescope] times d_b
+    // only; mid = the first W strata term by term (the per-stratum
+    // datum, whose default is the ownership division), then
+    // [first term, telescope] times d_b for the tail. Re-derived
+    // here from the charge's stated form, not copied from it; W is
+    // the implementation's window, the one constant this endpoint
+    // mirror must share with the charge.
+    const W: u64 = 4;
     let mut ext_lo = small.clone() + Rational::from(chan.clone()) * Rational::from(2);
     let mut ext_hi = ext_lo.clone();
     let l0m = lmin.max(kod);
     if l0m < n {
         let a = t - 2 * kod;
         let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
-        ext_lo += db.clone() / Rational::from(binom(l0m, kod));
-        ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
-            / Rational::from(binom(l0m - 1, kod - 1));
+        let hi = (l0m + W).min(n);
+        let mut window = Rational::new();
+        for l in l0m..hi {
+            window += db.clone() / Rational::from(binom(l, kod));
+        }
+        ext_lo += window.clone();
+        ext_hi += window;
+        if hi < n {
+            ext_lo += db.clone() / Rational::from(binom(hi, kod));
+            ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
+                / Rational::from(binom(hi - 1, kod - 1));
+        }
     }
     (classic.clone().min(ext_lo), classic.min(ext_hi))
 }

@@ -10,7 +10,7 @@
 //!   vanish certify --p 1568247649 --s 32 --r 16
 //!   vanish attack  --n 2097152 --k 1048576 --list-bits 57.93 [--base-bits 31]
 //!   vanish pinch   [--total 2097152] [--k total/2-1] [--n0 8] [--res 8192]
-//!                  [--eps-bits -128] [--data trivial|shower|rigidity] [--acap 8]
+//!                  [--eps-bits -128] [--data trivial|shower|star]
 //!   vanish tower   (same flags as pinch)
 //!
 //! `pinch` and `tower` (certified feature) are the challenge
@@ -289,15 +289,13 @@ fn main() {
                 // mistyped flag (`--res=16384` would otherwise fall
                 // back to the default without a word)
                 for key in m.keys() {
-                    if !["total", "k", "n0", "res", "eps-bits", "data", "acap"]
-                        .contains(&key.as_str())
-                    {
+                    if !["total", "k", "n0", "res", "eps-bits", "data"].contains(&key.as_str()) {
                         die(format!("unknown flag --{key} for {cmd}"));
                     }
                 }
                 use vanish::soundness::envelope::{
-                    assemble_levels, Interface, RigidityInterface, ShowerInterface,
-                    TrivialInterface, DEFAULT_RESOLUTION,
+                    assemble_levels, Interface, ShowerInterface, StarInterface, TrivialInterface,
+                    DEFAULT_RESOLUTION,
                 };
                 use vanish::soundness::{elias_list_row, lg_list_threshold, list_ceiling_row};
                 let total: u64 = opt(&m, "total", 1u64 << 21);
@@ -306,24 +304,20 @@ fn main() {
                 let res: u64 = opt(&m, "res", DEFAULT_RESOLUTION);
                 let eps_bits: f64 = opt(&m, "eps-bits", -128.0);
                 let data_name: String = opt(&m, "data", "shower".to_string());
-                let a_cap: u64 = opt(&m, "acap", 8);
                 let data: Box<dyn Interface> = match data_name.as_str() {
                     "trivial" => Box::new(TrivialInterface),
                     "shower" => Box::new(ShowerInterface::new()),
-                    "rigidity" => Box::new(RigidityInterface::new(a_cap)),
-                    other => die(format!("unknown --data {other} (trivial|shower|rigidity)")),
+                    "star" => Box::new(StarInterface::new()),
+                    "rigidity" => die(
+                        "--data rigidity was REFUTED (SPLICE round 20, 2026-08-13): its \
+                         middle face is false for every word one step from a codeword, \
+                         so every row it produced is vacuous. RigidityInterface survives \
+                         in the library only as the battery's negative control. \
+                         Unconditional providers: trivial|shower|star.",
+                    ),
+                    other => die(format!("unknown --data {other} (trivial|shower|star)")),
                 };
-                println!(
-                    "interface data: {data_name}{}",
-                    match data_name.as_str() {
-                        "rigidity" => format!(
-                            " (CONDITIONAL: graded bucket-rigidity / tail-SBC \
-                             hypothesis, surplus cap {a_cap} on both the middle \
-                             and graded faces; measured caps 4 and 2)"
-                        ),
-                        _ => " (unconditional)".to_string(),
-                    }
-                );
+                println!("interface data: {data_name} (unconditional)");
                 let base = Integer::from(vanish::field::named::KOALABEAR);
                 let ext = base.clone().pow(6);
                 let t0 = std::time::Instant::now();

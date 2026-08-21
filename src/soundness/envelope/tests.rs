@@ -1,12 +1,48 @@
 //! The envelope's gates: exact-rational oracles for the step (the
 //! candidate-min right-hand side mirrored independently), provider
 //! pins against measured strata, tower-level regressions.
+//!
+//! The functions marked `#[ignore]` are EXPLORATORY SCANS, not
+//! tests: they assemble full towers at the reduced box and print
+//! tables that the SPLICE ledger quotes. They cannot fail, so they
+//! are excluded from the default run; reproduce one with
+//! `cargo test --features certified <name> -- --ignored --nocapture`.
 
 use super::charges::derived_johnson;
 use super::*;
 use rug::float::Round;
 use rug::{Integer, Rational};
 use std::collections::BTreeSet;
+
+/// The reduced box: the level `2^12` at rate one half, the cell
+/// every gauge below is read at (the full box `2^21` is the CLI's).
+const BOX_TOTAL: u64 = 1 << 12;
+
+/// The reduced box's `(total, k)`.
+fn box_cell() -> (u64, u64) {
+    (BOX_TOTAL, BOX_TOTAL / 2 - 1)
+}
+
+/// The certified extension field the ceiling rows are read in:
+/// KoalaBear to the sixth.
+fn box_ext() -> Integer {
+    use rug::ops::Pow;
+    Integer::from(crate::field::named::KOALABEAR).pow(6)
+}
+
+/// The certified disagreement radius `z*` of the tower `(total, k)`
+/// assembled from `base` under `data`, at budget `2^-128` in the
+/// box extension; `0` when the tower does not assemble or no
+/// positive ceiling exists. The one number every gauge reads.
+fn zstar(total: u64, k: u64, base: u64, data: &dyn Interface) -> u64 {
+    let Ok(prof) = assemble(total, k, base, data, DEFAULT_RESOLUTION) else {
+        return 0;
+    };
+    crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &box_ext(), -128.0, |z| {
+        prof.lg_at_disagreement(k, z)
+    })
+    .map_or(0, |r| r.z_star)
+}
 
 fn binom(a: u64, b: u64) -> Integer {
     if b > a {
@@ -362,17 +398,9 @@ fn full_agreement_transports_one_word() {
 /// assertion is existence, not strength.
 #[test]
 fn classical_ceiling_exists_at_reduced_box() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let prof = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
-    let row =
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .expect("a positive ceiling");
-    assert!(row.z_star >= 5, "z* = {}", row.z_star);
+    let (total, k) = box_cell();
+    let z = zstar(total, k, 64, &TrivialInterface);
+    assert!(z >= 5, "z* = {z}");
 }
 
 /// The coarse grid encloses the exact computation: a stride-1
@@ -460,10 +488,7 @@ fn star_provider_pins() {
     }
     // sup face: prefix maximum never below pointwise
     for l in 0..7 {
-        assert!(
-            st.d_c_sup(32, 15, l).expect("s").hi
-                >= st.d_c(32, 15, l).expect("s").hi
-        );
+        assert!(st.d_c_sup(32, 15, l).expect("s").hi >= st.d_c(32, 15, l).expect("s").hi);
     }
 }
 
@@ -493,20 +518,9 @@ fn star_tower_dominates_and_sharpens() {
 /// provider moves the ceiling the right way at the box.
 #[test]
 fn star_ceiling_at_reduced_box() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let base = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
-    let star = assemble(total, k, 64, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
-    let row_of = |prof: &Profile| {
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .expect("a positive ceiling")
-    };
-    let zb = row_of(&base).z_star;
-    let zs = row_of(&star).z_star;
+    let (total, k) = box_cell();
+    let zb = zstar(total, k, 64, &TrivialInterface);
+    let zs = zstar(total, k, 64, &StarInterface::new());
     assert!(zs >= zb, "star z* = {zs} < trivial z* = {zb}");
     println!("reduced box z*: trivial {zb}, star {zs}");
 }
@@ -569,18 +583,10 @@ impl Interface for ProbeInterface {
 }
 
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn db_sensitivity_probe() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let zstar = |data: &dyn Interface| -> u64 {
-        let prof = assemble(total, k, 64, data, DEFAULT_RESOLUTION).expect("tower");
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
-    };
+    let (total, k) = box_cell();
+    let zstar = |data: &dyn Interface| zstar(total, k, 64, data);
     let probe = |a_max: u64, cap_b: bool, cap_r: bool, decay: bool| ProbeInterface {
         shower: ShowerInterface::new(),
         a_max,
@@ -611,21 +617,29 @@ fn db_sensitivity_probe() {
 /// line a2 = (delta - 1/4) s at delta = 0.46783; graded face
 /// empties at the same line. Falsifiable step: does this land z*
 /// at the wall (0.468 * 4096 ~ 1916)?
-struct Ft2Interface { shower: ShowerInterface }
+struct Ft2Interface {
+    shower: ShowerInterface,
+}
 impl Interface for Ft2Interface {
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
         let a2 = (s as f64 * 0.21783) as u64;
-        if a > a2 { return Lg::zero(); }
+        if a > a2 {
+            return Lg::zero();
+        }
         lg_binom(s / 2, k / 2)
     }
     fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
         let a2 = (s as f64 * 0.21783) as u64;
-        if m.saturating_sub(k - 2 * l) > a2 { return None; }
+        if m.saturating_sub(k - 2 * l) > a2 {
+            return None;
+        }
         Some(lg_binom(s / 2, l))
     }
     fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
         let a2 = (s as f64 * 0.21783) as u64;
-        if t.saturating_sub(k) > a2 { return None; }
+        if t.saturating_sub(k) > a2 {
+            return None;
+        }
         Some(lg_binom(s / 2, l.min(s / 4)))
     }
     fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
@@ -637,15 +651,17 @@ impl Interface for Ft2Interface {
 }
 
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn ft2_shape_probe() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let prof = assemble(total, k, 64, &Ft2Interface { shower: ShowerInterface::new() },
-        DEFAULT_RESOLUTION).expect("tower");
-    let z = crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext,
-        -128.0, |z| prof.lg_at_disagreement(k, z)).map_or(0, |r| r.z_star);
+    let (total, k) = box_cell();
+    let z = zstar(
+        total,
+        k,
+        64,
+        &Ft2Interface {
+            shower: ShowerInterface::new(),
+        },
+    );
     println!("FT-2 shape z* = {z} (wall ~ 1916, Johnson 1201, cap-law pred 1155)");
 }
 
@@ -659,10 +675,15 @@ fn ft2_shape_probe() {
 /// (cap 4, 2^{4-a} head); what changed is its epistemic status:
 /// derived structure, not hypothesis. Runs: reduced box
 /// (calibration: must reproduce z* = 2044) and the 2^21 box.
-struct DerivedInterface { shower: ShowerInterface, a_cap: u64 }
+struct DerivedInterface {
+    shower: ShowerInterface,
+    a_cap: u64,
+}
 impl Interface for DerivedInterface {
     fn d_b(&self, s: u64, k: u64, a: u64) -> Lg {
-        if a > self.a_cap { return Lg::zero(); }
+        if a > self.a_cap {
+            return Lg::zero();
+        }
         let kod = k / 2;
         // a = 1: capacity term 2^{m-1} + pair-rich head;
         // a >= 2: transported/base-certified 2^{4-a} shape
@@ -671,14 +692,20 @@ impl Interface for DerivedInterface {
         if a == 1 {
             let capacity = Lg::from_u64(2).pow(s / 2 - 1);
             rig.add(&capacity)
-        } else { rig }
+        } else {
+            rig
+        }
     }
     fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
-        if m.saturating_sub(k - 2 * l) > self.a_cap { return None; }
+        if m.saturating_sub(k - 2 * l) > self.a_cap {
+            return None;
+        }
         Some(lg_binom(s / 2, l))
     }
     fn d_r_sup(&self, s: u64, k: u64, l: u64, t: u64) -> Option<Lg> {
-        if t.saturating_sub(k) > self.a_cap { return None; }
+        if t.saturating_sub(k) > self.a_cap {
+            return None;
+        }
         Some(lg_binom(s / 2, l.min(s / 4)))
     }
     fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
@@ -690,17 +717,15 @@ impl Interface for DerivedInterface {
 }
 
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn derived_provider_runs() {
-    use rug::ops::Pow;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
     let zstar = |total: u64, base: u64| -> u64 {
         let k = total / 2 - 1;
-        let data = DerivedInterface { shower: ShowerInterface::new(), a_cap: 4 };
-        let prof = assemble(total, k, base, &data, DEFAULT_RESOLUTION).expect("tower");
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
+        let data = DerivedInterface {
+            shower: ShowerInterface::new(),
+            a_cap: 4,
+        };
+        zstar(total, k, base, &data)
     };
     let zr = zstar(1 << 12, 64);
     println!("DERIVED PROVIDER reduced box (2^12): z* = {zr} (calibration target 2044)");
@@ -709,11 +734,11 @@ fn derived_provider_runs() {
     println!("DERIVED PROVIDER full box (2^21): z* = {zb}, delta = {delta:.5} (wall 0.46783, Johnson 0.29285)");
 }
 
-
 /// Round 14 reconnaissance: the object the profile induction will
 /// carry — print the certified profile at (32,15) (star face) and
 /// its cumulative, the summation-by-parts inputs.
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn profile_reconnaissance() {
     let prof = assemble(32, 15, 8, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
     let mut cum = 0f64;
@@ -744,7 +769,9 @@ impl FeedbackInterface {
     fn lookup(&self, s: u64, t: u64) -> Option<Lg> {
         let prof = self.stored.get(&s)?;
         let dim = *prof.rows.keys().next_back()?;
-        if t > s { return Some(Lg::zero()); }
+        if t > s {
+            return Some(Lg::zero());
+        }
         let v = prof.eval(dim, t.max(dim)).ok()?;
         let hi = v.hi.to_f64_round(Round::Up) + self.mult_bits;
         Some(Lg::from_f64_bracket(0.0, hi))
@@ -774,6 +801,7 @@ impl Interface for FeedbackInterface {
 }
 
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn contraction_reconnaissance() {
     use rug::ops::Pow;
     let total = 1u64 << 12;
@@ -798,7 +826,11 @@ fn contraction_reconnaissance() {
             stored = next;
             let prof = &stored[&total];
             let z = crate::soundness::ceiling::list_ceiling_row(
-                1, total, total / 2, &ext, -128.0,
+                1,
+                total,
+                total / 2,
+                &ext,
+                -128.0,
                 |z| prof.lg_at_disagreement(total / 2 - 1, z),
             )
             .map_or(0, |r| r.z_star);
@@ -807,8 +839,6 @@ fn contraction_reconnaissance() {
     }
 }
 // temp bench: timing of assemble at growing levels
-
-
 
 /// The deep-capacity sensitivity scan (SPLICE round 18): what
 /// growth law must the far collision top K(s) satisfy for the
@@ -844,7 +874,7 @@ impl Interface for DeepCapShape {
         let v = self.lg_k(s) - pairs.log2();
         // a count bound below one is still a count bound of one in
         // the log bracket (cannot say zero)
-        Lg::from_f64_bracket(v.min(0.0).max(0.0).min(v), v.max(0.0))
+        Lg::from_f64_bracket(v.min(0.0), v.max(0.0))
     }
     fn d_r(&self, s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
         if m.saturating_sub(k - 2 * l) > self.a_cap(s, k) {
@@ -867,23 +897,15 @@ impl Interface for DeepCapShape {
 }
 
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn deepcap_sensitivity_scan() {
-    use rug::ops::Pow;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
     let zstar = |total: u64, alpha: f64| -> u64 {
         let k = total / 2 - 1;
         let data = DeepCapShape {
             star: StarInterface::new(),
             alpha,
         };
-        let prof = match assemble(total, k, 32, &data, DEFAULT_RESOLUTION) {
-            Ok(p) => p,
-            Err(_) => return 0,
-        };
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
+        zstar(total, k, 32, &data)
     };
     println!("== deep-capacity shape scan: K(s) = 280 (s/16)^alpha ==");
     println!("targets: reduced box 1365 = 1/3 (M1), 1916 = wall (M2)");
@@ -894,16 +916,17 @@ fn deepcap_sensitivity_scan() {
             "alpha = {alpha:.1}: reduced z* = {zr:5} ({dr:.5})  \
              [lgK(2^12) = {:.1}, cap {}]",
             (280f64).log2() + alpha * 8.0,
-            DeepCapShape { star: StarInterface::new(), alpha }
-                .a_cap(1 << 12, (1 << 11) - 1)
+            DeepCapShape {
+                star: StarInterface::new(),
+                alpha
+            }
+            .a_cap(1 << 12, (1 << 11) - 1)
         );
     }
     for alpha in [0.0f64, 1.0, 2.0, 3.0] {
         let zb = zstar(1 << 21, alpha);
         let db = zb as f64 / (1u64 << 21) as f64;
-        println!(
-            "alpha = {alpha:.1}: FULL BOX z* = {zb:7} ({db:.5})"
-        );
+        println!("alpha = {alpha:.1}: FULL BOX z* = {zb:7} ({db:.5})");
     }
 }
 
@@ -917,9 +940,8 @@ fn deepcap_sensitivity_scan() {
 /// scan below the free cap; the free-cap row itself is HONEST
 /// (min-distance is a theorem).
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn cap_endpoint_scan() {
-    use rug::ops::Pow;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
     let zstar = |total: u64, a_max: u64, decay: bool| -> u64 {
         let k = total / 2 - 1;
         let data = ProbeInterface {
@@ -930,14 +952,7 @@ fn cap_endpoint_scan() {
             decay: false,
         };
         let _ = decay;
-        let prof = match assemble(total, k, 32, &data, DEFAULT_RESOLUTION) {
-            Ok(p) => p,
-            Err(_) => return 0,
-        };
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
+        zstar(total, k, 32, &data)
     };
     println!("== cap endpoint scan: z* vs phi = a_cap/s ==");
     for total in [1u64 << 12, 1u64 << 21] {
@@ -974,39 +989,42 @@ fn cap_endpoint_scan() {
 /// programme is aimed at a non-binding face and Transport-style
 /// recursion for pair-rich members is the requirement.
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn species_split_scan() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let zstar = |data: &dyn Interface| -> u64 {
-        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
-            Ok(p) => p,
-            Err(_) => return 0,
-        };
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
-    };
+    let (total, k) = box_cell();
+    let zstar = |data: &dyn Interface| zstar(total, k, 32, data);
     println!("== species split, reduced box (s = 2^12, k = {k}) ==");
-    println!("baseline (trivial, no split):        z* = {}", zstar(&TrivialInterface));
+    println!(
+        "baseline (trivial, no split):        z* = {}",
+        zstar(&TrivialInterface)
+    );
     println!("-- pair-poor swept, pair-rich UNCAPPED (pigeonhole) --");
-    for (lg, cap) in [(60.0f64, 4096u64), (20.0, 4096), (0.0, 4096), (0.0, 512), (0.0, 64)] {
+    for (lg, cap) in [
+        (60.0f64, 4096u64),
+        (20.0, 4096),
+        (0.0, 4096),
+        (0.0, 512),
+        (0.0, 64),
+    ] {
         let z = zstar(&SpeciesInterface::new(lg, cap, None, None));
         println!("   poor = 2^{lg:<5} up to a = {cap:<5}: z* = {z}");
     }
     println!("-- pair-rich CAPPED, pair-poor free (2^60, uncapped) --");
     for rc in [4096u64, 1024, 682, 512, 131] {
         let z = zstar(&SpeciesInterface::new(60.0, 4096, Some(rc), Some(rc)));
-        println!("   rich cap a <= {rc:<5}: z* = {z}   (1/2 - {:.4} => delta {:.4})",
-                 rc as f64 / total as f64, 0.5 - rc as f64 / total as f64);
+        println!(
+            "   rich cap a <= {rc:<5}: z* = {z}   (1/2 - {:.4} => delta {:.4})",
+            rc as f64 / total as f64,
+            0.5 - rc as f64 / total as f64
+        );
     }
     println!("-- BOTH capped together --");
     for c in [682u64, 512, 131] {
         let z = zstar(&SpeciesInterface::new(0.0, c, Some(c), Some(c)));
-        println!("   both caps a <= {c:<5}: z* = {z}  (delta {:.5})",
-                 z as f64 / total as f64);
+        println!(
+            "   both caps a <= {c:<5}: z* = {z}  (delta {:.5})",
+            z as f64 / total as f64
+        );
     }
 }
 
@@ -1016,38 +1034,34 @@ fn species_split_scan() {
 /// (~2^58) on its own — so it tested a broken poor face, not the
 /// rich cap. Here the poor face is 2^0 and never empty.
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn species_one_sided_scan() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let zstar = |data: &dyn Interface| -> u64 {
-        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
-            Ok(p) => p,
-            Err(_) => return 0,
-        };
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
-    };
+    let (total, k) = box_cell();
+    let zstar = |data: &dyn Interface| zstar(total, k, 32, data);
     println!("== one-sided: rich capped, poor SMALL and never empty ==");
     for rc in [682u64, 512, 131] {
         let z = zstar(&SpeciesInterface::new(0.0, total, Some(rc), Some(rc)));
-        println!("   poor = 2^0 uncapped, rich cap {rc:<4}: z* = {z}  \
+        println!(
+            "   poor = 2^0 uncapped, rich cap {rc:<4}: z* = {z}  \
                   (predicted {} if the rich cap alone sets the line)",
-                 total - k - rc - 1);
+            total - k - rc - 1
+        );
     }
     println!("== the reverse: poor capped, rich at its PROVEN bound ==");
-    println!("   (no row: the pair-rich word-free bound is the \
+    println!(
+        "   (no row: the pair-rich word-free bound is the \
               pigeonhole ~C(s/2,kod), exponentially over budget at \
               every surplus — there is no 'small magnitude' setting \
-              to test, which is the asymmetry itself)");
+              to test, which is the asymmetry itself)"
+    );
     println!("== what the capacity theorem actually supplies ==");
     let m = total / 2;
-    println!("   capacity bound at the boundary = 2^(m-1) = 2^{}  \
+    println!(
+        "   capacity bound at the boundary = 2^(m-1) = 2^{}  \
               vs budget ~2^58: over by {} bits",
-             m - 1, (m - 1) as i64 - 58);
+        m - 1,
+        (m - 1) as i64 - 58
+    );
 }
 
 /// The species question asked CORRECTLY (round 19n). Round 19m
@@ -1057,21 +1071,10 @@ fn species_one_sided_scan() {
 /// charge empty past `c`) and only the species vary inside the mid
 /// charge, which is the question that was meant to be asked.
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn species_isolated_scan() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let zstar = |data: &dyn Interface| -> u64 {
-        let prof = match assemble(total, k, 32, data, DEFAULT_RESOLUTION) {
-            Ok(p) => p,
-            Err(_) => return 0,
-        };
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .map_or(0, |r| r.z_star)
-    };
+    let (total, k) = box_cell();
+    let zstar = |data: &dyn Interface| zstar(total, k, 32, data);
     for c in [682u64, 131] {
         println!("== graded face capped at a <= {c} (cut charge empty past it) ==");
         let both = zstar(&SpeciesInterface::new(0.0, c, Some(c), Some(c)));
@@ -1083,13 +1086,16 @@ fn species_isolated_scan() {
         let cap_lg = zstar(&SpeciesInterface::new(2047.0, c, Some(c), Some(c)));
         println!("   poor CAPPED, magnitude 2^(m-1) = 2^2047:  z* = {cap_lg}");
         let cap_nocap = zstar(&SpeciesInterface::new(2047.0, total, Some(c), Some(c)));
-        println!("   poor UNCAPPED at the capacity theorem's own \
-bound 2^2047 (what we can actually prove): z* = {cap_nocap}");
+        println!(
+            "   poor UNCAPPED at the capacity theorem's own \
+bound 2^2047 (what we can actually prove): z* = {cap_nocap}"
+        );
     }
 }
 
 /// Debug: where does the poor term actually land in the envelope?
 #[test]
+#[ignore = "exploratory scan: prints a table, asserts nothing binding; run with --ignored"]
 fn species_envelope_probe() {
     let total = 1u64 << 12;
     let k = total / 2 - 1;
@@ -1097,10 +1103,14 @@ fn species_envelope_probe() {
     let lstar = (total / 2 + k - 1).div_ceil(3);
     println!("s = {total}, k = {k}, kod = {kod}, kev = {kev}, lstar = {lstar}");
     for (name, data) in [
-        ("poor 2^2047 uncapped, rich cap 131",
-         SpeciesInterface::new(2047.0, total, Some(131), Some(131))),
-        ("poor 2^0 uncapped, rich cap 131",
-         SpeciesInterface::new(0.0, total, Some(131), Some(131))),
+        (
+            "poor 2^2047 uncapped, rich cap 131",
+            SpeciesInterface::new(2047.0, total, Some(131), Some(131)),
+        ),
+        (
+            "poor 2^0 uncapped, rich cap 131",
+            SpeciesInterface::new(0.0, total, Some(131), Some(131)),
+        ),
     ] {
         let prof = assemble(total, k, 32, &data, DEFAULT_RESOLUTION).expect("tower");
         println!("{name}:");
@@ -1108,9 +1118,12 @@ fn species_envelope_probe() {
             let l0 = t.saturating_sub(total / 2).max(kod);
             let a = t - 2 * kod;
             let v = prof.eval(k, t).map(|x| x.hi.to_f64_round(Round::Up));
-            println!("   t = {t}: l0 = {l0} (kod = {kod}, mid active: \
+            println!(
+                "   t = {t}: l0 = {l0} (kod = {kod}, mid active: \
                       {}), a = {a}, envelope hi = {:?}",
-                     l0 < lstar, v.map(|x| format!("2^{x:.1}")));
+                l0 < lstar,
+                v.map(|x| format!("2^{x:.1}"))
+            );
         }
     }
 }

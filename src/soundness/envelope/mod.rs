@@ -150,36 +150,35 @@ impl<'a> Charges<'a> {
     /// (SpeciesInterface) is read here and nowhere else.
     fn mid_at(&self, t: u64) -> Option<Lg> {
         let cell = &self.cell;
+        self.mid_band(t, cell.lstar, |hi| self.mid.suffix_from(cell, hi))
+    }
+
+    /// The middle-band charge at threshold `t` over the strata
+    /// `[l0, top)`, `l0 = max(t - n, kod)`: the first
+    /// [`Self::SPECIES_WINDOW`] strata through the per-stratum datum
+    /// [`Interface::d_b_at`], the remainder as the aggregate
+    /// [`Interface::d_b`] times `tail(hi)`, the bracket of
+    /// `sum_{l >= hi} 1/C(l, kod)` over the rest of the range. `top`
+    /// is further clipped at the far-branch pair limit (a theorem,
+    /// `Cell::far_pair_limit`; the near branch is floored at one in
+    /// [`Self::rhs`]). Both split candidates of [`Self::rhs`] go
+    /// through here, so a provider that prices strata separately is
+    /// consulted by both.
+    fn mid_band(&self, t: u64, top: u64, tail: impl Fn(u64) -> Lg) -> Option<Lg> {
+        let cell = &self.cell;
         let l0 = t.saturating_sub(cell.n).max(cell.kod);
-        if l0 >= cell.lstar {
-            return None;
-        }
-        let a = t - 2 * cell.kod;
-        // strata above the far-branch pair limit are empty (a
-        // theorem, Cell::far_pair_limit); the near branch is
-        // floored at one in `rhs`
-        let top = cell.lstar.min(cell.far_pair_limit(t) + 1);
+        let top = top.min(cell.far_pair_limit(t) + 1);
         if l0 >= top {
             return None;
         }
+        let a = t - 2 * cell.kod;
         let hi = (l0 + Self::SPECIES_WINDOW).min(top);
-        let mut acc: Option<Lg> = None;
-        for l in l0..hi {
-            let term = self.data.d_b_at(cell.s, cell.k, l, a);
-            acc = Some(match acc {
-                Some(x) => x.add(&term),
-                None => term,
-            });
-        }
+        let mut acc = (l0..hi)
+            .map(|l| self.data.d_b_at(cell.s, cell.k, l, a))
+            .reduce(|x, y| x.add(&y));
         if hi < top {
-            let tail = self
-                .data
-                .d_b(cell.s, cell.k, a)
-                .mul(&self.mid.suffix_from(cell, hi));
-            acc = Some(match acc {
-                Some(x) => x.add(&tail),
-                None => tail,
-            });
+            let rest = self.data.d_b(cell.s, cell.k, a).mul(&tail(hi));
+            acc = Some(acc.map_or(rest.clone(), |x| x.add(&rest)));
         }
         acc
     }
@@ -217,39 +216,7 @@ impl<'a> Charges<'a> {
             .flatten()
             .reduce(|a, b| a.add(&b));
         let full_mid = if cell.kod >= 2 && cell.lstar < cell.n {
-            let l0m = t.saturating_sub(cell.n).max(cell.kod);
-            // per-stratum over the window, aggregate for the tail —
-            // the same treatment as `mid_at`, so a provider that
-            // prices strata separately is consulted by BOTH
-            // candidates. (Before round 19n this candidate read only
-            // the aggregate, and since it wins the min it made the
-            // per-stratum seam invisible.)
-            let topm = cell.n.min(cell.far_pair_limit(t) + 1);
-            let mid = if l0m < topm {
-                let a = t - 2 * cell.kod;
-                let hi = (l0m + Self::SPECIES_WINDOW).min(topm);
-                let mut acc: Option<Lg> = None;
-                for l in l0m..hi {
-                    let term = self.data.d_b_at(cell.s, cell.k, l, a);
-                    acc = Some(match acc {
-                        Some(x) => x.add(&term),
-                        None => term,
-                    });
-                }
-                if hi < topm {
-                    let tail = self
-                        .data
-                        .d_b(cell.s, cell.k, a)
-                        .mul(&self.mid.range_bracket(cell, hi));
-                    acc = Some(match acc {
-                        Some(x) => x.add(&tail),
-                        None => tail,
-                    });
-                }
-                acc
-            } else {
-                None
-            };
+            let mid = self.mid_band(t, cell.n, |hi| self.mid.range_bracket(cell, hi));
             [self.deep.single_at(cell.n), mid, small]
                 .into_iter()
                 .flatten()
@@ -294,12 +261,7 @@ pub fn step(
     };
     for &k in dims {
         let charges = Charges::build(prev, k, data)?;
-        let grid = build_grid(
-            charges.cell.r,
-            charges.cell.s,
-            2 * charges.cell.lstar,
-            res,
-        );
+        let grid = build_grid(charges.cell.r, charges.cell.s, 2 * charges.cell.lstar, res);
         // the envelope is the min of every theorem in hand: the
         // master's right-hand side, clamped by the analytic counts at
         // this level (Johnson and the shower bound hold at every

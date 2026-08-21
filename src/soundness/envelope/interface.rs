@@ -191,56 +191,81 @@ impl Interface for TrivialInterface {
 
     fn d_c(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
         let (np, h, lp) = stratum_geometry(s, k, l)?;
-        Some(
-            Lg::from_u64(2)
-                .pow(h)
-                .mul(&lg_binom(np, lp))
-                .mul(&lg_binom(np - lp, h)),
-        )
+        Some(trivial_d_c(np, h, lp, &lg_binom))
     }
 
-    /// The prefix scan of the trait default is `O(l)` binomials per
-    /// query — at box scale that linear scan was the profiled wall
-    /// (37 of 40 assembly minutes). Same values, table-driven and
-    /// cached per `(s, k)`, the shower/star pattern.
+    /// The trait default's prefix scan is `O(l)` binomials per query
+    /// — at box scale that linear scan was the profiled wall (37 of
+    /// 40 assembly minutes). Same values, table-driven. The unit
+    /// struct has nowhere to hold a cache, so the store is
+    /// process-global; it holds only outward-rounded endpoints, so
+    /// sharing it is harmless.
     fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
-        let kod = k / 2;
-        assert!(
-            l < kod,
-            "d_c_sup asked at l = {l} outside the small-strata range \
-             [0, {kod}) of k = {k}"
-        );
         static SUP: std::sync::OnceLock<SupCache> = std::sync::OnceLock::new();
-        let mut cache = SUP
-            .get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let prefix = cache.entry((s, k)).or_insert_with(|| {
-            let np = s / 2;
-            let facts = LgFactorials::new(np);
-            let binom = |n: u64, kk: u64| -> Lg { facts.binom(n, kk) };
-            let vals: Vec<Option<Lg>> = (0..kod)
-                .into_par_iter()
-                .map(|lp| {
-                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| {
-                        Lg::from_u64(2)
-                            .pow(h)
-                            .mul(&binom(np, lpp))
-                            .mul(&binom(np - lpp, h))
-                    })
-                })
-                .collect();
-            prefix_max_by_hi(vals.into_iter())
-                .into_iter()
-                .map(|v| v.as_ref().map(store))
-                .collect()
-        });
-        let (lo, hi) = prefix[l as usize]?;
-        Some(Lg::from_f64_bracket(lo, hi))
+        let cache = SUP.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()));
+        cached_prefix_sup(cache, s, k, l, trivial_d_c)
     }
 }
 
-/// The per-`(s, k)` prefix-maximum store of [`ShowerInterface`]'s
+/// The full stratum by configurations, `2^h C(np, lp) C(np - lp, h)`
+/// — every configuration charged its whole section cube. `binom`
+/// abstracts the binomial source so the cached scan can substitute
+/// its factorial table.
+fn trivial_d_c(np: u64, h: u64, lp: u64, binom: &dyn Fn(u64, u64) -> Lg) -> Lg {
+    Lg::from_u64(2)
+        .pow(h)
+        .mul(&binom(np, lp))
+        .mul(&binom(np - lp, h))
+}
+
+/// A stratum formula in the geometry coordinates `(np, h, lp)` with
+/// an abstracted binomial source — the shape shared by the trivial,
+/// shower and star faces.
+type StratumFormula = fn(u64, u64, u64, &dyn Fn(u64, u64) -> Lg) -> Lg;
+
+/// `max_{l' <= l} D_c(l')` for a stratum formula, computed once per
+/// `(s, k)` over the whole small-strata range `[0, kod)` from a
+/// parallel factorial table (the profiled 94%-of-wall hot spot when
+/// done per query with three-lgamma binomials), stored as
+/// outward-rounded endpoint pairs, and thereafter a lookup.
+///
+/// Precondition: `l < k/2` — the trait's stated `d_c_sup` domain.
+fn cached_prefix_sup(
+    cache: &SupCache,
+    s: u64,
+    k: u64,
+    l: u64,
+    formula: StratumFormula,
+) -> Option<Lg> {
+    let kod = k / 2;
+    assert!(
+        l < kod,
+        "d_c_sup asked at l = {l} outside the small-strata range \
+         [0, {kod}) of k = {k}"
+    );
+    let mut cache = cache
+        .lock()
+        // the cache holds only outward-rounded endpoint pairs,
+        // valid regardless of where another thread panicked
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let prefix = cache.entry((s, k)).or_insert_with(|| {
+        let np = s / 2;
+        let facts = LgFactorials::new(np);
+        let binom = |n: u64, kk: u64| -> Lg { facts.binom(n, kk) };
+        let vals: Vec<Option<Lg>> = (0..kod)
+            .into_par_iter()
+            .map(|lp| stratum_geometry(s, k, lp).map(|(np, h, lpp)| formula(np, h, lpp, &binom)))
+            .collect();
+        prefix_max_by_hi(vals.into_iter())
+            .into_iter()
+            .map(|v| v.as_ref().map(store))
+            .collect()
+    });
+    let (lo, hi) = prefix[l as usize]?;
+    Some(Lg::from_f64_bracket(lo, hi))
+}
+
+/// The per-`(s, k)` prefix-maximum store of a provider's cut-face
 /// suprema, as outward-rounded `f64` endpoint pairs (`None` = every
 /// stratum up to that index provably empty).
 type SupCache = std::sync::Mutex<BTreeMap<(u64, u64), Vec<Option<(f64, f64)>>>>;
@@ -314,41 +339,8 @@ impl Interface for ShowerInterface {
         Some(shower_d_c(np, h, lp, &lg_binom))
     }
 
-    /// Precondition: `l < k/2` (the master's small-strata range) and
-    /// `k >= 2` — matching the trait's stated `d_c` domain.
     fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
-        let kod = k / 2;
-        assert!(
-            l < kod,
-            "d_c_sup asked at l = {l} outside the small-strata range \
-             [0, {kod}) of k = {k}"
-        );
-        let mut cache = self
-            .sup
-            .lock()
-            // the cache holds only outward-rounded endpoint pairs,
-            // valid regardless of where another thread panicked
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let prefix = cache.entry((s, k)).or_insert_with(|| {
-            // one factorial table per (s, k), built in parallel,
-            // turns the O(kod) scan of three-lgamma binomials into
-            // table lookups — the profiled 94%-of-wall hot spot
-            let np = s / 2;
-            let facts = LgFactorials::new(np);
-            let binom = |n: u64, k: u64| -> Lg { facts.binom(n, k) };
-            let vals: Vec<Option<Lg>> = (0..kod)
-                .into_par_iter()
-                .map(|lp| {
-                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| shower_d_c(np, h, lpp, &binom))
-                })
-                .collect();
-            prefix_max_by_hi(vals.into_iter())
-                .into_iter()
-                .map(|v| v.as_ref().map(store))
-                .collect()
-        });
-        let (lo, hi) = prefix[l as usize]?;
-        Some(Lg::from_f64_bracket(lo, hi))
+        cached_prefix_sup(&self.sup, s, k, l, shower_d_c)
     }
 }
 
@@ -431,36 +423,8 @@ impl Interface for StarInterface {
         Some(star_d_c(np, h, lp, &lg_binom))
     }
 
-    /// Precondition: `l < k/2` — matching the trait's stated `d_c`
-    /// domain (same as the shower provider).
     fn d_c_sup(&self, s: u64, k: u64, l: u64) -> Option<Lg> {
-        let kod = k / 2;
-        assert!(
-            l < kod,
-            "d_c_sup asked at l = {l} outside the small-strata range \
-             [0, {kod}) of k = {k}"
-        );
-        let mut cache = self
-            .sup
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let prefix = cache.entry((s, k)).or_insert_with(|| {
-            let np = s / 2;
-            let facts = LgFactorials::new(np);
-            let binom = |n: u64, kk: u64| -> Lg { facts.binom(n, kk) };
-            let vals: Vec<Option<Lg>> = (0..kod)
-                .into_par_iter()
-                .map(|lp| {
-                    stratum_geometry(s, k, lp).map(|(np, h, lpp)| star_d_c(np, h, lpp, &binom))
-                })
-                .collect();
-            prefix_max_by_hi(vals.into_iter())
-                .into_iter()
-                .map(|v| v.as_ref().map(store))
-                .collect()
-        });
-        let (lo, hi) = prefix[l as usize]?;
-        Some(Lg::from_f64_bracket(lo, hi))
+        cached_prefix_sup(&self.sup, s, k, l, star_d_c)
     }
 }
 
@@ -607,6 +571,8 @@ pub struct SpeciesInterface {
 }
 
 impl SpeciesInterface {
+    /// The probe at the given pair-poor bound (`poor_lg` bits, empty
+    /// past `poor_cap`) and optional pair-rich / graded emptiness caps.
     #[must_use]
     pub fn new(
         poor_lg: f64,

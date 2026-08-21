@@ -43,8 +43,7 @@ impl Cell {
     /// `t_max <= s + k - t - 1`, hence every member has agreement at
     /// most that, hence at most `floor((s + k - t - 1)/2)` pairs.
     /// Strata above this limit are EMPTY and the sums may stop
-    /// there — which is also what structurally removes near words'
-    /// deeply-paired members from the middle band (SPLICE round 20b).
+    /// there.
     pub(super) fn far_pair_limit(&self, t: u64) -> u64 {
         (self.s + self.k).saturating_sub(t + 1) / 2
     }
@@ -316,16 +315,12 @@ impl CutCharge {
             let cut_term = self
                 .dc(cell, data, l)
                 .map(|dc| dc.div(&lg_binom(t - 2 * l, r - 2 * l)));
-            // the graded route (Lemma D + Lemma J). The decomposition
-            // is unconditional — every class member realizes its own
-            // fiber set — so a provider asserting ZERO realized cores
-            // (d_r = None) empties the class outright, with no
-            // multiplicity factor and hence no derived-Johnson
-            // validity condition (issue #65: the emptiness form
-            // crosses the coverage curve). Where the count is
-            // positive, multiply by the Johnson factor where the
-            // theorem applies; a pointwise min of valid bounds is a
-            // valid bound, and every branch is non-increasing in t.
+            // the graded route: every class member realizes its own
+            // fiber set, so zero realized cores (`d_r = None`) empty
+            // the class outright; a positive count is multiplied by
+            // the derived-Johnson factor where that theorem applies.
+            // A pointwise min of valid bounds is valid, and every
+            // branch is non-increasing in t.
             let term = match data.d_r(cell.s, cell.k, l, t - 2 * l) {
                 // zero realized cores: the class at (l, t) is empty
                 None => None,

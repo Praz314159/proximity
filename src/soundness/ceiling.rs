@@ -7,10 +7,9 @@
 //! the generic list-to-MCA conversion (ABF26 Theorem 5.1), kept as
 //! the certified BASELINE for the sibling MCA challenge: it delimits
 //! what generic methods achieve, and anything beyond it requires
-//! RS-specific structure — the program's open target. A soundness-map
-//! ceiling (Lemma 6.12 run backwards on an envelope) was removed
-//! 2026-08-07: no theorem backs that direction, and its crossing
-//! coincides with the list row's on the lattice.
+//! RS-specific structure — the program's open target. No
+//! soundness-map ceiling is provided: no theorem backs that
+//! direction.
 //!
 //! The envelope parameter is a closure because which envelope is
 //! admissible is the compilation chapter's decision; the real object

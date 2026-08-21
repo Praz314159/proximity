@@ -3,7 +3,7 @@
 //! count (ABF26 Lemma 3.7) — the attack side's data layer, consumed
 //! by [`super::floor`]; the defense side's counterpart is
 //! [`super::envelope`]. Upgrades to the estimates land here once
-//! (issue #37: the Diamond--Gruen Thm 3.10 ball estimate).
+//! (the Diamond--Gruen Thm 3.10 ball estimate).
 
 use crate::error::{Error, Result};
 use crate::math::enclosure::{lg_binom, Lg};

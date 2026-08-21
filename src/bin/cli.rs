@@ -308,13 +308,6 @@ fn main() {
                     "trivial" => Box::new(TrivialInterface),
                     "shower" => Box::new(ShowerInterface::new()),
                     "star" => Box::new(StarInterface::new()),
-                    "rigidity" => die(
-                        "--data rigidity was REFUTED (SPLICE round 20, 2026-08-13): its \
-                         middle face is false for every word one step from a codeword, \
-                         so every row it produced is vacuous. RigidityInterface survives \
-                         in the library only as the battery's negative control. \
-                         Unconditional providers: trivial|shower|star.",
-                    ),
                     other => die(format!("unknown --data {other} (trivial|shower|star)")),
                 };
                 println!("interface data: {data_name} (unconditional)");

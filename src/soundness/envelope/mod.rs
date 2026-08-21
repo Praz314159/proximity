@@ -40,17 +40,10 @@
 //! statement, when the register lands). With the analytic base the
 //! floor holds no flood at small `n0`.
 //!
-//! THE MEASURED WALL (re-affirmed, SPLICE round 17b). Every
-//! provider's gauge pins at the Johnson clamp because the mid band
-//! is priced through `D_b` at `l0 = kod`, where no data can be
-//! small. A "band-collapse" charge that briefly certified the box
-//! at `delta = 1/3` was RETRACTED the same day: its fiber-fold
-//! instantiation of thm:tc-ft2 misread the theorem's joint list
-//! (see the retraction note at `Charges::rhs`), and the standalone
-//! verifier gate_band_collapse.py refuted it with planted words.
-//! Beyond-Johnson radii remain gated on genuine mid-band data —
-//! the deep-capacity program (STAR-MAXIMUM-GENERAL.md secs. 12,
-//! 14) is the standing route.
+//! With every shipped provider the certified radius is the Johnson
+//! radius: the middle band is priced through `D_b` at `l = kod`, and
+//! no word-free `D_b` is small there. Radii beyond Johnson require a
+//! sharper middle-band datum, which no provider supplies.
 
 mod base;
 mod charges;
@@ -61,10 +54,7 @@ mod tests;
 
 pub use base::{analytic_base, interpolation_base};
 pub use charges::channel_dims;
-pub use interface::{
-    Interface, RigidityInterface, ShowerInterface, SpeciesInterface, StarInterface,
-    TrivialInterface,
-};
+pub use interface::{Interface, ShowerInterface, StarInterface, TrivialInterface};
 pub use profile::{Profile, DEFAULT_RESOLUTION};
 
 use base::analytic_brackets;
@@ -135,19 +125,11 @@ impl<'a> Charges<'a> {
         })
     }
 
-    /// Charge 2 at threshold `t`, `None` when the band is empty.
-    ///
-    /// The first [`Self::SPECIES_WINDOW`] strata are consumed through
-    /// the PER-STRATUM datum [`Interface::d_b_at`] and the rest
-    /// through the aggregate's closed form. The split is exact: with
-    /// the default `d_b_at` (the ownership division) the two forms
-    /// sum to the old single-term product, so shipped providers are
-    /// unaffected. It exists because the strata are not alike — the
-    /// dominant term is `l = kod`, where the ownership divisor is
-    /// one, and that is exactly the PAIR-POOR species; the strata
-    /// above it are pair-rich and already discounted by
-    /// `C(l, kod)`. A provider that prices the species separately
-    /// (SpeciesInterface) is read here and nowhere else.
+    /// Charge 2 at threshold `t`, `None` when the band is empty. The
+    /// first [`Self::SPECIES_WINDOW`] strata go through the per-stratum
+    /// datum [`Interface::d_b_at`], the rest through the aggregate
+    /// `D_b` times the closed-form tail; with the default `d_b_at` the
+    /// two forms sum to the single-term product exactly.
     fn mid_at(&self, t: u64) -> Option<Lg> {
         let cell = &self.cell;
         self.mid_band(t, cell.lstar, |hi| self.mid.suffix_from(cell, hi))
@@ -183,27 +165,12 @@ impl<'a> Charges<'a> {
         acc
     }
 
-    /// [RETRACTED 2026-08-12, SPLICE round 17b] A "band collapse"
-    /// candidate briefly lived here: it priced the whole sub-`l*`
-    /// range by the child rows at fiber agreement `F0 = t - l* + 1`
-    /// via thm:tc-ft2, and certified the box at `delta = 1/3`. The
-    /// standalone verifier (gate_band_collapse.py) REFUTED it with
-    /// planted words at every audited cell: tc-ft2's joint list
-    /// `J_F` takes channel pairs with a COMMON F-fiber witness of
-    /// PLAIN agreement in both channels (07_topcut.tex), and an
-    /// unfolded member's plain both-channel agreement is exactly
-    /// its PAIR count `l` — the deep charge's `F = l`
-    /// instantiation, valid only at `l >= l*`. Single-fiber
-    /// (marked) agreement never enters `J_F`; there is no
-    /// fiber-fold instantiation, and the sub-`l*` strata remain
-    /// priced by `D_b`/`D_c` data alone.
-    ///
     /// The master's right-hand side at threshold `t`: the minimum
     /// over split candidates of the three charges. The split between
     /// the middle band and the deep range is a FREE parameter
     /// `lambda in [l*, n]` — the core charge holds at every
-    /// `l >= kod` and the round-9 nesting + FT-2 chain holds at
-    /// every `F >= l*` — and the candidates bracket its extremes:
+    /// `l >= kod` and the descent chain at every `l >= l*` — and
+    /// the candidates bracket its extremes:
     /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
     /// middle range through cores, deep reduced to the fully-paired
     /// class). Each candidate is non-increasing in `t`, so the min
@@ -224,15 +191,11 @@ impl<'a> Charges<'a> {
         } else {
             None
         };
-        // THE NEAR BRANCH (desc:interface-scope's companion, SPLICE
-        // round 20b). At threshold `t` a word with
-        // `t_max >= s + k - t` has list EXACTLY ONE: its best
-        // codeword `g` and any member `f` agree with each other on
-        // `>= t + t_max - s >= k` points, and two distinct
-        // polynomials of degree `< k` agree at most `k - 1` times.
-        // That branch consumes no charge, so the envelope is the
-        // MAX of one and the far branch's bound — which is why an
-        // all-empty right-hand side is the value one, not an error.
+        // The near branch: a word with `t_max >= s + k - t` has list
+        // exactly one (its best codeword and any member agree on
+        // `>= t + t_max - s >= k` points). It consumes no charge, so
+        // the envelope is the max of one and the far branch's bound;
+        // an all-empty right-hand side is the value one, not an error.
         Ok([classic, full_mid]
             .into_iter()
             .flatten()

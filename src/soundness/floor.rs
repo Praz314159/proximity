@@ -238,9 +238,8 @@ mod tests {
         assert!((l - 185.93196).abs() < 0.001, "log2|F| = {l}");
     }
 
-    /// The crossing brackets the exact rational threshold — the test
-    /// the original search direction lacked (it returned the range
-    /// endpoints; caught in the 2026-08-06 review).
+    /// The crossing brackets the exact rational threshold, never a
+    /// range endpoint.
     #[test]
     fn first_moment_crossing_brackets_the_exact_threshold() {
         use super::super::volumes::ball_exact;

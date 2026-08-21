@@ -1,7 +1,7 @@
-//! The master's three charges — deep (round-9 single term min'd
-//! with the suffix sum), middle (cores against `D_b`), and small
-//! strata (the cut min'd with the graded route) — with their
-//! precomputed structures.
+//! The master's three charges — deep strata (the descent, as the
+//! smaller of a suffix sum and a single-term form), the middle band
+//! (cores against `D_b`), and the small strata (the cut, min'd with
+//! the graded route) — with their precomputed structures.
 
 use crate::math::enclosure::{lg_binom, Lg};
 use rug::float::Round;
@@ -30,6 +30,23 @@ pub(super) struct Cell {
 }
 
 impl Cell {
+    /// The largest pair count any member can carry at threshold `t`
+    /// on the far branch of the near/far split.
+    ///
+    /// At threshold `t` a word with `t_max >= s + k - t` has list
+    /// exactly one (its best codeword and any member agree with
+    /// each other on `>= t + t_max - s >= k` points, and distinct
+    /// polynomials of degree `< k` agree at most `k - 1` times), so
+    /// that branch consumes no charge and `Charges::rhs` floors the
+    /// envelope at one. Every remaining word has
+    /// `t_max <= s + k - t - 1`, hence every member has agreement at
+    /// most that, hence at most `floor((s + k - t - 1)/2)` pairs.
+    /// Strata above this limit are empty and the sums may stop
+    /// there.
+    pub(super) fn far_pair_limit(&self, t: u64) -> u64 {
+        (self.s + self.k).saturating_sub(t + 1) / 2
+    }
+
     pub(super) fn new(n: u64, k: u64) -> Self {
         let (kev, kod) = channel_dims(k);
         Cell {
@@ -107,8 +124,8 @@ impl DeepCharge {
         DeepCharge { runs }
     }
 
-    /// The round-9 single-term charge at split `l0` (which must lie
-    /// in `[l*, n]`): `2 max(E(n, kev, l0), E(n, kod, l0))`.
+    /// The single-term charge at split `l0` (which must lie in
+    /// `[l*, n]`): `2 max(E(n, kev, l0), E(n, kod, l0))`.
     pub(super) fn single_at(&self, l0: u64) -> Option<Lg> {
         if self.runs.is_empty() {
             return None;
@@ -118,18 +135,17 @@ impl DeepCharge {
         Some(Lg::from_u64(2).mul(&run.max_at(l0)))
     }
 
-    /// The charge at threshold `t`: the smaller of the master's
-    /// suffix sum from `l0 = max(l*, t - n)` and the round-9
-    /// single-term charge `2 max(E(n, kev, l0), E(n, kod, l0))` —
-    /// the nesting + injectivity + FT-2 chain (verifier
-    /// s19_ft2_correlated): every deep class injects into the joint
-    /// list at its own threshold, the joint lists NEST down to `l0`,
-    /// and FT-2's tiling (`3 l0 >= n + k - 1`, guaranteed by the
+    /// The charge at threshold `t`: the smaller of the suffix sum
+    /// from `l0 = max(l*, t - n)` and the single-term charge
+    /// `2 max(E(n, kev, l0), E(n, kod, l0))`. The single term is
+    /// valid because every deep class injects into the joint list at
+    /// its own threshold, the joint lists nest down to `l0`, and the
+    /// fold's tiling condition `3 l0 >= n + k - 1` (guaranteed by the
     /// coverage threshold) collapses the joint list to twice the
-    /// larger channel list, loss ONE — no width factor per level.
-    /// Both forms are non-increasing in `t`, so the pointwise min
-    /// preserves the grid's enclosure contract. `None` when the
-    /// stratum range is empty.
+    /// larger channel list with no further loss. Both forms are
+    /// non-increasing in `t`, so the pointwise min preserves the
+    /// grid's enclosure contract. `None` when the stratum range is
+    /// empty.
     pub(super) fn at(&self, cell: &Cell, t: u64) -> Option<Lg> {
         let l0 = t.saturating_sub(cell.n).max(cell.lstar);
         if l0 > cell.n || self.runs.is_empty() {
@@ -182,8 +198,8 @@ impl MidSuffix {
         MidSuffix::Exact(suffix)
     }
 
-    /// The suffix bracket for an EXTENDED split `lambda > l*`
-    /// (round-9 split-point freedom): the range `[l0, lambda)` is
+    /// The suffix bracket for an extended split `lambda > l*`: the
+    /// range `[l0, lambda)` is
     /// enclosed by [first term, infinite telescope] — loose by a
     /// fraction of a bit, sound for every `lambda`, and free of any
     /// `lambda`-indexed storage. Caller guarantees `kod >= 2`.
@@ -215,20 +231,20 @@ impl MidSuffix {
     }
 }
 
-/// The derived-Johnson per-core multiplicity (gate_graded_pencils,
-/// Lemma J): members through a partial core of size `l` agree
+/// The derived-Johnson per-core multiplicity: members through a
+/// partial core of size `l` agree
 /// pairwise on at most `k' - 1` of the `N = s - 2l` available
 /// points, so at derived agreement `m` the classical Johnson count
 /// `N (m - k' + 1) / (m^2 - N (k' - 1))` bounds the per-core class.
-/// Returned only where BOTH the quadratic condition holds (true on
-/// the whole band below the coverage curve — the marginality
-/// identity) AND the expression is non-increasing in `m`
+/// Returned only where both the quadratic condition holds (true on
+/// the whole band below the coverage curve) and the expression is
+/// non-increasing in `m`
 /// (`m >= 2 (k' - 1)`), which the step's off-grid block enclosure
 /// requires of every summand.
 pub(super) fn derived_johnson(s: u64, k: u64, l: u64, m: u64) -> Option<Lg> {
     let kp = k.checked_sub(2 * l)?;
     let n_av = s - 2 * l;
-    // the extra gates are MONOTONE-SAFETY in `t` (the off-grid block
+    // the extra gates are monotone-safety in `t` (the off-grid block
     // enclosure needs every summand non-increasing), not validity —
     // they stay here, outside the shared kernel
     if kp == 0 || m < 2 * (kp - 1) || m < kp {
@@ -297,18 +313,27 @@ impl CutCharge {
             let cut_term = self
                 .dc(cell, data, l)
                 .map(|dc| dc.div(&lg_binom(t - 2 * l, r - 2 * l)));
-            // the graded route (Lemma D + Lemma J): realized cores
-            // times the derived-Johnson multiplicity, where the
-            // theorem applies; a pointwise min of valid bounds is a
-            // valid bound, and both branches are non-increasing in t
-            let graded_term = derived_johnson(cell.s, cell.k, l, t - 2 * l)
-                .and_then(|j| data.d_r(cell.s, cell.k, l, t - 2 * l).map(|rr| rr.mul(&j)));
-            // an empty stratum (cut face None) means the class is
-            // empty outright — the graded term must not resurrect it
-            let term = match (cut_term, graded_term) {
-                (Some(c), Some(g)) => Some(c.min(&g)),
-                (Some(c), None) => Some(c),
-                (None, _) => None,
+            // the graded route: every class member realizes its own
+            // fiber set, so zero realized cores (`d_r = None`) empty
+            // the class outright; a positive count is multiplied by
+            // the derived-Johnson factor where that theorem applies.
+            // A pointwise min of valid bounds is valid, and every
+            // branch is non-increasing in t.
+            let term = match data.d_r(cell.s, cell.k, l, t - 2 * l) {
+                // zero realized cores: the class at (l, t) is empty
+                None => None,
+                Some(rr) => {
+                    let graded_term =
+                        derived_johnson(cell.s, cell.k, l, t - 2 * l).map(|j| rr.mul(&j));
+                    // an empty stratum (cut face None) means the
+                    // class is empty outright — the graded term must
+                    // not resurrect it
+                    match (cut_term, graded_term) {
+                        (Some(c), Some(g)) => Some(c.min(&g)),
+                        (Some(c), None) => Some(c),
+                        (None, _) => None,
+                    }
+                }
             };
             if let Some(term) = term {
                 acc = Some(add_to(acc, term));
@@ -317,7 +342,14 @@ impl CutCharge {
                 break;
             }
             // a provider that certifies everything below `l` empty
-            // closes the sum exactly — no tail term at all
+            // closes the sum exactly — no tail term at all: either
+            // through the cut face (d_c_sup = None) or through the
+            // graded face (d_r_sup = None: zero realized cores at
+            // every remaining stratum, so every remaining class is
+            // empty by the unconditional decomposition)
+            if data.d_r_sup(cell.s, cell.k, l - 1, t).is_none() {
+                break;
+            }
             let Some(sup) = self.dc_sup(cell, data, l - 1) else {
                 break;
             };
@@ -327,7 +359,7 @@ impl CutCharge {
             tail_hi.sub_assign_round(&lg_binom(t - 2 * (l - 1), r - 2 * (l - 1)).lo, Round::Up);
             // the graded tail majorant: on the band (`phi` increasing
             // in `l`, i.e. `t <= (s + k - 1)/2`) the derived-Johnson
-            // multiplicity at the BINDING stratum dominates every
+            // multiplicity at the binding stratum dominates every
             // remaining one — `N` falls, `m - k'` is constant, `phi`
             // rises — so count x d_r_sup x J(lmin) bounds the whole
             // remainder; non-increasing in `t` (numerator-derivative

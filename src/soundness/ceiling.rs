@@ -5,12 +5,11 @@
 //! envelope against `eps* |F|`, no conversion (the grand list-decoding
 //! challenge at `m = 1`; see its scope note). [`ca_ceiling_row`] is
 //! the generic list-to-MCA conversion (ABF26 Theorem 5.1), kept as
-//! the certified BASELINE for the sibling MCA challenge: it delimits
+//! the certified baseline for the sibling MCA challenge: it delimits
 //! what generic methods achieve, and anything beyond it requires
-//! RS-specific structure — the program's open target. A soundness-map
-//! ceiling (Lemma 6.12 run backwards on an envelope) was removed
-//! 2026-08-07: no theorem backs that direction, and its crossing
-//! coincides with the list row's on the lattice.
+//! RS-specific structure — the program's open target. No
+//! soundness-map ceiling is provided: no theorem backs that
+//! direction.
 //!
 //! The envelope parameter is a closure because which envelope is
 //! admissible is the compilation chapter's decision; the real object
@@ -50,21 +49,20 @@ pub struct CeilingRow {
     /// Certified upper endpoint of the same.
     pub lg_sound_hi: f64,
     /// True if the next list radius is certified on the other side of
-    /// the target: the ENVELOPE's crossing is pinned to one lattice
+    /// the target: the envelope's crossing is pinned to one lattice
     /// step. This pins the instrument, not the true list — the
     /// envelope is only an upper bound, so nothing is claimed about
     /// where the true list crosses.
     pub crossing_pinned: bool,
 }
 
-/// The generic list-to-MCA conversion (GCXK25, ABF26 Theorem 5.1):
+/// The generic list-to-MCA conversion (ABF26 Theorem 5.1):
 /// a certified list bound `L` at radius `z/n` yields certified mutual
 /// correlated agreement at the square-root-loss radius
 /// `1 - sqrt(1 - z/n + eta)` with error `(L^2 (z/n) n + 1/eta)/|F|`
 /// — i.e. `(L^2 z + 1/eta)/|F|` on the lattice. The proximity loss is
-/// intrinsic to the generic conversion (ABF26 Theorem 5.4's
-/// counterexample); closing it for smooth-domain RS is the program's
-/// open target, so rows through this map are the certified GENERIC
+/// intrinsic to the generic conversion (ABF26 Theorem 5.4 gives a
+/// counterexample); rows through this map are the certified generic
 /// ceiling.
 pub fn lg_mca_error(lg_list: &Lg, z: u64, inv_eta: u64, ext_q: &Integer) -> Result<Lg> {
     let numerator = lg_list
@@ -75,7 +73,7 @@ pub fn lg_mca_error(lg_list: &Lg, z: u64, inv_eta: u64, ext_q: &Integer) -> Resu
 }
 
 /// The CA radius of the conversion at list radius `z`, on the target
-/// lattice, rounded DOWN (a conservative claim): the largest `z_ca`
+/// lattice, rounded down (a conservative claim): the largest `z_ca`
 /// with `z_ca/n <= 1 - sqrt(1 - z/n + eta)`, computed with directed
 /// rounding (the sqrt argument and the sqrt both rounded up).
 pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
@@ -93,7 +91,7 @@ pub fn ca_radius(n: u64, z: u64, inv_eta: u64) -> u64 {
     eta.div_assign_round(&Float::with_val(prec, inv_eta), Round::Up);
     let mut s = Float::with_val_round(prec, arg + eta, Round::Up).0;
     s.sqrt_round(Round::Up);
-    // remaining steps rounded DOWN so the claimed radius never overshoots
+    // remaining steps rounded down so the claimed radius never overshoots
     let mut frac = Float::with_val(prec, 1u32);
     frac.sub_assign_round(&s, Round::Down);
     frac.mul_assign_round(&Float::with_val(prec, n), Round::Down);
@@ -143,7 +141,7 @@ pub fn ca_ceiling_row(
 }
 
 /// The ceiling in the challenge's own currency: the largest radius at
-/// which the envelope is certified to hold the list AT OR BELOW
+/// which the envelope is certified to hold the list at or below
 /// `eps* |F|`. This is the challenge's own question — no soundness or
 /// MCA conversion enters — and it is directly comparable to
 /// [`super::floor::elias_list_row`]: the challenge is resolved at a

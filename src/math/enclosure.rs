@@ -300,6 +300,34 @@ pub fn lg_binom(n: u64, k: u64) -> Lg {
     lgamma2(n + 1).div(&lgamma2(k + 1)).div(&lgamma2(n - k + 1))
 }
 
+/// [`lg_binom`] behind a global memo — for call sites that query the
+/// same fixed arguments many times (per-threshold loops re-deriving
+/// per-level constants). Bit-for-bit the same bracket as
+/// [`lg_binom`]; the memo stores the full-precision endpoints, so
+/// this is a pure amortization, not a widening. Reads dominate after
+/// warm-up; the lock is per-process and the key space stays small
+/// (level constants, not per-threshold values).
+#[must_use]
+pub fn lg_binom_memo(n: u64, k: u64) -> Lg {
+    use std::collections::HashMap;
+    use std::sync::{OnceLock, RwLock};
+    static CACHE: OnceLock<RwLock<HashMap<(u64, u64), Lg>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Some(v) = cache
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&(n, k))
+    {
+        return v.clone();
+    }
+    let v = lg_binom(n, k);
+    cache
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((n, k), v.clone());
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

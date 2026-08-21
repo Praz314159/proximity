@@ -1,14 +1,13 @@
-//! The floor face: what attacks certifiably achieve. Two row species,
-//! by the theorem behind them. **Counting rows**: Table-4-style Elias
-//! rows (ABF26 Lemma 3.7 pigeonhole — some word has the list; the
-//! certified wall floor delta* = 0.46783 at the box) and the
-//! first-moment (Diamond--Gruen random words) crossing.
-//! **Construction rows**: [`rung_floor_row`] certifies the Theorem-A
-//! rung families — here is the word, and its list is the exact
-//! binomial `C(avail, b)` (exact at every prime by Theorem B_mult).
-//! The prize's pinch is floor z* == ceiling z*
-//! ([`super::ceiling`]). The uncertified float twin of this file is
-//! [`super::explore`]: explore there, cite from here.
+//! The floor face: what attacks certifiably achieve. Two row species.
+//! Counting rows: the Elias pigeonhole (some word has a list at least
+//! the ball volume over `Q^(n-k)`; ABF26 Lemma 3.7) and the
+//! first-moment crossing for random words. Construction rows:
+//! [`rung_floor_row`] certifies the rung families — an explicit word
+//! whose list is the exact binomial `C(avail, b)` at every prime
+//! (see [`crate::smooth::rung`]). The challenge is resolved at a
+//! radius where this face's crossing meets the ceiling's
+//! ([`super::ceiling`]). The float twin of this file is
+//! [`super::explore`].
 
 use crate::error::{Error, Result};
 use crate::math::enclosure::{lg_binom, Lg};
@@ -78,7 +77,7 @@ pub struct EliasRow {
     pub lg_sound_lo: f64,
     /// Certified upper endpoint of log2 soundness at z_star.
     pub lg_sound_hi: f64,
-    /// True if at z_star - 1 the soundness is certified BELOW the target
+    /// True if at z_star - 1 the soundness is certified below the target
     /// (upper endpoint under target), i.e. the crossing is pinned to one z.
     pub crossing_pinned: bool,
 }
@@ -120,7 +119,7 @@ pub fn elias_row(
 
 /// The floor in the challenge's own currency: the smallest radius at
 /// which the exact Elias count (ABF26 Lemma 3.7) is certified to
-/// EXCEED `eps* |F|` — above it no list bound can meet the challenge,
+/// exceed `eps* |F|` — above it no list bound can meet the challenge,
 /// so it bounds `delta*` from above. Equivalent to the soundness route
 /// of [`elias_row`] up to the negligible `2x` term of the Lemma 6.12
 /// map; the two are cross-pinned in the tests.
@@ -177,10 +176,10 @@ pub struct RungFloorRow {
 /// The construction floor at `(n, k)`: among all rung families in the
 /// exactness window ([`rung_families`]), the largest agreement
 /// fraction `r/s_g` whose exact count `C(avail, b)` is certified to
-/// EXCEED `eps* |F|` — the family's radius `1 - r/s_g` bounds the
+/// exceed `eps* |F|` — the family's radius `1 - r/s_g` bounds the
 /// challenge answer from above, and unlike the counting rows the
-/// witness is explicit: Theorem A's rung construction attains the
-/// count in the window, exactly at every prime by Theorem B_mult.
+/// witness is explicit: the rung word attains the count in the
+/// window, exactly at every prime.
 /// There is no lattice walk here: a family is accepted only when its
 /// whole count bracket clears the whole threshold bracket
 /// (straddling candidates are conservatively dropped), fractions are
@@ -238,9 +237,8 @@ mod tests {
         assert!((l - 185.93196).abs() < 0.001, "log2|F| = {l}");
     }
 
-    /// The crossing brackets the exact rational threshold — the test
-    /// the original search direction lacked (it returned the range
-    /// endpoints; caught in the 2026-08-06 review).
+    /// The crossing brackets the exact rational threshold, never a
+    /// range endpoint.
     #[test]
     fn first_moment_crossing_brackets_the_exact_threshold() {
         use super::super::volumes::ball_exact;

@@ -2,9 +2,8 @@
 //!
 //! A *profile envelope* at level `n` is a function `E(n, k, t)` that
 //! dominates the list profile of every word on `mu_n` — every
-//! dimension `k` in its window, every threshold `t` above its curve
-//! (notes v2, ch. 4, the profile envelope / descent hypothesis). The
-//! objects here carry that hypothesis up the tower: [`Profile`] is one
+//! dimension `k` in its window, every threshold `t` above its curve.
+//! The objects here carry that hypothesis up the tower: [`Profile`] is one
 //! level's envelope as certified brackets, [`step`] is the master
 //! inequality applied as an operator (level `n` in, level `2n` out),
 //! and [`assemble`] is the conditional form of the worst-case bound —
@@ -26,25 +25,17 @@
 //! falls, so the remaining terms are dominated by count times the
 //! worst numerator over the smallest divisor).
 //!
-//! Interface data is pluggable ([`Interface`]). [`TrivialInterface`]
-//! is the citable floor of the hierarchy: `D_c` by counting the whole
-//! stratum, `D_b` by the pencil-agreement lemma's disjointness bound
-//! (at most `(s - 2 kod)/a` members per core reach surplus `a`).
-//! Real data — the engine's collision bounds and the per-prime
-//! envelope at a certified prime — drops in by implementing the same
-//! trait. Bases likewise: [`analytic_base`] (the default — the ch. 4
-//! base section's unconditional statement: interpolation, sharp
-//! Johnson, and the ownership shower bound, pointwise min) seeds the
-//! tower; [`assemble_levels_from`] is the seam for sharper bases
-//! (the certified floor values of the base section's companion
-//! statement, when the register lands). With the analytic base the
-//! floor holds no flood at small `n0`. The loss map's measured wall
-//! (box run, 2026-08-09) is the SMALL-STRATA cut charge: past the
-//! Johnson radius the classes at `l` just below `kod` activate, and
-//! the configuration-count `D_c` floods at scale in both data modes
-//! — beyond-Johnson radii are gated on a scale-correct small-strata
-//! charge (the graded-pencil route) before the `D_b` supply even
-//! binds.
+//! Interface data is pluggable ([`Interface`]); [`TrivialInterface`]
+//! is the word-free floor of the hierarchy, [`ShowerInterface`] and
+//! [`StarInterface`] sharpen the cut face. The tower is seeded by
+//! [`analytic_base`] (interpolation, sharp Johnson, and the ownership
+//! bound, pointwise min); [`assemble_levels_from`] accepts any other
+//! base.
+//!
+//! With every shipped provider the certified radius is the Johnson
+//! radius: the middle band is priced through `D_b` at `l = kod`, and
+//! no word-free `D_b` is small there. Radii beyond Johnson require a
+//! sharper middle-band datum, which no provider supplies.
 
 mod base;
 mod charges;
@@ -55,7 +46,7 @@ mod tests;
 
 pub use base::{analytic_base, interpolation_base};
 pub use charges::channel_dims;
-pub use interface::{Interface, RigidityInterface, ShowerInterface, TrivialInterface};
+pub use interface::{Interface, ShowerInterface, StarInterface, TrivialInterface};
 pub use profile::{Profile, DEFAULT_RESOLUTION};
 
 use base::analytic_brackets;
@@ -83,6 +74,13 @@ struct Charges<'a> {
 }
 
 impl<'a> Charges<'a> {
+    /// How many of the lowest middle-band strata are consumed
+    /// through the per-stratum datum before the aggregate's closed
+    /// form takes over. Small: the ownership divisor `C(l, kod)`
+    /// makes higher strata negligible, and the box's `l*` is far too
+    /// large to sum term by term.
+    const SPECIES_WINDOW: u64 = 4;
+
     fn build(prev: &Profile, k: u64, data: &'a dyn Interface) -> Result<Self> {
         let cell = Cell::new(prev.n, k);
         if k < 2 || k > cell.s - 2 {
@@ -119,28 +117,53 @@ impl<'a> Charges<'a> {
         })
     }
 
-    /// Charge 2 at threshold `t`, `None` when the band is empty.
+    /// Charge 2 at threshold `t`, `None` when the band is empty. The
+    /// first [`Self::SPECIES_WINDOW`] strata go through the per-stratum
+    /// datum [`Interface::d_b_at`], the rest through the aggregate
+    /// `D_b` times the closed-form tail; with the default `d_b_at` the
+    /// two forms sum to the single-term product exactly.
     fn mid_at(&self, t: u64) -> Option<Lg> {
         let cell = &self.cell;
+        self.mid_band(t, cell.lstar, |hi| self.mid.suffix_from(cell, hi))
+    }
+
+    /// The middle-band charge at threshold `t` over the strata
+    /// `[l0, top)`, `l0 = max(t - n, kod)`: the first
+    /// [`Self::SPECIES_WINDOW`] strata through the per-stratum datum
+    /// [`Interface::d_b_at`], the remainder as the aggregate
+    /// [`Interface::d_b`] times `tail(hi)`, the bracket of
+    /// `sum_{l >= hi} 1/C(l, kod)` over the rest of the range. `top`
+    /// is further clipped at the far-branch pair limit (a theorem,
+    /// `Cell::far_pair_limit`; the near branch is floored at one in
+    /// [`Self::rhs`]). Both split candidates of [`Self::rhs`] go
+    /// through here, so a provider that prices strata separately is
+    /// consulted by both.
+    fn mid_band(&self, t: u64, top: u64, tail: impl Fn(u64) -> Lg) -> Option<Lg> {
+        let cell = &self.cell;
         let l0 = t.saturating_sub(cell.n).max(cell.kod);
-        if l0 >= cell.lstar {
+        let top = top.min(cell.far_pair_limit(t) + 1);
+        if l0 >= top {
             return None;
         }
         let a = t - 2 * cell.kod;
-        Some(
-            self.data
-                .d_b(cell.s, cell.k, a)
-                .mul(&self.mid.suffix_from(cell, l0)),
-        )
+        let hi = (l0 + Self::SPECIES_WINDOW).min(top);
+        let mut acc = (l0..hi)
+            .map(|l| self.data.d_b_at(cell.s, cell.k, l, a))
+            .reduce(|x, y| x.add(&y));
+        if hi < top {
+            let rest = self.data.d_b(cell.s, cell.k, a).mul(&tail(hi));
+            acc = Some(acc.map_or(rest.clone(), |x| x.add(&rest)));
+        }
+        acc
     }
 
     /// The master's right-hand side at threshold `t`: the minimum
     /// over split candidates of the three charges. The split between
-    /// the middle band and the deep range is a FREE parameter
+    /// the middle band and the deep range is a free parameter
     /// `lambda in [l*, n]` — the core charge holds at every
-    /// `l >= kod` and the round-9 nesting + FT-2 chain holds at
-    /// every `F >= l*` — and the candidates bracket its extremes:
-    /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
+    /// `l >= kod` and the descent chain at every `l >= l*` — and
+    /// the candidates bracket its extremes:
+    /// `lambda = l*` and `lambda = n` (the whole
     /// middle range through cores, deep reduced to the fully-paired
     /// class). Each candidate is non-increasing in `t`, so the min
     /// preserves the grid's enclosure contract.
@@ -152,17 +175,7 @@ impl<'a> Charges<'a> {
             .flatten()
             .reduce(|a, b| a.add(&b));
         let full_mid = if cell.kod >= 2 && cell.lstar < cell.n {
-            let l0m = t.saturating_sub(cell.n).max(cell.kod);
-            let mid = if l0m < cell.n {
-                let a = t - 2 * cell.kod;
-                Some(
-                    self.data
-                        .d_b(cell.s, cell.k, a)
-                        .mul(&self.mid.range_bracket(cell, l0m)),
-                )
-            } else {
-                None
-            };
+            let mid = self.mid_band(t, cell.n, |hi| self.mid.range_bracket(cell, hi));
             [self.deep.single_at(cell.n), mid, small]
                 .into_iter()
                 .flatten()
@@ -170,15 +183,16 @@ impl<'a> Charges<'a> {
         } else {
             None
         };
-        match (classic, full_mid) {
-            (Some(c), Some(f)) => Ok(c.min(&f)),
-            (Some(c), None) => Ok(c),
-            (None, Some(f)) => Ok(f),
-            (None, None) => Err(Error::Unsupported(format!(
-                "no charge covers cell ({}, {}, {t})",
-                cell.s, cell.k
-            ))),
-        }
+        // The near branch: a word with `t_max >= s + k - t` has list
+        // exactly one (its best codeword and any member agree on
+        // `>= t + t_max - s >= k` points). It consumes no charge, so
+        // the envelope is the max of one and the far branch's bound;
+        // an all-empty right-hand side is the value one, not an error.
+        Ok([classic, full_mid]
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| a.min(&b))
+            .map_or_else(Lg::zero, |v| v.max(&Lg::zero())))
     }
 }
 
@@ -202,7 +216,7 @@ pub fn step(
     };
     for &k in dims {
         let charges = Charges::build(prev, k, data)?;
-        let grid = build_grid(charges.cell.r, charges.cell.s, res);
+        let grid = build_grid(charges.cell.r, charges.cell.s, 2 * charges.cell.lstar, res);
         // the envelope is the min of every theorem in hand: the
         // master's right-hand side, clamped by the analytic counts at
         // this level (Johnson and the shower bound hold at every

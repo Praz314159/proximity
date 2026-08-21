@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
-use crate::math::enclosure::{lg_binom, Lg};
+use crate::math::enclosure::{lg_binom, lg_binom_memo, Lg};
 use rug::Integer;
 
 use super::profile::{store, Profile};
@@ -15,7 +15,7 @@ use super::profile::{store, Profile};
 /// on any `k`-subset of its agreement set, so the map to that subset
 /// is injective and the list is at most the number of subsets. The
 /// crudest citable base, kept as the reference floor;
-/// [`analytic_base`] dominates it pointwise and is [`assemble`]'s
+/// [`analytic_base`] dominates it pointwise and is [`super::assemble`]'s
 /// default.
 pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
     base_from_counts(n0, dims, |_, _, interp| interp.clone())
@@ -54,28 +54,21 @@ fn base_from_counts(
     Ok(prof)
 }
 
-/// The analytic base (ch. 4, the base of the tower): at each
-/// threshold the smallest of three unconditional, prime-free counts.
-/// **Interpolation**: `C(n0, k)`. **Johnson**, in the sharp
-/// agreement form `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`,
-/// valid once `t^2 > n (k - 1)` — the quadratic argument: `m`
-/// members agreeing on `>= t` points each, pairwise on `<= k - 1`,
-/// force `m t (m t - n) / n <= m (m - 1)(k - 1)` by convexity. At
-/// `t = n` it reads exactly 1, so the tower's loss-free transport
-/// carries a one-word list to the top. **The shower bound**
-/// (dictionary, ownership): the `t`-cliques of the cut decompose
-/// disjointly by list member, so
-/// `|Lam_t(w)| <= |Z(b)| / C(t, k + 1) <= C(n, k + 1) / C(t, k + 1)`
-/// — weak, but it closes the band between the coverage curve and
-/// the Johnson threshold at any floor, and slack at the base
-/// inflates only the final constant, never the induction. On the
-/// integer grid at floors 8 and 16 (rate 1/2) the sharp Johnson
-/// form already covers the coverage curve and the band is empty;
-/// the shower term guards every other configuration. The certified
-/// sharpening — exact floor values as register-backed certificates —
-/// is the base section's companion statement, consumed only where
-/// the compilation chapter wants sharp seeds; the mainline rests on
-/// this analytic statement.
+/// The analytic base: at each threshold the smallest of three
+/// unconditional, prime-free counts.
+///
+/// * Interpolation: `C(n0, k)`.
+/// * Johnson, in the sharp agreement form
+///   `floor( n (t - k + 1) / (t^2 - n (k - 1)) )`, valid once
+///   `t^2 > n (k - 1)`: `m` members agreeing on `>= t` points each and
+///   pairwise on `<= k - 1` force `m t (m t - n) / n <= m (m - 1)(k - 1)`
+///   by convexity. At `t = n` it reads exactly 1.
+/// * The ownership bound: the `t`-cliques of the cut decompose
+///   disjointly by list member, so
+///   `|Lam_t(w)| <= |Z(b)| / C(t, k + 1) <= C(n, k + 1) / C(t, k + 1)`.
+///   Weak, but it covers the band between the coverage curve and the
+///   Johnson threshold at any floor; slack at the base inflates only
+///   the final constant, never the induction.
 pub fn analytic_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
     base_from_counts(n0, dims, |k, t, interp| {
         let mut best = interp.clone();
@@ -87,13 +80,13 @@ pub fn analytic_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
 /// The Johnson agreement bound's kernel: the unreduced
 /// `(numerator, denominator) = (n (t - k + 1), t^2 - n (k - 1))`
 /// pair in `u128` (u64 products wrap in release at levels past
-/// 2^32, and a wrapped clause could sit BELOW the truth — the one
+/// 2^32, and a wrapped clause could sit below the truth — the one
 /// failure mode this module must never have), gated on the
 /// quadratic validity condition. The single home of the formula:
 /// the base's floored refinement, the per-level clamp, the derived
 /// (graded) multiplicity, and the test mirrors all wrap this pair.
 /// Callers add their own regime gates (e.g. the derived charge's
-/// monotone-safety) — those are NOT validity conditions and stay at
+/// monotone-safety); those are not validity conditions and stay at
 /// the call sites.
 pub(super) fn johnson_agreement(n: u64, k: u64, t: u64) -> Option<(u128, u128)> {
     let (tw, nw, kw) = (t as u128, n as u128, k as u128);
@@ -132,7 +125,12 @@ fn analytic_refine(n: u64, k: u64, t: u64, best: &mut Integer) {
 /// microseconds where the exact binomials would cost million-bit
 /// integers.
 pub(super) fn analytic_brackets(n: u64, k: u64, t: u64) -> Vec<Lg> {
-    let mut out = vec![lg_binom(n, k), lg_binom(n, k + 1).div(&lg_binom(t, k + 1))];
+    // the two `(n, k)` binomials are per-level constants queried at
+    // every grid point — memoized; only `C(t, k+1)` varies with `t`
+    let mut out = vec![
+        lg_binom_memo(n, k),
+        lg_binom_memo(n, k + 1).div(&lg_binom(t, k + 1)),
+    ];
     if let Some((num, den)) = johnson_agreement(n, k, t) {
         out.push(Lg::from_integer(&Integer::from(num)).div(&Lg::from_integer(&Integer::from(den))));
     }

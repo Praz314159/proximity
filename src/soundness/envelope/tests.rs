@@ -4,9 +4,40 @@
 
 use super::charges::derived_johnson;
 use super::*;
+use crate::math::enclosure::lg_binom;
 use rug::float::Round;
 use rug::{Integer, Rational};
 use std::collections::BTreeSet;
+
+/// The reduced box: the level `2^12` at rate one half, the cell
+/// every gauge below is read at (the full box `2^21` is the CLI's).
+const BOX_TOTAL: u64 = 1 << 12;
+
+/// The reduced box's `(total, k)`.
+fn box_cell() -> (u64, u64) {
+    (BOX_TOTAL, BOX_TOTAL / 2 - 1)
+}
+
+/// The certified extension field the ceiling rows are read in:
+/// KoalaBear to the sixth.
+fn box_ext() -> Integer {
+    use rug::ops::Pow;
+    Integer::from(crate::field::named::KOALABEAR).pow(6)
+}
+
+/// The certified disagreement radius `z*` of the tower `(total, k)`
+/// assembled from `base` under `data`, at budget `2^-128` in the
+/// box extension; `0` when the tower does not assemble or no
+/// positive ceiling exists. The one number every gauge reads.
+fn zstar(total: u64, k: u64, base: u64, data: &dyn Interface) -> u64 {
+    let Ok(prof) = assemble(total, k, base, data, DEFAULT_RESOLUTION) else {
+        return 0;
+    };
+    crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &box_ext(), -128.0, |z| {
+        prof.lg_at_disagreement(k, z)
+    })
+    .map_or(0, |r| r.z_star)
+}
 
 fn binom(a: u64, b: u64) -> Integer {
     if b > a {
@@ -31,7 +62,7 @@ fn run_step_oracle(data: &dyn Interface, dc_mirror: impl Fn(u64) -> Integer) {
     let s = 2 * n;
     let (kev, kod) = channel_dims(k); // (4, 3)
     let r = k + 1;
-    // the coverage threshold, RE-DERIVED rather than read from the
+    // the coverage threshold, re-derived rather than read from the
     // charges — the oracle mirrors the theorem, not the code
     let lstar = (n + k - 1).div_ceil(3); // 5
     let base = interpolation_base(n, &BTreeSet::from([kev, kod])).expect("base");
@@ -132,10 +163,15 @@ fn rhs_mirror(
     // classic candidate (tight)
     let mut classic = small.clone();
     let l0 = lmin.max(lstar);
-    if l0 <= n {
+    let deep = if l0 <= n {
         let sum_form = Rational::from(chan.clone()) * Rational::from(n - l0 + 1);
         let single = Rational::from(chan.clone()) * Rational::from(2);
-        classic += sum_form.min(single);
+        Some(sum_form.min(single))
+    } else {
+        None
+    };
+    if let Some(d) = &deep {
+        classic += d.clone();
     }
     if lmin.max(kod) < lstar {
         let a = t - 2 * kod;
@@ -145,16 +181,31 @@ fn rhs_mirror(
         }
     }
     // extended candidate (lambda = n): deep = fully-paired class
-    // only; mid = [first term, telescope] times d_b
+    // only; mid = the first W strata term by term (the per-stratum
+    // datum, whose default is the ownership division), then
+    // [first term, telescope] times d_b for the tail. Re-derived
+    // here from the charge's stated form, not copied from it; W is
+    // the implementation's window, the one constant this endpoint
+    // mirror must share with the charge.
+    const W: u64 = 4;
     let mut ext_lo = small.clone() + Rational::from(chan.clone()) * Rational::from(2);
     let mut ext_hi = ext_lo.clone();
     let l0m = lmin.max(kod);
     if l0m < n {
         let a = t - 2 * kod;
         let db = Rational::from(binom(n, kod) * ((s - 2 * kod) / a));
-        ext_lo += db.clone() / Rational::from(binom(l0m, kod));
-        ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
-            / Rational::from(binom(l0m - 1, kod - 1));
+        let hi = (l0m + W).min(n);
+        let mut window = Rational::new();
+        for l in l0m..hi {
+            window += db.clone() / Rational::from(binom(l, kod));
+        }
+        ext_lo += window.clone();
+        ext_hi += window;
+        if hi < n {
+            ext_lo += db.clone() / Rational::from(binom(hi, kod));
+            ext_hi += db * Rational::from((Integer::from(kod), Integer::from(kod - 1)))
+                / Rational::from(binom(hi - 1, kod - 1));
+        }
     }
     (classic.clone().min(ext_lo), classic.min(ext_hi))
 }
@@ -177,18 +228,11 @@ fn graded_min(cut: Rational, s: u64, k: u64, n: u64, l: u64, t: u64) -> Rational
     cut.min(graded)
 }
 
-/// The graded face pins: the rigidity provider's `d_r` caps at
-/// the graded surplus (`m - k' = t - k`, l-independent), and the
-/// default `d_r` counts every core.
+/// The graded face pins: the default `d_r` counts every core, and
+/// `derived_johnson` is defined exactly on its valid, monotone-safe
+/// region.
 #[test]
 fn graded_face_pins() {
-    let rig = RigidityInterface::new(8);
-    // (32,15): l = 5, m = 7 -> k' = 5, surplus 2 <= 8: all cores
-    let v = rig.d_r(32, 15, 5, 7).expect("within cap");
-    assert!((v.hi.to_f64() - (4368f64).log2()).abs() < 1e-9);
-    // surplus 9 > 8: at most one realized core
-    let v = rig.d_r(32, 15, 5, 14).expect("capped");
-    assert!(v.hi.to_f64() < 1e-9);
     // default d_r: every l-subset
     let v = TrivialInterface.d_r(32, 15, 3, 100).expect("default");
     assert!((v.hi.to_f64() - (560f64).log2()).abs() < 1e-9);
@@ -235,14 +279,36 @@ fn provider_pins() {
     for l in 0..7 {
         assert!(sh.d_c_sup(32, 15, l).expect("nonempty").hi >= dc(l).hi);
     }
-    // rigidity: cut face delegates, middle face caps
-    let rig = RigidityInterface::new(8);
-    assert_eq!(
-        rig.d_c(32, 15, 3).expect("nonempty").hi.to_f64(),
-        dc(3).hi.to_f64()
-    );
-    assert!(rig.d_b(32, 15, 9).hi.to_f64() < 1e-9); // beyond the cap: one
-    assert!(rig.d_b(32, 15, 2).hi.to_f64() >= (28348f64).log2()); // measured
+}
+
+/// A necessary condition on every middle-face datum, from the word
+/// at Hamming distance one from a codeword: its list at any `t > k`
+/// is that codeword alone, which agrees on `s - 1` points and so has
+/// `n - 1` pairs and surplus `s - 1 - 2 kod`, and is owned by
+/// `C(n - 1, kod)` cores. Hence `D_b(a) >= C(n - 1, kod)` for all
+/// `a <= s - 1 - 2 kod`, for every word-free provider. At (16,7) this
+/// is 35 up to surplus 9; the surplus-cap providers that asserted
+/// zero past a cap failed exactly here (verified by decoding at two
+/// primes, 2026-08-21).
+#[test]
+fn near_codeword_lower_bound() {
+    let providers: [&dyn Interface; 3] = [
+        &TrivialInterface,
+        &ShowerInterface::new(),
+        &StarInterface::new(),
+    ];
+    for (s, k) in [(16u64, 7u64), (32, 15), (64, 31)] {
+        let (n, kod) = (s / 2, k / 2);
+        let floor = lg_binom(n - 1, kod).hi.to_f64();
+        for data in providers {
+            for a in 1..=(s - 1 - 2 * kod) {
+                assert!(
+                    data.d_b(s, k, a).hi.to_f64() >= floor - 1e-9,
+                    "({s},{k}) a = {a}: d_b below the near-codeword floor"
+                );
+            }
+        }
+    }
 }
 
 /// The assembled tower dominates the measured record at the base
@@ -341,17 +407,9 @@ fn full_agreement_transports_one_word() {
 /// assertion is existence, not strength.
 #[test]
 fn classical_ceiling_exists_at_reduced_box() {
-    use rug::ops::Pow;
-    let total = 1u64 << 12;
-    let k = total / 2 - 1;
-    let ext = Integer::from(crate::field::named::KOALABEAR).pow(6);
-    let prof = assemble(total, k, 64, &TrivialInterface, DEFAULT_RESOLUTION).expect("tower");
-    let row =
-        crate::soundness::ceiling::list_ceiling_row(1, total, total - k - 1, &ext, -128.0, |z| {
-            prof.lg_at_disagreement(k, z)
-        })
-        .expect("a positive ceiling");
-    assert!(row.z_star >= 5, "z* = {}", row.z_star);
+    let (total, k) = box_cell();
+    let z = zstar(total, k, 64, &TrivialInterface);
+    assert!(z >= 5, "z* = {z}");
 }
 
 /// The coarse grid encloses the exact computation: a stride-1
@@ -388,4 +446,90 @@ fn small_strata_truncation_smoke() {
         assert!(v.hi.is_finite() && v.lo.is_finite());
         assert!(v.hi >= v.lo);
     }
+}
+
+/// The star-maximum provider: exact sup pins at the audited cells
+/// (the stratum_sweep / gate_stratum_rate numbers), dominance under
+/// the shower bound, the rate law against the trivial face, and
+/// soundness against measured strata. This is the calibration leg:
+/// the closed forms must reproduce the audited numbers exactly.
+#[test]
+fn star_provider_pins() {
+    let st = StarInterface::new();
+    let sh = ShowerInterface::new();
+    // (16,7): strata l = 0,1,2 <-> (lp,h) = (0,8),(1,6),(2,4);
+    // audited sups 128, 1792, 3360 (gate_stratum_rate, both primes)
+    for (l, sup) in [(0u64, 128f64), (1, 1792.0), (2, 3360.0)] {
+        let got = st.d_c(16, 7, l).expect("nonempty").hi.to_f64();
+        assert!(
+            (got - sup.log2()).abs() < 1e-9,
+            "l = {l}: got 2^{got}, want {sup}"
+        );
+    }
+    // (32,15): l = 6 <-> (lp,h) = (6,4):
+    // 2^4 C(15,5) C(10,4) + 2^3 C(15,6) C(9,3) = 13,453,440
+    let want = (13_453_440f64).log2();
+    assert!((st.d_c(32, 15, 6).expect("nonempty").hi.to_f64() - want).abs() < 1e-9);
+    // star <= shower at every queried stratum (both cells): the
+    // exact sup can never exceed the shower bound
+    for l in 0..3 {
+        assert!(
+            st.d_c(16, 7, l).expect("s").hi.to_f64()
+                <= sh.d_c(16, 7, l).expect("s").hi.to_f64() + 1e-9
+        );
+    }
+    for l in 0..7 {
+        assert!(
+            st.d_c(32, 15, l).expect("s").hi.to_f64()
+                <= sh.d_c(32, 15, l).expect("s").hi.to_f64() + 1e-9
+        );
+    }
+    // the stratum-uniform rate law: star = (k+1)/s * trivial, i.e.
+    // exactly half at rate-1/2 cells
+    for l in 0..7 {
+        let tv = TrivialInterface.d_c(32, 15, l).expect("s").hi.to_f64();
+        let stv = st.d_c(32, 15, l).expect("s").hi.to_f64();
+        assert!((stv - (tv - 1.0)).abs() < 1e-9, "l = {l}");
+    }
+    // soundness against measured strata at (16,7), top word
+    for (l, meas) in [(1u64, 256f64), (2, 416.0)] {
+        assert!(st.d_c(16, 7, l).expect("s").hi.to_f64() >= meas.log2());
+    }
+    // sup face: prefix maximum never below pointwise
+    for l in 0..7 {
+        assert!(st.d_c_sup(32, 15, l).expect("s").hi >= st.d_c(32, 15, l).expect("s").hi);
+    }
+}
+
+/// The star tower at the record cell: assembles, dominates the
+/// measured record 2674 at (32,15,17), and its ceiling face is
+/// nowhere above the shower tower's (the exact sup sharpens, never
+/// weakens).
+#[test]
+fn star_tower_dominates_and_sharpens() {
+    let star = assemble(32, 15, 8, &StarInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    let record = (2674f64).log2();
+    let at = star.eval(15, 17).expect("in domain");
+    assert!(at.lo.to_f64_round(Round::Down) >= record);
+    let shower = assemble(32, 15, 8, &ShowerInterface::new(), DEFAULT_RESOLUTION).expect("tower");
+    for t in 16..=32 {
+        let s_ = star.eval(15, t).expect("in domain");
+        let h_ = shower.eval(15, t).expect("in domain");
+        assert!(
+            s_.hi.to_f64_round(Round::Up) <= h_.hi.to_f64_round(Round::Up) + 1e-6,
+            "t = {t}: star must not exceed shower"
+        );
+    }
+}
+
+/// The reduced-box pinch with the star face: the certified radius
+/// exists and is at least the trivial tower's — the provable data
+/// provider moves the ceiling the right way at the box.
+#[test]
+fn star_ceiling_at_reduced_box() {
+    let (total, k) = box_cell();
+    let zb = zstar(total, k, 64, &TrivialInterface);
+    let zs = zstar(total, k, 64, &StarInterface::new());
+    assert!(zs >= zb, "star z* = {zs} < trivial z* = {zb}");
+    println!("reduced box z*: trivial {zb}, star {zs}");
 }

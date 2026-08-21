@@ -1,5 +1,5 @@
-//! The soundness map and the lattice-crossing report types: the ABF26
-//! Lemma 6.12 conversion from a certified list count to a certified
+//! The soundness map and the lattice-crossing report types: the
+//! ABF26 Lemma 6.12 conversion from a certified list count to a certified
 //! soundness bracket, the challenge threshold, and the row/crossing
 //! structures every consumer reports in. The soundness map is the
 //! floor's own chain; the ceiling never touches it — both faces meet

@@ -62,7 +62,7 @@ fn run_step_oracle(data: &dyn Interface, dc_mirror: impl Fn(u64) -> Integer) {
     let s = 2 * n;
     let (kev, kod) = channel_dims(k); // (4, 3)
     let r = k + 1;
-    // the coverage threshold, RE-DERIVED rather than read from the
+    // the coverage threshold, re-derived rather than read from the
     // charges — the oracle mirrors the theorem, not the code
     let lstar = (n + k - 1).div_ceil(3); // 5
     let base = interpolation_base(n, &BTreeSet::from([kev, kod])).expect("base");
@@ -452,7 +452,7 @@ fn small_strata_truncation_smoke() {
 /// (the stratum_sweep / gate_stratum_rate numbers), dominance under
 /// the shower bound, the rate law against the trivial face, and
 /// soundness against measured strata. This is the calibration leg:
-/// the closed forms must reproduce the audited numbers EXACTLY.
+/// the closed forms must reproduce the audited numbers exactly.
 #[test]
 fn star_provider_pins() {
     let st = StarInterface::new();

@@ -160,14 +160,11 @@ impl Profile {
 /// dense stride-1 tail of `res/2` points ending at `t_max` — full
 /// agreement is where the profile varies fastest per lattice step —
 /// plus a dense stride-1 window of `res/2` points centered on
-/// `edge` (the coverage edge `t = 2 l*`, where the band-collapse
-/// charge turns on and the profile falls off its cliff). The
-/// collapse queries the CHILD row within a threshold unit of the
-/// child's own cliff; a coarse block there smears the cliff across
-/// a whole stride and the monotone enclosure returns the pre-cliff
-/// value, killing the charge at every coarse level — the box
-/// measured exactly that (M1 run 1: z* pinned at Johnson at
-/// s = 2^21 while the stride-1 reduced box certified coverage).
+/// `edge` (the coverage edge `t = 2 l*`, where the deep charge turns
+/// on and the profile falls fastest). The deep charge reads the
+/// child row within a threshold unit of the child's own edge; a
+/// coarse block there would smear that drop across a whole stride
+/// and the monotone enclosure would return the pre-drop value.
 pub(super) fn build_grid(t_min: u64, t_max: u64, edge: u64, res: u64) -> Vec<u64> {
     let len = t_max - t_min + 1;
     let res = res.max(4);

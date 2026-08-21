@@ -2,9 +2,8 @@
 //!
 //! A *profile envelope* at level `n` is a function `E(n, k, t)` that
 //! dominates the list profile of every word on `mu_n` — every
-//! dimension `k` in its window, every threshold `t` above its curve
-//! (notes v2, ch. 4, the profile envelope / descent hypothesis). The
-//! objects here carry that hypothesis up the tower: [`Profile`] is one
+//! dimension `k` in its window, every threshold `t` above its curve.
+//! The objects here carry that hypothesis up the tower: [`Profile`] is one
 //! level's envelope as certified brackets, [`step`] is the master
 //! inequality applied as an operator (level `n` in, level `2n` out),
 //! and [`assemble`] is the conditional form of the worst-case bound —
@@ -26,19 +25,12 @@
 //! falls, so the remaining terms are dominated by count times the
 //! worst numerator over the smallest divisor).
 //!
-//! Interface data is pluggable ([`Interface`]). [`TrivialInterface`]
-//! is the citable floor of the hierarchy: `D_c` by counting the whole
-//! stratum, `D_b` by the pencil-agreement lemma's disjointness bound
-//! (at most `(s - 2 kod)/a` members per core reach surplus `a`).
-//! Real data — the engine's collision bounds and the per-prime
-//! envelope at a certified prime — drops in by implementing the same
-//! trait. Bases likewise: [`analytic_base`] (the default — the ch. 4
-//! base section's unconditional statement: interpolation, sharp
-//! Johnson, and the ownership shower bound, pointwise min) seeds the
-//! tower; [`assemble_levels_from`] is the seam for sharper bases
-//! (the certified floor values of the base section's companion
-//! statement, when the register lands). With the analytic base the
-//! floor holds no flood at small `n0`.
+//! Interface data is pluggable ([`Interface`]); [`TrivialInterface`]
+//! is the word-free floor of the hierarchy, [`ShowerInterface`] and
+//! [`StarInterface`] sharpen the cut face. The tower is seeded by
+//! [`analytic_base`] (interpolation, sharp Johnson, and the ownership
+//! bound, pointwise min); [`assemble_levels_from`] accepts any other
+//! base.
 //!
 //! With every shipped provider the certified radius is the Johnson
 //! radius: the middle band is priced through `D_b` at `l = kod`, and
@@ -167,11 +159,11 @@ impl<'a> Charges<'a> {
 
     /// The master's right-hand side at threshold `t`: the minimum
     /// over split candidates of the three charges. The split between
-    /// the middle band and the deep range is a FREE parameter
+    /// the middle band and the deep range is a free parameter
     /// `lambda in [l*, n]` — the core charge holds at every
     /// `l >= kod` and the descent chain at every `l >= l*` — and
     /// the candidates bracket its extremes:
-    /// `lambda = l*` (the ch. 4 form) and `lambda = n` (the whole
+    /// `lambda = l*` and `lambda = n` (the whole
     /// middle range through cores, deep reduced to the fully-paired
     /// class). Each candidate is non-increasing in `t`, so the min
     /// preserves the grid's enclosure contract.

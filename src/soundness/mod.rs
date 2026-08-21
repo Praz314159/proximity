@@ -17,13 +17,21 @@
 //! (`Lg` enclosures): `volumes` counts for the attack side (balls,
 //! expected lists, the exact Elias count); `envelope` assembles the
 //! defense side's object (the profile tower of the conditional
-//! corollary); `chain` converts (the Lemma 6.12 soundness map, the
+//! corollary); `chain` converts (the soundness map, the
 //! budget bracket, and the z-lattice crossing reports); `floor` and
-//! `ceiling` are the two faces as rows. The module rule: every
-//! certified row cites the named theorem (or the challenge statement
-//! itself) backing its comparison.
+//! `ceiling` are the two faces as rows. Every certified row names the
+//! statement backing its comparison.
+//!
+//! Throughout, *the box* is the deployment cell: level `s = 2^21` at
+//! rate one half (`k = s/2 - 1`) over the degree-6 extension of
+//! KoalaBear, with challenge budget `eps* = 2^-128`; *the reduced box*
+//! is the same at `s = 2^12`.
 //!
 //! The namespace is flat: every item re-exports here.
+//!
+//! Reference. ABF26: G. Arnon, D. Boneh, G. Fenzi, *Open Problems
+//! in List Decoding and Correlated Agreement*, 2026. Lemma and
+//! theorem numbers cited in this module are to that paper.
 
 pub mod explore;
 pub use explore::*;

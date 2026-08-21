@@ -1,5 +1,5 @@
-//! The derived interface (notes v2, ch. 4): the external data the
-//! master step consumes, as a trait, with the shipped providers.
+//! The derived interface: the external data the master step consumes,
+//! as a trait, with the shipped providers.
 //!
 //! Throughout, `s` is the level, `k` the dimension, `kod = k/2`,
 //! `r = k + 1` the rung, and `n = s/2` the number of fibers. Every
@@ -196,9 +196,10 @@ fn trivial_d_c(np: u64, h: u64, lp: u64, binom: &dyn Fn(u64, u64) -> Lg) -> Lg {
         .mul(&binom(np - lp, h))
 }
 
-/// The general cut bound with the joint count word-freed (notes v2,
-/// ch. 3; the low-strata pencil theorem). Sharpens only the cut face;
-/// `D_b` is [`TrivialInterface`]'s.
+/// The general cut bound with the joint count made word-free: the
+/// joint sets of a stratum form a pencil over a nonempty base locus
+/// whenever `2l' <= h + 1`, and are counted outright otherwise.
+/// Sharpens only the cut face; `D_b` is [`TrivialInterface`]'s.
 ///
 /// `D_c(l) = 2^(h-1) C(n - l', h) ( C(n, l') + J )`, with
 /// `J = C(n - 1, l' - 1)` when `2l' <= h + 1` (the joint sets form a
@@ -256,9 +257,10 @@ impl Interface for ShowerInterface {
     }
 }
 
-/// The exact cut face: the star-maximum theorem (notes v2, ch. 7,
-/// `cons:starmax`) gives `sup_b |Z^(l)(b)|` in closed form, attained
-/// by the point-divisor syndromes, at every prime. `D_b` is
+/// The exact cut face: `sup_b |Z^(l)(b)|` in closed form, valid at
+/// every prime and attained by the point-divisor syndromes (the
+/// syndromes orthogonal to every core through one fiber, with the
+/// secant line through one of its square roots). `D_b` is
 /// [`TrivialInterface`]'s.
 ///
 /// `D_c(l) = 2^h C(n-1, l'-1) C(n-l', h) + 2^(h-1) C(n-1, l') C(n-l'-1, h-1)`,

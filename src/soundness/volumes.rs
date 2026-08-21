@@ -2,8 +2,7 @@
 //! volumes, the exact expected-list identity, and the original Elias
 //! count (ABF26 Lemma 3.7) — the attack side's data layer, consumed
 //! by [`super::floor`]; the defense side's counterpart is
-//! [`super::envelope`]. Upgrades to the estimates land here once
-//! (the Diamond--Gruen Thm 3.10 ball estimate).
+//! [`super::envelope`].
 
 use crate::error::{Error, Result};
 use crate::math::enclosure::{lg_binom, Lg};
@@ -65,7 +64,7 @@ pub fn lg_ball(n: u64, z: u64, q: &Integer) -> Result<Lg> {
 }
 
 /// Certified enclosure of log2 E\[list\] = k log2 Q + log2 V(n, z) - n log2 Q:
-/// the exact expected number of codewords of ANY [n, k] code over the
+/// the exact expected number of codewords of any [n, k] code over the
 /// alphabet within radius z of a uniformly random word.
 pub fn lg_expected_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
     let lg_q = lg_q(q)?;
@@ -76,8 +75,8 @@ pub fn lg_expected_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
 }
 
 /// Certified enclosure of log2 |Λ|-lower-bound from the exact Elias count
-/// (ABF26 Lemma 3.7, no MS77 approximation): |Λ(C, z/n)| >= V(n, z) / Q^(n-k)
-/// for ANY code C: Σ^k -> Σ^n over an alphabet of size Q.
+/// (ABF26 Lemma 3.7, with the exact ball volume): |Λ(C, z/n)| >= V(n, z) / Q^(n-k)
+/// for any code C: Σ^k -> Σ^n over an alphabet of size Q.
 pub fn lg_elias_list(n: u64, k: u64, z: u64, q: &Integer) -> Result<Lg> {
     let lg_q = lg_q(q)?;
     if k >= n {

@@ -15,7 +15,7 @@ use super::profile::{store, Profile};
 /// on any `k`-subset of its agreement set, so the map to that subset
 /// is injective and the list is at most the number of subsets. The
 /// crudest citable base, kept as the reference floor;
-/// [`analytic_base`] dominates it pointwise and is [`assemble`]'s
+/// [`analytic_base`] dominates it pointwise and is [`super::assemble`]'s
 /// default.
 pub fn interpolation_base(n0: u64, dims: &BTreeSet<u64>) -> Result<Profile> {
     base_from_counts(n0, dims, |_, _, interp| interp.clone())

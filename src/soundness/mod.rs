@@ -27,6 +27,11 @@
 //! KoalaBear, with challenge budget `eps* = 2^-128`; *the reduced box*
 //! is the same at `s = 2^12`.
 //!
+//! Throughout, *the box* is the deployment cell: level `s = 2^21` at
+//! rate one half (`k = s/2 - 1`) over the degree-6 extension of
+//! KoalaBear, with challenge budget `eps* = 2^-128`; *the reduced box*
+//! is the same at `s = 2^12`.
+//!
 //! The namespace is flat: every item re-exports here.
 //!
 //! Reference. ABF26: G. Arnon, D. Boneh, G. Fenzi, *Open Problems

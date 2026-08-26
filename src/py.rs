@@ -528,6 +528,49 @@ fn list_decode(
     rows_to_array(py, &members)
 }
 
+/// Exact list decode past the fiber count on a paired domain
+/// (`points[i + n] = -points[i]`), by core enumeration and
+/// Guruswami-Sudan residual decodes: complete for `t > n` whenever
+/// `(t - 2l)^2 > (s - 2l)(k - 2l - 1)` with `l = t - n` (errors
+/// otherwise, and on unpaired domains). Reaches cells the
+/// information-set engine cannot. GIL released.
+#[pyfunction]
+fn list_decode_paired(
+    py: Python<'_>,
+    p: u64,
+    points: Vec<u64>,
+    k: usize,
+    word: Vec<u64>,
+    t: usize,
+) -> PyResult<Py<PyArray2<u64>>> {
+    let members = err(py.allow_threads(|| {
+        let dom = crate::rs::core_residual::PairedDomain::from_points(p, points)?;
+        crate::rs::core_residual::list_paired(&dom, k, &word, t)
+    }))?;
+    rows_to_array(py, &members)
+}
+
+/// Sampled lower bound for the paired-domain decode: the distinct
+/// members found through `samples` uniform cores — a subset of the
+/// true list, deterministic in `seed`. The optimizer's objective.
+#[pyfunction]
+fn list_decode_paired_sampled(
+    py: Python<'_>,
+    p: u64,
+    points: Vec<u64>,
+    k: usize,
+    word: Vec<u64>,
+    t: usize,
+    samples: u64,
+    seed: u64,
+) -> PyResult<Py<PyArray2<u64>>> {
+    let members = err(py.allow_threads(|| {
+        let dom = crate::rs::core_residual::PairedDomain::from_points(p, points)?;
+        crate::rs::core_residual::list_paired_sampled(&dom, k, &word, t, samples, seed)
+    }))?;
+    rows_to_array(py, &members)
+}
+
 /// Exact distinct list sizes for a batch of words in one sweep (issue
 /// #45): shared barycentric tables per information set, lex-first
 /// dedup, rayon inside — the CPU campaign confirm path without the
@@ -1522,6 +1565,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDescent>()?;
     m.add_class::<PyWordView>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
+    m.add_function(wrap_pyfunction!(list_decode_paired, m)?)?;
+    m.add_function(wrap_pyfunction!(list_decode_paired_sampled, m)?)?;
     m.add_function(wrap_pyfunction!(list_sizes, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
     m.add_function(wrap_pyfunction!(optimize_pencil, m)?)?;

@@ -11,6 +11,7 @@
 pub mod classify;
 pub mod cluster;
 pub mod code;
+pub mod core_residual;
 pub mod decode;
 pub mod descent;
 pub mod gs;

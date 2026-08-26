@@ -1,14 +1,21 @@
 //! Dense linear algebra over `F_p` — the small toolbox every syndrome/kernel
 //! experiment re-implemented in Python (five separate Gaussian eliminations,
 //! ten `modinv` copies): row reduction, nullspaces, residues mod a span,
-//! batch inversion, divided-difference rows. Each elimination copy in a
+//! batch inversion, divided-difference rows, and polynomial
+//! evaluation/interpolation in coefficient form. Each elimination copy in a
 //! proof-verification script is a fresh chance for a pivot bug; this is the
 //! audited one.
+//!
+//! Interpolation has exactly three forms in the crate, one home each:
+//! value at one point ([`interp_eval`], here), values on a whole domain
+//! (`decode`'s batched barycentric kernel, the hot path), and the
+//! coefficient vector ([`interpolate_poly`], here). Subset walks and the
+//! deterministic PRNG live in `rs::combi`.
 
 use crate::error::{Error, Result};
 use crate::field::{batch_inv, mulmod, powmod};
 
-fn inv(a: u64, p: u64) -> u64 {
+pub(crate) fn inv(a: u64, p: u64) -> u64 {
     powmod(a % p, p - 2, p)
 }
 
@@ -197,6 +204,59 @@ pub fn dd_rows(p: u64, domain: &[u64], subsets: &[Vec<usize>]) -> Result<Vec<Vec
             Ok(row)
         })
         .collect()
+}
+
+/// Evaluate a coefficient vector (dense, low-to-high) at one point.
+pub fn horner(f: &[u64], x: u64, p: u64) -> u64 {
+    f.iter()
+        .rev()
+        .fold(0u64, |acc, &c| (mulmod(acc, x, p) + c) % p)
+}
+
+/// Evaluate a coefficient vector on a domain.
+pub fn evaluate(f: &[u64], xs: &[u64], p: u64) -> Vec<u64> {
+    xs.iter().map(|&x| horner(f, x, p)).collect()
+}
+
+/// Interpolate the unique degree-`< pts.len()` polynomial through
+/// `(xs[i], ys[i])`, as coefficients (Newton form expanded).
+pub fn interpolate_poly(p: u64, xs: &[u64], ys: &[u64]) -> Vec<u64> {
+    let n = xs.len();
+    // divided differences
+    let mut dd: Vec<u64> = ys.to_vec();
+    let mut coeffs = vec![dd[0]];
+    for level in 1..n {
+        let mut denoms: Vec<u64> = (level..n)
+            .map(|i| (xs[i] + p - xs[i - level]) % p)
+            .collect();
+        batch_inv(&mut denoms, p);
+        for i in (level..n).rev() {
+            dd[i] = mulmod((dd[i] + p - dd[i - 1]) % p, denoms[i - level], p);
+        }
+        coeffs.push(dd[level]);
+    }
+    // expand Newton form
+    let mut f = vec![0u64; n];
+    let mut basis = vec![0u64; n + 1];
+    basis[0] = 1;
+    let mut basis_len = 1;
+    for (level, &c) in coeffs.iter().enumerate() {
+        for i in 0..basis_len {
+            f[i] = (f[i] + mulmod(c, basis[i], p)) % p;
+        }
+        if level + 1 < n {
+            // basis *= (x - xs[level])
+            let neg = (p - xs[level] % p) % p;
+            for i in (0..basis_len).rev() {
+                let b = basis[i];
+                basis[i + 1] = (basis[i + 1] + b) % p;
+                basis[i] = mulmod(b, neg, p);
+            }
+            // fix: multiply-by-(x + neg) done in place above shifted
+            basis_len += 1;
+        }
+    }
+    f
 }
 
 #[cfg(test)]

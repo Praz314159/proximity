@@ -10,12 +10,8 @@
 //! path, when it lands, is gated against this one.
 
 use crate::error::{Error, Result};
-use crate::field::{batch_inv, mulmod, powmod};
-use crate::rs::linalg::nullspace_mod;
-
-fn inv(a: u64, p: u64) -> u64 {
-    powmod(a % p, p - 2, p)
-}
+use crate::field::{binom_table_mod, mulmod};
+use crate::rs::linalg::{horner, inv, nullspace_mod};
 
 /// Interpolation parameters certifying completeness at agreement `t`:
 /// multiplicity `m` and weighted-degree bound `d` such that the
@@ -74,21 +70,6 @@ pub fn gs_params(n: u64, k: u64, t: u64) -> Result<GsParams> {
     )))
 }
 
-/// Pascal's triangle mod `p` up to row `top` (inclusive).
-fn binom_table(top: usize, p: u64) -> Vec<Vec<u64>> {
-    let mut c = vec![vec![0u64; top + 1]; top + 1];
-    for row in &mut c {
-        row[0] = 1;
-    }
-    for a in 1..=top {
-        for b in 1..=a {
-            let v = (c[a - 1][b - 1] + c[a - 1][b]) % p;
-            c[a][b] = v;
-        }
-    }
-    c
-}
-
 /// A nonzero `(1, k-1)`-weighted interpolant vanishing to order `m`
 /// at every `(xs[i], ys[i])`, as dense `q[b][a]` (coefficient of
 /// `x^a y^b`). One nullspace of the Hasse-derivative system.
@@ -103,7 +84,7 @@ fn interpolate(p: u64, xs: &[u64], ys: &[u64], k: u64, prm: GsParams) -> Result<
             cols.push((a, b));
         }
     }
-    let table = binom_table(d as usize + 1, p);
+    let table = binom_table_mod(d as usize + 1, p);
     let mut rows = Vec::new();
     for (&x, &y) in xs.iter().zip(ys) {
         // powers of x and y up to the degree caps
@@ -354,7 +335,7 @@ fn strip_x(q: &mut [Vec<u64>]) {
 fn shift_y(q: &[Vec<u64>], alpha: u64, p: u64) -> Vec<Vec<u64>> {
     let dy = q.len() - 1;
     let dx = q.iter().map(Vec::len).max().unwrap_or(1);
-    let table = binom_table(dy, p);
+    let table = binom_table_mod(dy, p);
     let mut alpha_pow = vec![1u64; dy + 1];
     for i in 1..=dy {
         alpha_pow[i] = mulmod(alpha_pow[i - 1], alpha, p);
@@ -440,74 +421,13 @@ pub fn gs_list(p: u64, xs: &[u64], ys: &[u64], k: u64, t: u64) -> Result<Vec<Vec
     Ok(out)
 }
 
-fn horner(f: &[u64], x: u64, p: u64) -> u64 {
-    f.iter()
-        .rev()
-        .fold(0u64, |acc, &c| (mulmod(acc, x, p) + c) % p)
-}
-
-/// Evaluate a coefficient vector on a domain.
-pub fn evaluate(f: &[u64], xs: &[u64], p: u64) -> Vec<u64> {
-    xs.iter().map(|&x| horner(f, x, p)).collect()
-}
-
-/// Interpolate the unique degree-`< pts.len()` polynomial through
-/// `(xs[i], ys[i])`, as coefficients (Newton form expanded).
-pub fn interpolate_poly(p: u64, xs: &[u64], ys: &[u64]) -> Vec<u64> {
-    let n = xs.len();
-    // divided differences
-    let mut dd: Vec<u64> = ys.to_vec();
-    let mut coeffs = vec![dd[0]];
-    for level in 1..n {
-        let mut denoms: Vec<u64> = (level..n)
-            .map(|i| (xs[i] + p - xs[i - level]) % p)
-            .collect();
-        batch_inv(&mut denoms, p);
-        for i in (level..n).rev() {
-            dd[i] = mulmod((dd[i] + p - dd[i - 1]) % p, denoms[i - level], p);
-        }
-        coeffs.push(dd[level]);
-    }
-    // expand Newton form
-    let mut f = vec![0u64; n];
-    let mut basis = vec![0u64; n + 1];
-    basis[0] = 1;
-    let mut basis_len = 1;
-    for (level, &c) in coeffs.iter().enumerate() {
-        for i in 0..basis_len {
-            f[i] = (f[i] + mulmod(c, basis[i], p)) % p;
-        }
-        if level + 1 < n {
-            // basis *= (x - xs[level])
-            let neg = (p - xs[level] % p) % p;
-            for i in (0..basis_len).rev() {
-                let b = basis[i];
-                basis[i + 1] = (basis[i + 1] + b) % p;
-                basis[i] = mulmod(b, neg, p);
-            }
-            // fix: multiply-by-(x + neg) done in place above shifted
-            basis_len += 1;
-        }
-    }
-    f
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rs::code::ReedSolomon;
+    use crate::rs::combi::SplitMix64;
     use crate::rs::decode::{DecodeOracle, Radius};
-
-    struct Rng(u64);
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            self.0 >> 11
-        }
-    }
+    use crate::rs::linalg::{evaluate, interpolate_poly};
 
     #[test]
     fn params_refuse_at_johnson() {
@@ -540,10 +460,10 @@ mod tests {
     #[test]
     fn interpolate_poly_roundtrip() {
         let p = 65537;
-        let mut rng = Rng(7);
+        let mut rng = SplitMix64::new(7);
         for _ in 0..20 {
             let xs: Vec<u64> = (0..9).map(|i| (i * i + 3 * i + 1) % p).collect();
-            let f: Vec<u64> = (0..9).map(|_| rng.next() % p).collect();
+            let f: Vec<u64> = (0..9).map(|_| rng.next_u64() % p).collect();
             let ys = evaluate(&f, &xs, p);
             let g = interpolate_poly(p, &xs, &ys);
             assert_eq!(evaluate(&g, &xs, p), ys);
@@ -554,7 +474,7 @@ mod tests {
     /// words, random domains, both primes.
     #[test]
     fn agrees_with_exact_engine() {
-        let mut rng = Rng(1);
+        let mut rng = SplitMix64::new(1);
         for p in [97u64, 65537] {
             for trial in 0..8 {
                 let n = 14 + (trial % 3) * 2; // 14, 16, 18
@@ -562,7 +482,7 @@ mod tests {
                                        // distinct random points
                 let mut xs: Vec<u64> = Vec::new();
                 while xs.len() < n as usize {
-                    let x = rng.next() % p;
+                    let x = rng.next_u64() % p;
                     if !xs.contains(&x) {
                         xs.push(x);
                     }
@@ -575,10 +495,10 @@ mod tests {
                     t + 1
                 };
                 // half-random word seeded with a planted codeword
-                let f: Vec<u64> = (0..k).map(|_| rng.next() % p).collect();
+                let f: Vec<u64> = (0..k).map(|_| rng.next_u64() % p).collect();
                 let mut ys = evaluate(&f, &xs, p);
                 for y in ys.iter_mut().take(n as usize - t as usize) {
-                    *y = rng.next() % p;
+                    *y = rng.next_u64() % p;
                 }
                 let rs = ReedSolomon::on_domain(p, xs.clone(), k as usize).expect("code");
                 let oracle = DecodeOracle::new(&rs);
@@ -602,13 +522,13 @@ mod tests {
     #[test]
     fn planted_codewords_are_found() {
         let p = 65537u64;
-        let mut rng = Rng(42);
+        let mut rng = SplitMix64::new(42);
         let n = 20u64;
         let k = 4u64;
         let xs: Vec<u64> = {
             let mut v = Vec::new();
             while v.len() < n as usize {
-                let x = rng.next() % p;
+                let x = rng.next_u64() % p;
                 if !v.contains(&x) {
                     v.push(x);
                 }
@@ -617,8 +537,8 @@ mod tests {
         };
         let t = 10u64; // 100 > 20*3
                        // word = codeword A on the first 10 points, codeword B on the rest
-        let fa: Vec<u64> = (0..k).map(|_| rng.next() % p).collect();
-        let fb: Vec<u64> = (0..k).map(|_| rng.next() % p).collect();
+        let fa: Vec<u64> = (0..k).map(|_| rng.next_u64() % p).collect();
+        let fb: Vec<u64> = (0..k).map(|_| rng.next_u64() % p).collect();
         let ya = evaluate(&fa, &xs, p);
         let yb = evaluate(&fb, &xs, p);
         let ys: Vec<u64> = (0..n as usize)

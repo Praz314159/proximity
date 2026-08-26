@@ -21,7 +21,9 @@ use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::field::{batch_inv, checked_binom, mulmod};
-use crate::rs::gs::{evaluate, gs_list, gs_params, interpolate_poly};
+use crate::rs::combi::unrank_combination;
+use crate::rs::gs::{gs_list, gs_params};
+use crate::rs::linalg::{evaluate, interpolate_poly};
 
 /// A domain of `s = 2n` points closed under negation, stored as
 /// `points[i]` and `points[i + n] = -points[i]`; fiber `i` is the
@@ -67,24 +69,6 @@ impl PairedDomain {
     pub fn points(&self) -> &[u64] {
         &self.points
     }
-}
-
-/// The `idx`-th `l`-subset of `{0..n}` in colexicographic order.
-fn unrank(mut idx: u64, n: u64, l: u64) -> Vec<usize> {
-    let mut out = Vec::with_capacity(l as usize);
-    let mut remaining = l;
-    let mut top = n;
-    while remaining > 0 {
-        top -= 1;
-        let c = checked_binom(top, remaining).unwrap_or(u64::MAX);
-        if idx >= c {
-            out.push(top as usize);
-            idx -= c;
-            remaining -= 1;
-        }
-    }
-    out.reverse();
-    out
 }
 
 /// The members through one core: decode the residual and reassemble.
@@ -214,7 +198,7 @@ pub fn list_paired(dom: &PairedDomain, k: usize, word: &[u64], t: usize) -> Resu
     let found: Vec<Vec<u64>> = (0..total)
         .into_par_iter()
         .flat_map_iter(|idx| {
-            let core = unrank(idx, n as u64, l as u64);
+            let core = unrank_combination(idx, n as u64, l as u64);
             members_through_core(dom, k, word, t, &core)
         })
         .collect();
@@ -251,19 +235,12 @@ pub fn list_paired_sampled(
         (k - 2 * l) as u64,
         (t - 2 * l) as u64,
     )?;
-    let mut state = seed | 1;
-    let idxs: Vec<u64> = (0..samples)
-        .map(|_| {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (state >> 3) % total
-        })
-        .collect();
+    let mut rng = crate::rs::combi::SplitMix64::new(seed);
+    let idxs: Vec<u64> = (0..samples).map(|_| rng.next_u64() % total).collect();
     let found: Vec<Vec<u64>> = idxs
         .into_par_iter()
         .flat_map_iter(|idx| {
-            let core = unrank(idx, n as u64, l as u64);
+            let core = unrank_combination(idx, n as u64, l as u64);
             members_through_core(dom, k, word, t, &core)
         })
         .collect();
@@ -298,15 +275,7 @@ mod tests {
     }
 
     fn rng_word(p: u64, len: usize, seed: u64) -> Vec<u64> {
-        let mut state = seed;
-        (0..len)
-            .map(|_| {
-                state = state
-                    .wrapping_mul(6364136223846793005)
-                    .wrapping_add(1442695040888963407);
-                (state >> 7) % p
-            })
-            .collect()
+        crate::rs::combi::SplitMix64::new(seed).word(p, len)
     }
 
     /// The core-residual list equals the information-set engine's at

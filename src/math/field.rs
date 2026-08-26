@@ -348,6 +348,23 @@ pub fn batch_inv(vals: &mut [u64], p: u64) {
     }
 }
 
+/// Pascal's triangle mod `p` up to row `top` (inclusive) — the
+/// binomials as field elements, next to the exact [`binom`].
+#[must_use]
+pub fn binom_table_mod(top: usize, p: u64) -> Vec<Vec<u64>> {
+    let mut c = vec![vec![0u64; top + 1]; top + 1];
+    for row in &mut c {
+        row[0] = 1;
+    }
+    for a in 1..=top {
+        for b in 1..=a {
+            let v = (c[a - 1][b - 1] + c[a - 1][b]) % p;
+            c[a][b] = v;
+        }
+    }
+    c
+}
+
 /// The top-`q` elementary symmetric functions `e_1..e_q` of a set of field
 /// elements.
 #[must_use]

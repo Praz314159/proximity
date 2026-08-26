@@ -21,6 +21,7 @@
 use crate::error::{Error, Result};
 use crate::rs::classify::{classify, WordKind};
 use crate::rs::code::ReedSolomon;
+use crate::rs::combi::splitmix;
 use crate::rs::decode::{interp_eval_all, DecodeOracle, Radius};
 use std::collections::{HashMap, HashSet};
 
@@ -458,15 +459,6 @@ pub fn search(
     }
     best.map(|b| (b, traces))
         .ok_or_else(|| Error::OutOfRange("restarts must be >= 1".into()))
-}
-
-/// SplitMix64 — the shared deterministic PRNG for seed sampling and annealing.
-fn splitmix(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
 }
 
 /// Majority-vote center: at each coordinate, the value the most members take

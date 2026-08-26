@@ -120,8 +120,8 @@ fn members_through_core(
     // free points, the residual targets (w - q_Y)/V_Y there
     let mut fxs = Vec::with_capacity(2 * (n - l));
     let mut fidx = Vec::with_capacity(2 * (n - l));
-    for i in 0..n {
-        if !in_core[i] {
+    for (i, inc) in in_core.iter().enumerate() {
+        if !inc {
             for j in [i, i + n] {
                 fxs.push(dom.points[j]);
                 fidx.push(j);
@@ -291,13 +291,8 @@ mod tests {
         // subgroup as powers of a generator g: g^{i+n} = -g^i
         PairedDomain::from_points(p, pts.clone()).unwrap_or_else(|_| {
             // reorder into fiber-major antipodal layout
-            let mut points = Vec::with_capacity(pts.len());
-            for i in 0..n {
-                points.push(pts[i]);
-            }
-            for i in 0..n {
-                points.push((p - pts[i]) % p);
-            }
+            let mut points: Vec<u64> = pts[..n].to_vec();
+            points.extend(pts[..n].iter().map(|&x| (p - x) % p));
             PairedDomain::from_points(p, points).expect("paired layout")
         })
     }
@@ -400,8 +395,8 @@ mod tests {
         let rs = crate::rs::code::ReedSolomon::on_domain(p, pts.clone(), k).expect("code");
         let cw = rs.encode(&rng_word(p, k, 77)).expect("encode");
         let mut w = cw.clone();
-        for i in 0..(s - t) {
-            w[i] = (w[i] + 1 + i as u64) % p;
+        for (i, wi) in w.iter_mut().enumerate().take(s - t) {
+            *wi = (*wi + 1 + i as u64) % p;
         }
         let list = list_paired(&dom, k, &w, t).expect("list");
         assert!(

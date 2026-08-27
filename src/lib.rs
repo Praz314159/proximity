@@ -103,7 +103,7 @@ pub mod toy;
 pub use error::{Error, Result};
 #[cfg(feature = "certified")]
 pub use math::enclosure;
-pub use math::{field, ring};
+pub use math::{field, poly, ring};
 
 #[cfg(feature = "python")]
 mod py;

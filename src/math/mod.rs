@@ -2,6 +2,8 @@
 //!
 //! - [`field`]: prime-field arithmetic — `mulmod`/`powmod`, primality,
 //!   factoring, prime enumeration.
+//! - [`poly`]: dense univariate polynomials over `F_p` — evaluation,
+//!   interpolation, modular arithmetic, gcd, root finding.
 //! - [`ring`]: the cyclotomic (negacyclic) ring `Z[zeta_s]` — the
 //!   [`ring::fold`] primitive, [`ring::Cyclo`], and the NTTs
 //!   ([`ring::ntt`]).
@@ -16,4 +18,5 @@
 #[cfg(feature = "certified")]
 pub mod enclosure;
 pub mod field;
+pub mod poly;
 pub mod ring;

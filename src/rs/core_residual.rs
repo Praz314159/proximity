@@ -21,9 +21,9 @@ use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::field::{batch_inv, checked_binom, mulmod};
+use crate::poly;
 use crate::rs::combi::unrank_combination;
 use crate::rs::gs::{gs_list, gs_params};
-use crate::rs::linalg::{evaluate, interpolate_poly};
 
 /// A domain of `s = 2n` points closed under negation, stored as
 /// `points[i]` and `points[i + n] = -points[i]`; fiber `i` is the
@@ -100,72 +100,50 @@ fn members_through_core(
             cys.push(word[j]);
         }
     }
-    let q = interpolate_poly(p, &cxs, &cys);
-    // free points, the residual targets (w - q_Y)/V_Y there
-    let mut fxs = Vec::with_capacity(2 * (n - l));
-    let mut fidx = Vec::with_capacity(2 * (n - l));
-    for (i, inc) in in_core.iter().enumerate() {
-        if !inc {
-            for j in [i, i + n] {
-                fxs.push(dom.points[j]);
-                fidx.push(j);
-            }
-        }
-    }
-    let qf = evaluate(&q, &fxs, p);
-    let mut vf: Vec<u64> = fxs
-        .iter()
-        .map(|&x| {
-            let x2 = mulmod(x, x, p);
-            core.iter().fold(1u64, |acc, &i| {
-                let y = mulmod(dom.points[i], dom.points[i], p);
-                mulmod(acc, (x2 + p - y) % p, p)
-            })
+    let q = poly::interpolate(p, &cxs, &cys);
+    // V_Y(x) = prod_{y in Y} (x^2 - y)
+    let v_at = |x: u64| {
+        let x2 = mulmod(x, x, p);
+        core.iter().fold(1, |acc, &i| {
+            let y = mulmod(dom.points[i], dom.points[i], p);
+            mulmod(acc, (x2 + p - y) % p, p)
         })
-        .collect();
-    batch_inv(&mut vf, p);
-    let targets: Vec<u64> = fxs
+    };
+    // free points, the residual targets (w - q_Y)/V_Y there
+    let (fxs, fidx): (Vec<u64>, Vec<usize>) = in_core
         .iter()
         .enumerate()
-        .map(|(a, _)| {
-            let d = (word[fidx[a]] + p - qf[a]) % p;
-            mulmod(d, vf[a], p)
-        })
+        .filter(|&(_, &inc)| !inc)
+        .flat_map(|(i, _)| [i, i + n])
+        .map(|j| (dom.points[j], j))
+        .unzip();
+    let qf = poly::evaluate(&q, &fxs, p);
+    let mut v_inv: Vec<u64> = fxs.iter().map(|&x| v_at(x)).collect();
+    batch_inv(&mut v_inv, p);
+    let targets: Vec<u64> = fidx
+        .iter()
+        .zip(&qf)
+        .zip(&v_inv)
+        .map(|((&j, &qx), &vi)| mulmod((word[j] + p - qx) % p, vi, p))
         .collect();
-    let kp = (k - 2 * l) as u64;
-    let tp = (t - 2 * l) as u64;
-    let Ok(gs) = gs_list(p, &fxs, &targets, kp, tp) else {
+    let Ok(gs) = gs_list(p, &fxs, &targets, (k - 2 * l) as u64, (t - 2 * l) as u64) else {
         return Vec::new();
     };
-    // reassemble f = q_Y + V_Y g and verify on the full domain
-    let mut out = Vec::new();
-    for g in gs {
-        let f: Vec<u64> = dom
-            .points
-            .iter()
-            .map(|&x| {
-                let x2 = mulmod(x, x, p);
-                let v = core.iter().fold(1u64, |acc, &i| {
-                    let y = mulmod(dom.points[i], dom.points[i], p);
-                    mulmod(acc, (x2 + p - y) % p, p)
-                });
-                let gx = g
-                    .iter()
-                    .rev()
-                    .fold(0u64, |acc, &c| (mulmod(acc, x, p) + c) % p);
-                let qx = q
-                    .iter()
-                    .rev()
-                    .fold(0u64, |acc, &c| (mulmod(acc, x, p) + c) % p);
-                (qx + mulmod(v, gx, p)) % p
-            })
-            .collect();
-        let agree = f.iter().zip(word).filter(|(a, b)| a == b).count();
-        if agree >= t {
-            out.push(f);
-        }
-    }
-    out
+    // reassemble f = q_Y + V_Y g and keep it if it truly agrees
+    gs.into_iter()
+        .filter_map(|g| {
+            let f: Vec<u64> = dom
+                .points
+                .iter()
+                .map(|&x| {
+                    let member = mulmod(v_at(x), poly::horner(&g, x, p), p);
+                    (poly::horner(&q, x, p) + member) % p
+                })
+                .collect();
+            let agree = f.iter().zip(word).filter(|(a, b)| a == b).count();
+            (agree >= t).then_some(f)
+        })
+        .collect()
 }
 
 /// The exact list of `RS[F_p, dom, k]` at agreement `t > n`: every

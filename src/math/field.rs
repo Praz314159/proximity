@@ -16,6 +16,13 @@ pub fn mulmod(a: u64, b: u64, p: u64) -> u64 {
     ((a as u128 * b as u128) % p as u128) as u64
 }
 
+/// The inverse of `a` modulo the prime `p`, by Fermat.
+#[inline]
+#[must_use]
+pub fn inv(a: u64, p: u64) -> u64 {
+    powmod(a % p, p - 2, p)
+}
+
 /// `b^e mod p` by square-and-multiply.
 #[must_use]
 pub fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {

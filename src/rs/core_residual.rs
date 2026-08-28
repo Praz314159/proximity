@@ -100,7 +100,7 @@ fn members_through_core(
             cys.push(word[j]);
         }
     }
-    let q = poly::interpolate(p, &cxs, &cys);
+    let q = poly::interpolate(&cxs, &cys, p);
     // V_Y(x) = prod_{y in Y} (x^2 - y)
     let v_at = |x: u64| {
         let x2 = mulmod(x, x, p);
@@ -161,9 +161,9 @@ pub fn list_paired(dom: &PairedDomain, k: usize, word: &[u64], t: usize) -> Resu
 /// same way [`list_paired`] does.
 pub fn core_count(dom: &PairedDomain, k: usize, t: usize) -> Result<u64> {
     let n = dom.n;
-    if t <= n {
+    if t <= n || t > 2 * n {
         return Err(Error::Unsupported(format!(
-            "core enumeration needs t > n (got t = {t}, n = {n})"
+            "core enumeration needs n < t <= 2n (got t = {t}, n = {n})"
         )));
     }
     let l = t - n;
@@ -237,6 +237,9 @@ pub fn list_paired_sampled(
     samples: u64,
     seed: u64,
 ) -> Result<Vec<Vec<u64>>> {
+    if word.len() != 2 * dom.n {
+        return Err(Error::OutOfRange("word length != domain size".into()));
+    }
     let total = core_count(dom, k, t)?;
     let l = t - dom.n;
     let mut rng = crate::rs::combi::SplitMix64::new(seed);
@@ -445,5 +448,9 @@ mod tests {
         assert!(list_paired(&dom, 7, &w, 9).is_err());
         // t <= n
         assert!(list_paired(&dom, 7, &w, 8).is_err());
+        // t > s: an error, not an arithmetic panic, whatever the k
+        assert!(list_paired(&dom, 20, &w, 17).is_err());
+        // sampled mode refuses a word of the wrong length too
+        assert!(list_paired_sampled(&dom, 7, &w[..15], 10, 4, 1).is_err());
     }
 }

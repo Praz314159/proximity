@@ -28,15 +28,23 @@ pub fn evaluate(f: &[u64], xs: &[u64], p: u64) -> Vec<u64> {
 /// The unique polynomial of degree below `xs.len()` through
 /// `(xs[i], ys[i])`, as coefficients: Newton's divided differences,
 /// then the Newton form expanded.
+///
+/// # Panics
+///
+/// When `xs` is empty, its length differs from `ys`, or it repeats a
+/// point.
 #[must_use]
-pub fn interpolate(p: u64, xs: &[u64], ys: &[u64]) -> Vec<u64> {
+pub fn interpolate(xs: &[u64], ys: &[u64], p: u64) -> Vec<u64> {
     let n = xs.len();
+    assert!(n > 0 && n == ys.len(), "interpolation needs matched nodes");
     let mut dd: Vec<u64> = ys.to_vec();
     let mut coeffs = vec![dd[0]];
     for level in 1..n {
         let mut denoms: Vec<u64> = (level..n)
             .map(|i| (xs[i] + p - xs[i - level]) % p)
             .collect();
+        // a zero denominator would silently corrupt the whole batch
+        assert!(!denoms.contains(&0), "repeated interpolation node");
         batch_inv(&mut denoms, p);
         for i in (level..n).rev() {
             dd[i] = mulmod((dd[i] + p - dd[i - 1]) % p, denoms[i - level], p);
@@ -171,12 +179,14 @@ pub fn div_exact(h: &[u64], d: &[u64], p: u64) -> Vec<u64> {
 ///
 /// # Panics
 ///
-/// On the zero polynomial, which has no root set.
+/// On the zero polynomial, which has no root set, and at `p = 2`,
+/// where the square criterion is vacuous (every crate prime is odd).
 #[must_use]
 pub fn roots(f: &[u64], p: u64) -> Vec<u64> {
     let mut f = f.to_vec();
     trim(&mut f);
     assert!(!f.is_empty(), "roots of the zero polynomial");
+    assert!(p % 2 == 1, "roots needs an odd prime");
     let mut out = Vec::new();
     if f.len() > 1 && f[0] == 0 {
         out.push(0);
@@ -243,7 +253,7 @@ mod tests {
             let xs: Vec<u64> = (0..9).map(|i| (i * i + 3 * i + 1) % p).collect();
             let f = rng.word(p, 9);
             let ys = evaluate(&f, &xs, p);
-            assert_eq!(evaluate(&interpolate(p, &xs, &ys), &xs, p), ys);
+            assert_eq!(evaluate(&interpolate(&xs, &ys, p), &xs, p), ys);
         }
     }
 

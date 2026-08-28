@@ -16,7 +16,8 @@ pub fn mulmod(a: u64, b: u64, p: u64) -> u64 {
     ((a as u128 * b as u128) % p as u128) as u64
 }
 
-/// The inverse of `a` modulo the prime `p`, by Fermat.
+/// The inverse of `a` modulo the prime `p`, by Fermat. The caller
+/// keeps `a` nonzero mod `p`: `inv(0, p)` returns 0, not an error.
 #[inline]
 #[must_use]
 pub fn inv(a: u64, p: u64) -> u64 {

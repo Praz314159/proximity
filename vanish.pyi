@@ -99,6 +99,13 @@ def list_decode(p: int, domain: List[int], k: int, word: List[int], t: int) -> n
     vector) agreeing with `word` on >= t of the n = len(domain) coordinates.
     `domain` is any distinct-point set (e.g. subgroup(p, s)). Requires t >= k."""
 
+def gs_params(n: int, k: int, t: int) -> Tuple[int, int]:
+    """The Guruswami-Sudan parameters (m, d) certifying a complete list
+    decode at agreement t on n points: vanishing multiplicity and
+    (1, k-1)-weighted degree bound. Errors at or below the Johnson
+    agreement sqrt(n (k - 1)). The interpolant's y-degree is
+    d // (k - 1)."""
+
 def list_decode_paired(p: int, points: List[int], k: int, word: List[int], t: int) -> npt.NDArray[np.uint64]:
     """Exact list decode past the fiber count on a paired domain
     (points[i + n] = -points[i]): every codeword agreeing on >= t of the

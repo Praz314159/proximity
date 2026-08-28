@@ -528,6 +528,17 @@ fn list_decode(
     rows_to_array(py, &members)
 }
 
+/// The Guruswami-Sudan parameters `(m, d)` at `(n, k, t)`:
+/// multiplicity and weighted-degree bound certifying a complete list
+/// decode at agreement `t` on `n` points. Errors at or below the
+/// Johnson agreement `sqrt(n (k - 1))`. The y-degree of the
+/// interpolant is `d // (k - 1)` — the GPU kernel generator's shape
+/// parameter.
+#[pyfunction]
+fn gs_params(n: u64, k: u64, t: u64) -> PyResult<(u64, u64)> {
+    err(crate::rs::gs::gs_params(n, k, t).map(|prm| (prm.m, prm.d)))
+}
+
 /// Exact list decode past the fiber count on a paired domain
 /// (`points[i + n] = -points[i]`), by core enumeration and
 /// Guruswami-Sudan residual decodes: complete for `t > n` whenever
@@ -1601,6 +1612,7 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDescent>()?;
     m.add_class::<PyWordView>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
+    m.add_function(wrap_pyfunction!(gs_params, m)?)?;
     m.add_function(wrap_pyfunction!(list_decode_paired, m)?)?;
     m.add_function(wrap_pyfunction!(list_decode_paired_range, m)?)?;
     m.add_function(wrap_pyfunction!(paired_core_count, m)?)?;

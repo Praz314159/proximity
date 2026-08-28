@@ -556,6 +556,7 @@ fn list_decode_paired(
 /// the exact list — long sweeps run as resumable chunks. GIL
 /// released.
 #[pyfunction]
+#[allow(clippy::too_many_arguments)] // the Python API's parameter list
 fn list_decode_paired_range(
     py: Python<'_>,
     p: u64,
@@ -588,6 +589,7 @@ fn paired_core_count(p: u64, points: Vec<u64>, k: usize, t: usize) -> PyResult<u
 /// members found through `samples` uniform cores — a subset of the
 /// true list, deterministic in `seed`. The optimizer's objective.
 #[pyfunction]
+#[allow(clippy::too_many_arguments)] // the Python API's parameter list
 fn list_decode_paired_sampled(
     py: Python<'_>,
     p: u64,

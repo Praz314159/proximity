@@ -99,6 +99,30 @@ def list_decode(p: int, domain: List[int], k: int, word: List[int], t: int) -> n
     vector) agreeing with `word` on >= t of the n = len(domain) coordinates.
     `domain` is any distinct-point set (e.g. subgroup(p, s)). Requires t >= k."""
 
+def list_decode_paired(p: int, points: List[int], k: int, word: List[int], t: int) -> npt.NDArray[np.uint64]:
+    """Exact list decode past the fiber count on a paired domain
+    (points[i + n] = -points[i]): every codeword agreeing on >= t of the
+    s = 2n points, via core enumeration + Guruswami-Sudan residual
+    decodes. Needs t > n and (t - 2l)^2 > (s - 2l)(k - 2l - 1), l = t - n."""
+
+def list_decode_paired_range(
+    p: int, points: List[int], k: int, word: List[int], t: int, lo: int, hi: int
+) -> npt.NDArray[np.uint64]:
+    """One shard of list_decode_paired: the members through cores lo..hi of
+    0..paired_core_count(..). The union over a partition of the full range,
+    deduplicated, is the exact list — long sweeps run as resumable chunks."""
+
+def paired_core_count(p: int, points: List[int], k: int, t: int) -> int:
+    """The number of cores list_decode_paired enumerates at (k, t) — the
+    index space of list_decode_paired_range. Errors when the cell is not
+    decodable."""
+
+def list_decode_paired_sampled(
+    p: int, points: List[int], k: int, word: List[int], t: int, samples: int, seed: int
+) -> npt.NDArray[np.uint64]:
+    """Sampled lower bound of list_decode_paired: members found through
+    `samples` uniform cores; a subset of the true list, deterministic in seed."""
+
 def list_sizes(p: int, domain: List[int], k: int, words: List[List[int]], t: int) -> List[int]:
     """Exact distinct list sizes for a batch of words in one sweep:
     shared barycentric tables per information set, lex-first dedup,

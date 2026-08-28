@@ -11,8 +11,11 @@
 pub mod classify;
 pub mod cluster;
 pub mod code;
+pub(crate) mod combi;
+pub mod core_residual;
 pub mod decode;
 pub mod descent;
+pub mod gs;
 pub mod linalg;
 pub mod moments;
 pub mod vs;

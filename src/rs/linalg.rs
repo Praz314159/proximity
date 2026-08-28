@@ -4,13 +4,15 @@
 //! batch inversion, divided-difference rows. Each elimination copy in a
 //! proof-verification script is a fresh chance for a pivot bug; this is the
 //! audited one.
+//!
+//! Interpolation has exactly three forms in the crate, one home each:
+//! value at one point ([`interp_eval`], here), values on a whole domain
+//! (`decode`'s batched barycentric kernel, the hot path), and the
+//! coefficient vector ([`crate::poly::interpolate`]). Subset walks and
+//! the deterministic PRNG live in `rs::combi`.
 
 use crate::error::{Error, Result};
-use crate::field::{batch_inv, mulmod, powmod};
-
-fn inv(a: u64, p: u64) -> u64 {
-    powmod(a % p, p - 2, p)
-}
+use crate::field::{batch_inv, inv, mulmod};
 
 /// Reduced row-echelon form in place; returns `(rank, pivot columns)`.
 pub fn rref_mod(rows: &mut [Vec<u64>], p: u64) -> Result<(usize, Vec<usize>)> {
@@ -172,7 +174,7 @@ pub fn interp_eval(p: u64, xs: &[u64], ys: &[u64], t: u64) -> Result<u64> {
         if den == 0 {
             return Err(Error::OutOfRange("interp_eval: repeated node".into()));
         }
-        acc = (acc + mulmod(ys[i], mulmod(num, powmod(den, p - 2, p), p), p)) % p;
+        acc = (acc + mulmod(ys[i], mulmod(num, inv(den, p), p), p)) % p;
     }
     Ok(acc)
 }
@@ -261,7 +263,10 @@ mod tests {
         let dom = sg.elements();
         let rows = dd_rows(65537, dom, &[vec![0, 2, 3, 5, 7, 8, 11, 13]]).unwrap();
         // D_T(x^{r-1}) = 1 for |T| = r = 8: pair against the monomial x^7
-        let w: Vec<u64> = dom.iter().map(|&x| powmod(x, 7, 65537)).collect();
+        let w: Vec<u64> = dom
+            .iter()
+            .map(|&x| crate::field::powmod(x, 7, 65537))
+            .collect();
         let dot = rows[0]
             .iter()
             .zip(&w)

@@ -16,6 +16,14 @@ pub fn mulmod(a: u64, b: u64, p: u64) -> u64 {
     ((a as u128 * b as u128) % p as u128) as u64
 }
 
+/// The inverse of `a` modulo the prime `p`, by Fermat. The caller
+/// keeps `a` nonzero mod `p`: `inv(0, p)` returns 0, not an error.
+#[inline]
+#[must_use]
+pub fn inv(a: u64, p: u64) -> u64 {
+    powmod(a % p, p - 2, p)
+}
+
 /// `b^e mod p` by square-and-multiply.
 #[must_use]
 pub fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
@@ -346,6 +354,23 @@ pub fn batch_inv(vals: &mut [u64], p: u64) {
         vals[i] = mulmod(inv_acc, pref[i], p);
         inv_acc = mulmod(inv_acc, orig, p);
     }
+}
+
+/// Pascal's triangle mod `p` up to row `top` (inclusive) — the
+/// binomials as field elements, next to the exact [`binom`].
+#[must_use]
+pub fn binom_table_mod(top: usize, p: u64) -> Vec<Vec<u64>> {
+    let mut c = vec![vec![0u64; top + 1]; top + 1];
+    for row in &mut c {
+        row[0] = 1;
+    }
+    for a in 1..=top {
+        for b in 1..=a {
+            let v = (c[a - 1][b - 1] + c[a - 1][b]) % p;
+            c[a][b] = v;
+        }
+    }
+    c
 }
 
 /// The top-`q` elementary symmetric functions `e_1..e_q` of a set of field

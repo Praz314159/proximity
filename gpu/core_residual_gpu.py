@@ -4,14 +4,25 @@ Same math as vanish::rs::core_residual (the Rust authority this module
 is gated against): a codeword agreeing with the word on t > n of the
 s = 2n paired points fully agrees on at least l = t - n fibers, so
 enumerating the C(n, l) fiber cores and Guruswami-Sudan-decoding each
-residual is complete. GPU-shaped: one thread per core. Each thread
-unranks its core (colexicographic, matching the Rust index space, so
-GPU and CPU shards partition the same way), interpolates the word on
-the 2l core points, builds the residual targets on the free points,
-interpolates by Koetter's update (dy + 1 running polynomials in
-registers -- the dense Hasse system at (42, 9, 21) is 126 x 132 and
-does not fit a thread), finds y-roots by Roth-Ruckenstein, reassembles
-f = q_Y + V_Y g, and emits the members agreeing on >= t points.
+residual is complete. GPU-shaped: one core per warp. The warp unranks
+its core (colexicographic, matching the Rust index space, so GPU and
+CPU shards partition the same way), interpolates the word on the 2l
+core points, builds the residual targets on the free points,
+interpolates by Koetter's update, finds y-roots by Roth-Ruckenstein,
+reassembles f = q_Y + V_Y g, and emits the members agreeing on >= t
+points.
+
+Why a warp and not a thread. The dense Hasse system of
+vanish::rs::gs is 126 x 132 at the (64, 31, 43) residual -- far past a
+thread, which is why Koetter replaces it. But Koetter's own state is
+also too big: measured peak is 330 u32 for a single one of the dy + 1
+candidates at (42, 9, 21), and 2436 u32 at (44, 11, 22), against a
+255-register hardware ceiling and a ~64 budget for decent occupancy.
+Thread-per-core would spill to local memory -- the 50-100x cliff
+decode_gpu.py documents. So the candidates live in shared memory, one
+core per warp, and the lanes cooperate on the two inner loops that
+dominate (the dy + 1 discrepancies, and the elementwise row updates),
+both of which are long vector operations over exactly this state.
 
 This module is the CPU mirror and the host driver. The mirror is a
 transliteration of the intended kernel -- same constraint order, same

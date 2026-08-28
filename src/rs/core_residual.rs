@@ -152,11 +152,15 @@ fn members_through_core(
 /// `(t - 2l)^2 > (s - 2l)(k - 2l - 1)` with `l = t - n` — the caller
 /// sees the exact reason.
 pub fn list_paired(dom: &PairedDomain, k: usize, word: &[u64], t: usize) -> Result<Vec<Vec<u64>>> {
+    let total = core_count(dom, k, t)?;
+    list_paired_range(dom, k, word, t, 0..total)
+}
+
+/// The number of cores `C(n, t - n)` the exact decode enumerates —
+/// the index space of [`list_paired_range`]. Validates the cell the
+/// same way [`list_paired`] does.
+pub fn core_count(dom: &PairedDomain, k: usize, t: usize) -> Result<u64> {
     let n = dom.n;
-    let s = 2 * n;
-    if word.len() != s {
-        return Err(Error::OutOfRange("word length != domain size".into()));
-    }
     if t <= n {
         return Err(Error::Unsupported(format!(
             "core enumeration needs t > n (got t = {t}, n = {n})"
@@ -169,25 +173,57 @@ pub fn list_paired(dom: &PairedDomain, k: usize, word: &[u64], t: usize) -> Resu
             k as i64 - 2 * l as i64
         )));
     }
-    // certify the residual cell once, up front
-    gs_params((s - 2 * l) as u64, (k - 2 * l) as u64, (t - 2 * l) as u64)?;
-    let total = checked_binom(n as u64, l as u64)
-        .ok_or_else(|| Error::OutOfRange("core count overflows u64".into()))?;
-    let found: Vec<Vec<u64>> = (0..total)
+    // certify the residual cell up front, so a sweep cannot start
+    // on an undecodable cell
+    gs_params(
+        (2 * n - 2 * l) as u64,
+        (k - 2 * l) as u64,
+        (t - 2 * l) as u64,
+    )?;
+    checked_binom(n as u64, l as u64)
+        .ok_or_else(|| Error::OutOfRange("core count overflows u64".into()))
+}
+
+/// One shard of the exact decode: the members found through the
+/// cores with indices in `cores` (a sub-range of
+/// `0..core_count(..)`, colexicographic order). The union of the
+/// members over a partition of the full range, deduplicated, is the
+/// exact list — a long sweep can run as resumable chunks.
+pub fn list_paired_range(
+    dom: &PairedDomain,
+    k: usize,
+    word: &[u64],
+    t: usize,
+    cores: std::ops::Range<u64>,
+) -> Result<Vec<Vec<u64>>> {
+    if word.len() != 2 * dom.n {
+        return Err(Error::OutOfRange("word length != domain size".into()));
+    }
+    let total = core_count(dom, k, t)?;
+    if cores.end > total {
+        return Err(Error::OutOfRange(format!(
+            "core range ends at {} of {total}",
+            cores.end
+        )));
+    }
+    let l = (t - dom.n) as u64;
+    let found: Vec<Vec<u64>> = cores
         .into_par_iter()
         .flat_map_iter(|idx| {
-            let core = unrank_combination(idx, n as u64, l as u64);
+            let core = unrank_combination(idx, dom.n as u64, l);
             members_through_core(dom, k, word, t, &core)
         })
         .collect();
+    Ok(dedup(found))
+}
+
+/// Keep the first occurrence of each member, preserving order.
+fn dedup(found: Vec<Vec<u64>>) -> Vec<Vec<u64>> {
     let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for f in found {
-        if seen.insert(f.clone()) {
-            out.push(f);
-        }
-    }
-    Ok(out)
+    found
+        .into_iter()
+        .filter(|f| seen.insert(f.clone()))
+        .collect()
 }
 
 /// A sampled lower bound: the distinct members found through
@@ -201,35 +237,18 @@ pub fn list_paired_sampled(
     samples: u64,
     seed: u64,
 ) -> Result<Vec<Vec<u64>>> {
-    let n = dom.n;
-    if t <= n {
-        return Err(Error::Unsupported("needs t > n".into()));
-    }
-    let l = t - n;
-    let total = checked_binom(n as u64, l as u64)
-        .ok_or_else(|| Error::OutOfRange("core count overflows u64".into()))?;
-    gs_params(
-        (2 * n - 2 * l) as u64,
-        (k - 2 * l) as u64,
-        (t - 2 * l) as u64,
-    )?;
+    let total = core_count(dom, k, t)?;
+    let l = t - dom.n;
     let mut rng = crate::rs::combi::SplitMix64::new(seed);
     let idxs: Vec<u64> = (0..samples).map(|_| rng.next_u64() % total).collect();
     let found: Vec<Vec<u64>> = idxs
         .into_par_iter()
         .flat_map_iter(|idx| {
-            let core = unrank_combination(idx, n as u64, l as u64);
+            let core = unrank_combination(idx, dom.n as u64, l as u64);
             members_through_core(dom, k, word, t, &core)
         })
         .collect();
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for f in found {
-        if seen.insert(f.clone()) {
-            out.push(f);
-        }
-    }
-    Ok(out)
+    Ok(dedup(found))
 }
 
 #[cfg(test)]
@@ -300,6 +319,35 @@ mod tests {
         for f in sampled {
             assert!(full.contains(&f));
         }
+    }
+
+    /// Sharding is a partition: the union of the members over any
+    /// split of the core range, deduplicated, equals the full list.
+    #[test]
+    fn shards_partition_the_sweep() {
+        let p = 65537;
+        let (s, k, t) = (16, 7, 10);
+        let dom = paired_subgroup(p, s);
+        // a corrupted codeword, so the list is provably nonempty and
+        // the partition check has something to partition
+        let rs =
+            crate::rs::code::ReedSolomon::on_domain(p, dom.points().to_vec(), k).expect("code");
+        let mut w = rs.encode(&rng_word(p, k, 8)).expect("encode");
+        for (i, wi) in w.iter_mut().enumerate().take(s - t) {
+            *wi = (*wi + 1 + i as u64) % p;
+        }
+        let mut full = list_paired(&dom, k, &w, t).expect("full");
+        assert!(!full.is_empty(), "the plant guarantees a member");
+        full.sort();
+        let total = core_count(&dom, k, t).expect("cell");
+        let mid = total / 3;
+        let mut merged: Vec<Vec<u64>> = [0..mid, mid..total]
+            .into_iter()
+            .flat_map(|r| list_paired_range(&dom, k, &w, t, r).expect("shard"))
+            .collect();
+        merged.sort();
+        merged.dedup();
+        assert_eq!(merged, full);
     }
 
     /// The first cell the information-set engine cannot comfortably

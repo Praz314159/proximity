@@ -550,6 +550,40 @@ fn list_decode_paired(
     rows_to_array(py, &members)
 }
 
+/// One shard of the paired-domain decode: the members found through
+/// cores `lo..hi` of `0..paired_core_count(..)` (colexicographic).
+/// The union over a partition of the full range, deduplicated, is
+/// the exact list — long sweeps run as resumable chunks. GIL
+/// released.
+#[pyfunction]
+fn list_decode_paired_range(
+    py: Python<'_>,
+    p: u64,
+    points: Vec<u64>,
+    k: usize,
+    word: Vec<u64>,
+    t: usize,
+    lo: u64,
+    hi: u64,
+) -> PyResult<Py<PyArray2<u64>>> {
+    let members = err(py.allow_threads(|| {
+        let dom = crate::rs::core_residual::PairedDomain::from_points(p, points)?;
+        crate::rs::core_residual::list_paired_range(&dom, k, &word, t, lo..hi)
+    }))?;
+    rows_to_array(py, &members)
+}
+
+/// The number of cores the paired-domain decode enumerates at
+/// `(k, t)` — the index space of `list_decode_paired_range`. Errors
+/// exactly when the exact decode would.
+#[pyfunction]
+fn paired_core_count(p: u64, points: Vec<u64>, k: usize, t: usize) -> PyResult<u64> {
+    err((|| {
+        let dom = crate::rs::core_residual::PairedDomain::from_points(p, points)?;
+        crate::rs::core_residual::core_count(&dom, k, t)
+    })())
+}
+
 /// Sampled lower bound for the paired-domain decode: the distinct
 /// members found through `samples` uniform cores — a subset of the
 /// true list, deterministic in `seed`. The optimizer's objective.
@@ -1566,6 +1600,8 @@ fn vanish(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWordView>()?;
     m.add_function(wrap_pyfunction!(list_decode, m)?)?;
     m.add_function(wrap_pyfunction!(list_decode_paired, m)?)?;
+    m.add_function(wrap_pyfunction!(list_decode_paired_range, m)?)?;
+    m.add_function(wrap_pyfunction!(paired_core_count, m)?)?;
     m.add_function(wrap_pyfunction!(list_decode_paired_sampled, m)?)?;
     m.add_function(wrap_pyfunction!(list_sizes, m)?)?;
     m.add_function(wrap_pyfunction!(anneal_pencil, m)?)?;
